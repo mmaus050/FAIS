@@ -142,15 +142,38 @@ function Get-FormationLineContext {
                 }
 }
 
-# A line a wingman or DS can be placed on: open, live-fly, not an O&B leg
+# A line a wingman or DS can be placed on: open, live-fly Day Local (never OFT/IFT, never an O&B leg)
 function Test-IsOpenWingLine {
                 param ($Row)
 
                 if ((Get-NameText $Row.Student) -ne '') { return $false }
                 if ([string](Get-OptionalProperty $Row 'FilledBy' '') -ne '') { return $false }
-                $t = [string]$Row.SortieType
-                if ($t -like '*Return*' -or $t -like '*SIM*' -or $t -like '*OFT*' -or $t -like '*IFT*' -or $t -like '*O&B*') { return $false }
-                return $true
+                return (Test-IsWingCapableType ([string]$Row.SortieType))
+}
+
+# The line the board paired as wingman to this lead (WingOfLineId), or $null.
+# Only counts when both lines can fly formation (OFT / IFT / O&B lines never can).
+function Get-PinnedWingRow {
+                param ($Sortie, [array]$Schedule)
+
+                $myId = [string](Get-OptionalProperty $Sortie 'BoardLineId' '')
+                if ($myId -eq '' -or -not (Test-IsWingCapableType ([string]$Sortie.SortieType))) { return $null }
+                foreach ($r in $Schedule) {
+                                if ([string](Get-OptionalProperty $r 'WingOfLineId' '') -eq $myId -and (Test-IsWingCapableType ([string]$r.SortieType))) { return $r }
+                }
+                return $null
+}
+
+# True when this line is pinned as a wingman to another line the board paired it with
+function Test-IsPairedWing {
+                param ($Sortie, [array]$Schedule)
+
+                $leadId = [string](Get-OptionalProperty $Sortie 'WingOfLineId' '')
+                if ($leadId -eq '' -or -not (Test-IsWingCapableType ([string]$Sortie.SortieType))) { return $false }
+                foreach ($r in $Schedule) {
+                                if ([string](Get-OptionalProperty $r 'BoardLineId' '') -eq $leadId) { return (Test-IsWingCapableType ([string]$r.SortieType)) }
+                }
+                return $false
 }
 
 function Test-SetHasOther {
@@ -384,6 +407,8 @@ function Test-HardRules {
                 }
 
                 $completedReal = @($timeline | Where-Object { -not $_.IsReservation })
+                # A wingman the board already paired to this line satisfies the formation-lead checks
+                $pinnedWing = if ($IsWingCandidate) { $null } else { Get-PinnedWingRow -Sortie $Sortie -Schedule $Schedule }
 
                 foreach ($evt in $eventsToTest) {
                                 $ev = New-Object System.Collections.Generic.List[object]
@@ -432,7 +457,7 @@ function Test-HardRules {
 
                                 # Formation lead: needs an open line for a wingman / DS. If no other
                                 # student can fly Form here but one can fly single-ship, prefer single-ship.
-                                if ($mType -like '*Form*' -and -not $IsWingCandidate -and ($Explain -or -not (Test-AnyBlocking $ev))) {
+                                if ($mType -like '*Form*' -and -not $IsWingCandidate -and $null -eq $pinnedWing -and ($Explain -or -not (Test-AnyBlocking $ev))) {
                                                 $ctx = $null
                                                 if ($null -ne $LineContext -and $LineContext.ContainsKey('Formation')) { $ctx = $LineContext['Formation'] }
                                                 else {
@@ -474,6 +499,36 @@ function Test-HardRules {
                 }
 
                 return (New-HardRuleResult $violations $notes $eventResults)
+}
+
+# Legacy entry point: $true / $false like the old HardRules, with its side effects
+# (Student.OptedEvents, Sortie.Mission = first passing event by Syllabus ID, Student.PendingNote)
+function HardRules {
+                param (
+                                $Student,
+                                $Sortie,
+                                $Schedule,
+                                $FormLookAhead = 22,
+                                $Students,
+                                [switch]$IsWingCandidate
+                )
+
+                $preset = $null
+                if ($null -ne $Sortie.Mission -and $Sortie.Mission -isnot [string] -and (Get-NameText $Sortie.Mission) -ne '') { $preset = $Sortie.Mission }
+                $r = Test-HardRules -Student $Student -Sortie $Sortie -Schedule @($Schedule) -Students @($Students) -FormLookAhead $FormLookAhead `
+                                -Mission $preset -IsWingCandidate:$IsWingCandidate
+                if (-not $r.Passed) {
+                                $Student | Add-Member -MemberType NoteProperty -Name 'PendingNote' -Value $null -Force
+                                return $false
+                }
+
+                $passed = @($r.PassedEvents | Sort-Object -Property { Get-SyllabusSortKey $_ })
+                $Student | Add-Member -MemberType NoteProperty -Name 'OptedEvents' -Value $passed -Force
+                $Sortie.Mission = $passed[0]
+                $notes = @(Get-ChosenEventNotes -Hard $r -Evt $passed[0] -Soft $null)
+                $joined = if ($notes.Count -gt 0) { $notes -join ' | ' } else { $null }
+                $Student | Add-Member -MemberType NoteProperty -Name 'PendingNote' -Value $joined -Force
+                return $true
 }
 
 function New-HardRuleResult {
@@ -854,15 +909,9 @@ function Process-HardcodedSortie {
                 }
 
                 # Formation pairing only for true leads (not a line pinned as someone's wing)
-                $isWing = ([string]$Sortie.WingOfLineId -ne '') -or ([string]$Sortie.Notes -like '*Wingman to*')
+                $isWing = (Test-IsPairedWing -Sortie $Sortie -Schedule $Schedule) -or ([string]$Sortie.Notes -like '*Wingman to*')
                 if ($null -ne $Mission -and ([string]$Mission.Type) -like '*Form*' -and -not $isWing) {
-                                $myId = [string]$Sortie.BoardLineId
-                                $existingWing = $null
-                                if ($myId -ne '') {
-                                                foreach ($r in $Schedule) {
-                                                                if ([string](Get-OptionalProperty $r 'WingOfLineId' '') -eq $myId) { $existingWing = $r; break }
-                                                }
-                                }
+                                $existingWing = Get-PinnedWingRow -Sortie $Sortie -Schedule $Schedule
                                 $FormIndex = Pair-FormationWingman -PrimarySortie $Sortie -PrimaryStudent $Student -PrimaryMission $Mission `
                                                 -Schedule $Schedule -Students $Students -Instructors $Instructors -SoftWeights $SoftWeights `
                                                 -FormIndex $FormIndex -Formations $Formations -ExistingWingSortie $existingWing
@@ -1231,7 +1280,7 @@ function Invoke-PinnedLine {
                 }
                 Remove-StudentReservation -Student $Student -LineId $release
 
-                $isWing = ([string]$Sortie.WingOfLineId -ne '')
+                $isWing = Test-IsPairedWing -Sortie $Sortie -Schedule $Rows
                 $explicitName = Get-NameText $Sortie.Mission
                 $missionArg = if ($explicitName -ne '') { $explicitName } else { $null }
                 $hr = Test-HardRules -Student $Student -Sortie $Sortie -Schedule $Rows -Students $Students -Instructors $Instructors `

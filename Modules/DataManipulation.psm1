@@ -271,6 +271,16 @@ function Test-IsOBSortieType {
                 return ($SortieType -match '(?i)O\s*&\s*B' -and -not (Test-IsReturnSortieType $SortieType))
 }
 
+# Lines a formation wingman or direct support can fly on: live-fly Day Local only.
+# Never an OFT / IFT / sim line, an O&B or its return leg.
+function Test-IsWingCapableType {
+                param ([string]$SortieType)
+
+                if ([string]::IsNullOrWhiteSpace($SortieType)) { return $false }
+                $t = $SortieType
+                return -not ($t -like '*Return*' -or $t -like '*SIM*' -or $t -like '*OFT*' -or $t -like '*IFT*' -or $t -like '*O&B*')
+}
+
 function Get-SortieCategory {
                 [CmdletBinding()]
                 param(

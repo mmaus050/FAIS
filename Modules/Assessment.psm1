@@ -139,6 +139,7 @@ function Get-PlacementAssessment {
                                 EventDetails   = @()
                                 Summary        = ''
                                 Quick          = [bool]$Quick
+                                RequestedMission = $MissionName
                 }
 
                 $line = Get-BoardLine $Board $LineId
@@ -168,7 +169,7 @@ function Get-PlacementAssessment {
                 $formLookAhead = Get-Weight $Data.SoftWeights 'FormLookAhead' 22
                 if (-not $script:AssessCache.Lines.ContainsKey($LineId)) { $script:AssessCache.Lines[$LineId] = @{} }
                 $lineCtx = $script:AssessCache.Lines[$LineId]
-                $isWing = -not [string]::IsNullOrWhiteSpace([string]$line.WingOfLineId)
+                $isWing = Test-IsPairedWing -Sortie $probe -Schedule $rows
                 $missionArg = if ($MissionName -ne '') { $MissionName } else { $null }
 
                 $hr = Test-HardRules -Student $clone -Sortie $probe -Schedule $rows -Students $Data.Students -Instructors $Data.Instructors `

@@ -321,6 +321,29 @@ function Set-BoardInstructor {
                 Step-BoardVersion $Board
 }
 
+# Moves an IP from one line to another (swaps if the target has one). -Copy keeps the original.
+function Move-BoardInstructor {
+                param ($Board, [string]$FromId, [string]$ToId, [switch]$Copy)
+
+                $from = Get-BoardLine $Board $FromId
+                $to = Get-BoardLine $Board $ToId
+                if ($null -eq $from -or $null -eq $to -or $FromId -eq $ToId) { return $false }
+                Save-BoardUndoPoint $Board
+
+                $moving = $from.Instructor
+                $displaced = $to.Instructor
+                $to.Instructor = $moving
+                if (-not $Copy) { $from.Instructor = $displaced }
+                foreach ($l in @($from, $to)) {
+                                if ((Test-BoardLineIsOB $l) -and $l.LinkedLineId) {
+                                                $ret = Get-BoardLine $Board $l.LinkedLineId
+                                                if ($null -ne $ret) { $ret.Instructor = $l.Instructor }
+                                }
+                }
+                Step-BoardVersion $Board
+                return $true
+}
+
 # Hardcodes a student on a line. Return lines can't be pinned (they follow their O&B).
 function Set-BoardPin {
                 param ($Board, [string]$Id, [string]$Student, [string]$Mission = '')
@@ -406,8 +429,10 @@ function Set-FormationPair {
                 $wing = Get-BoardLine $Board $WingId
                 if ($null -eq $wing) { return $false }
                 if ($LeadId -ne '') {
+                                # OFT / IFT / O&B lines can never fly formation, as lead or wing
                                 $lead = Get-BoardLine $Board $LeadId
                                 if ($null -eq $lead -or $LeadId -eq $WingId) { return $false }
+                                if (-not (Test-IsWingCapableType ([string]$wing.SortieType)) -or -not (Test-IsWingCapableType ([string]$lead.SortieType))) { return $false }
                 }
                 Save-BoardUndoPoint $Board
                 foreach ($l in $Board.Lines) { if ($l.WingOfLineId -eq $LeadId -and $LeadId -ne '') { $l.WingOfLineId = '' } }
