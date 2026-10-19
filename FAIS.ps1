@@ -1,5 +1,16 @@
 #FAIS
 # cd C:\Users\1595161645A\Desktop\FAIS7.1
+#
+# Run order:
+#   1. Pre-run pop-ups: log hooked (unsat) / incomplete events from the last schedule
+#   2. Puck board: build the day's lines, hardcode IPs and students, see the + / - and rule flags
+#   3. "Fill the rest of the lines": the scheduler fills every open line, you review it
+#   4. Export: OutputSchedule.xlsx (MasterSchedule + each student's syllabus tab) and SimDebt to MasterData
+#
+# -Trace prints every scheduling decision to the console.
+param (
+    [switch]$Trace
+)
 
 
 # =================================================================================
@@ -12,11 +23,50 @@
 
 
 # ==========================================
+#       STARTUP CHECKS
+# ==========================================
+# The puck board is a WPF window: it needs full language mode and an STA thread.
+if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
+    Write-Host "FAIS needs PowerShell in FullLanguage mode (the puck board uses WPF). Current mode: $($ExecutionContext.SessionState.LanguageMode)" -ForegroundColor Yellow
+    return
+}
+if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne [System.Threading.ApartmentState]::STA) {
+    Write-Host "Restarting PowerShell in STA mode for the puck board..." -ForegroundColor Cyan
+    $exe = (Get-Process -Id $PID).Path
+    $argList = @('-NoProfile', '-STA')
+    $policy = Get-ExecutionPolicy -Scope Process
+    if ($policy -ne 'Undefined') { $argList += @('-ExecutionPolicy', [string]$policy) }
+    $argList += @('-File', "`"$PSCommandPath`"")
+    if ($Trace) { $argList += '-Trace' }
+    Start-Process -FilePath $exe -ArgumentList $argList -Wait -NoNewWindow
+    return
+}
+
+
+# ==========================================
 #       CONFIGURATION
 # ==========================================
 $excelInputPath = Join-Path (Split-Path $PSScriptRoot -Parent) "MasterData.xlsx"
 $desktopPath = [Environment]::GetFolderPath('Desktop')
 $excelOutputPath = Join-Path -Path $desktopPath -ChildPath "OutputSchedule.xlsx"
+
+# Puck board
+$BoardSettings = @{
+    OBReturnOffsetMinutes = 180                                 # typing "1015 O&B" adds its return line this many minutes later
+    ReturnSortieType      = 'O&B Return'                        # SortieType written on return lines
+    SimInstructor         = 'SIM IP'                            # IP shown on OFT / IFT lines with no IP
+    BoardDir              = Join-Path $PSScriptRoot 'Boards'    # autosaved boards, one file per day
+    TemplateDir           = Join-Path $PSScriptRoot 'Templates' # saved wave templates
+    Trace                 = [bool]$Trace                        # print every scheduling decision while filling
+}
+
+# Output
+$OutputSettings = @{
+    WriteStudentTabs = $true                            # each student's syllabus tab in OutputSchedule + SimDebt in MasterData
+    PublishToTeams   = $false                           # also write the daily sheets to the Teams / OneDrive workbook
+    TeamsFolder      = ''                               # e.g. C:\Users\...\OneDrive - United States Air Force\ATIS - E Flight - E Flight
+    TeamsFileName    = 'TESTING ATIS NOT OFFICIAL.xlsx'
+}
 
 
 # ==========================================
@@ -31,215 +81,76 @@ catch {
     return
 }
 
-# Imports all the functions you need
-Import-Module (Join-Path $PSScriptRoot "Modules\ConnectsSyllabusToStudent.psm1") -Force -DisableNameChecking
-Import-Module (Join-Path $PSScriptRoot "Modules\GetOptedEvents1x2.psm1") -Force -DisableNameChecking
-Import-Module (Join-Path $PSScriptRoot "Modules\ScheduleHandling1x3.psm1") -Force -DisableNameChecking
-Import-Module (Join-Path $PSScriptRoot "Modules\HardAndSoftRules1x4.psm1") -Force -DisableNameChecking
-Import-Module (Join-Path $PSScriptRoot "Modules\Diagnostics.psm1") -Force -DisableNameChecking
-Import-Module (Join-Path $PSScriptRoot "Modules\FormationPairing1x8.psm1") -Force -DisableNameChecking
-Import-Module (Join-Path $PSScriptRoot "Modules\PreRunMenu.psm1") -Force -DisableNameChecking
-Import-Module (Join-Path $PSScriptRoot "Modules\OutputToTeams.psm1") -Force -DisableNameChecking
-
-Import-Module (Join-Path $PSScriptRoot "Modules\DataDownload.psm1") -Force -DisableNameChecking
-Import-Module (Join-Path $PSScriptRoot "Modules\DataManipulation.psm1") -Force -DisableNameChecking
-Import-Module (Join-Path $PSScriptRoot "Modules\SchedulingEngine.psm1") -Force -DisableNameChecking
-
-# Gets Program ready to run
-# Close-AllOpenExcelWorkbooks
+# Order matters: later modules call earlier ones
+$ModuleOrder = @('DataManipulation', 'Syllabus', 'DataDownload', 'SchedulingEngine', 'DataUpload', 'PreRunMenu', 'BoardModel', 'Assessment', 'PuckBoard')
+foreach ($moduleName in $ModuleOrder) {
+    $modulePath = Join-Path $PSScriptRoot "Modules\$moduleName.psm1"
+    try {
+        Import-Module $modulePath -Force -DisableNameChecking -Global -ErrorAction Stop
+    }
+    catch {
+        Write-Host "Could not load $modulePath : $($_.Exception.Message)" -ForegroundColor Red
+        return
+    }
+}
 
 
 # ==========================================
 #       INGEST DATA
 # ==========================================
+if (-not (Test-Path -LiteralPath $excelInputPath)) {
+    Write-Host "MasterData.xlsx was not found at $excelInputPath" -ForegroundColor Red
+    return
+}
 $Ingested = IngestData -excelInputPath $excelInputPath -desktopPath $desktopPath -excelOutputPath $excelOutputPath
 $Schedule = $Ingested.Schedule
 $Instructors = $Ingested.Instructors
 $Students = $Ingested.Students
 $Formations = $Ingested.Formations
 $SoftWeights = $Ingested.SoftWeights
-$StudentAbsences = $Ingested.StudentAbsences
 
-
-<#
-# ==========================================
-#      SCHEDULING ENGINE
-# ==========================================
-$numForm = 0
-$num = 0
-$CurrentDay = $null
+if ($null -eq $SoftWeights) {
+    Write-Host "The SoftWeights sheet could not be read, so nothing can be scored. Fix MasterData.xlsx and run again." -ForegroundColor Red
+    return
+}
+Write-Host ("Loaded {0} students, {1} IPs, {2} formation callsigns." -f @($Students).Count, @($Instructors).Count, @($Formations).Count) -ForegroundColor Cyan
 
 
 # ==========================================
 #      PRE RUN MENU
 # ==========================================
-# This brings the previous day's schedule if you want to MND lines or Unsat them
-# Brings in the Previous Schedule with all the complex objects attached
-$PrevSchedule = DownloadPrevSchedule -Students $Students -Instructors $Instructors -desktopPath $desktopPath -excelOutputPath $excelOutputPath
-
-# This needs to be reworked at least somewhat
-
-#$MasterDataPath = Join-Path $PSScriptRoot 'MasterData.xlsx'
-#Invoke-PreRunMenu -Schedule $PrevSchedule -Students $Students -SoftWeights $SoftWeights -MasterDataPath $excelPath
+# Brings in the previous schedule (with the complex objects attached) so lines can be
+# marked hooked (unsat) or incomplete before anything is scheduled
+$PrevSchedule = @(DownloadPrevSchedule -Students $Students -Instructors $Instructors -desktopPath $desktopPath -excelOutputPath $excelOutputPath)
+if (-not (Invoke-PreRunMenu -Schedule $PrevSchedule -Students $Students -SoftWeights $SoftWeights -MasterDataPath $excelInputPath)) {
+    return
+}
 
 
-# ==================================================================================================
-#  ____   ____ _   _ _____ ____  _   _ _     ___ _   _  ____   _     ___   ___  ____
-# / ___| / ___| | | | ____|  _ \| | | | |   |_ _| \ | |/ ___| | |   / _ \ / _ \|  _ \
-# \___ \| |   | |_| |  _| | | | | | | | |    | ||  \| | |  _  | |  | | | | | | | |_) |
-#  ___) | |___|  _  | |___| |_| | |_| | |___ | || |\  | |_| | | |__| |_| | |_| |  __/
-# |____/ \____|_| |_|_____|____/ \___/|_____|___|_| \_|\____| |_____\___/ \___/|_|
-# ==================================================================================================
-foreach ($Sortie in $Schedule){
+# ==========================================
+#      PUCK BOARD
+# ==========================================
+# Build the lines, hardcode anyone, then "Fill the rest of the lines" runs the scheduler
+# (Invoke-FillSchedule) and shows the result for review
+$BoardData = @{
+    Students       = $Students
+    Instructors    = $Instructors
+    SoftWeights    = $SoftWeights
+    Formations     = $Formations
+    PrevSchedule   = $PrevSchedule
+    ImportSchedule = $Schedule
+}
+$FirstDay = (Get-NextFlyingDay).ToString('yyyy-MM-dd')
+$BoardResult = Show-PuckBoard -Data $BoardData -Days @($FirstDay) -Settings $BoardSettings
 
-
-#=======================================================
-# SCHEDULE SET UP:
-# Setup for the run, clearing arrays, etc
-#
-#=======================================================
-                # Purely for Testing UI
-                $num++
-                Write-Host "Scheduling Sortie $num"
-
-                # Empties the Candidates for each new sortie
-                $SPCandidates = @()
-                $NewNotes = @()
-
-
-#=======================================================
-# CONNECTS INSTRUCTOR DATA:
-# Finds the Instructor based off the Instructor Data in Master Data
-# $Sortie.Instructor is a string; $SortieInstructor is the object
-#=======================================================
-                # This converts the Instructor String into the complete Object with all their data
-                if ($Sortie.Instructor -is [PSCustomObject]) {
-                                $SortieInstructor = $Sortie.Instructor
-                } else {
-                                $SortieInstructor = MatchInstructors -Instructors $Instructors -TargetName $Sortie.Instructor
-                                if ($null -eq $SortieInstructor) {
-                                                $fallbackName = if ([string]::IsNullOrWhiteSpace($Sortie.Instructor)) { "NEED IP" } else { $Sortie.Instructor }
-                                                $SortieInstructor = [PSCustomObject]@{ Name = $fallbackName; IsCounter = $true; IsExperienced = $false; IsCheck = $false; Callsign = ""; Num = "" }
-                                }
-                }
-
-
-#=======================================================
-# HARD CODED SORTIES:
-# If there is input, track that, input into Output, Update Student Schedule, etc
-#
-#=======================================================
-                if (-not [string]::IsNullOrWhiteSpace($Sortie.Student)) {
-                                $numForm = Process-HardcodedSortie -Sortie $Sortie -SortieInstructor $SortieInstructor -Students                                         $Students -Schedule $Schedule -Instructors $Instructors -SoftWeights                                                                                                 $SoftWeights -Formations $Formations -FormIndex $numForm
-                                continue
-                #If there is no input, input the IP's Callsign and add in the Instructor Object
-                } else {
-                                $Sortie.Callsign = $SortieInstructor.Callsign
-                                $Sortie.Num = $SortieInstructor.Num
-                                $Sortie.Instructor = $SortieInstructor
-                }
-
-
-#=======================================================
-# HARD RULES:
-# For each student, runs the hard rules, doesn't run if the line is filled
-#
-#=======================================================
-                foreach ($Student in $Students){
-                                if ([string]::IsNullOrWhiteSpace($Student.Name)) { continue }
-                                $Sortie.Mission = $null
-
-                                # HardRules now obtains valid opted events itself after the early independent checks
-                                if (HardRules -Student $Student -Sortie $Sortie -Schedule $Schedule -FormLookAhead $SoftWeights.FormLookAhead -Students $Students) {
-                                                $SPCandidates += $Student
-                                }
-                }
-
-
-#=======================================================
-# SOFT RULES:
-# Runs the soft rules, tries every event that the SP is opted for
-# Maybe put own restrictions in about when flights can be flown
-#=======================================================
-                foreach ($Candidate in $SPCandidates) {
-                                $BestScoreForStudent = $null
-                                $BestEventForStudent = $null
-
-                                foreach ($Event in $Candidate.OptedEvents) {
-                                                $Sortie.Mission = $Event
-                                                $Score = SoftRules -Student $Candidate -Config $SoftWeights -Sortie $Sortie
-
-                                                if ($null -eq $BestScoreForStudent -or $Score -gt $BestScoreForStudent) {
-                                                                $BestScoreForStudent = $Score
-                                                                $BestEventForStudent = $Event
-                                                }
-                                }
-
-                                $Candidate | Add-Member -MemberType NoteProperty -Name "Score" -Value $BestScoreForStudent -Force
-                                $Candidate | Add-Member -MemberType NoteProperty -Name "BestEvent" -Value $BestEventForStudent -Force
-                }
-
-                $BestMatch = $SPCandidates | Sort-Object -Property Score -Descending | Select-Object -First 1
-                $Sortie.Student = $BestMatch
-                $Sortie.Mission = $BestMatch.BestEvent
-                Write-Host "The Selected Student's Score is $($BestMatch.Score)"
-
-
-#=======================================================
-# UNABLE TO FILL:
-# Puts the line up for sale if we don't have any valid
-# students to put in the line
-#=======================================================
-                if ($SPCandidates.Count -eq 0) {
-                                Write-Host "No available Student for $($Sortie.ETD) : $($Sortie.Type)"
-                                $Sortie.Notes += "No Available SP"
-                                if ($Sortie.SortieType -notlike "*FT*") {
-                                                $Sortie.Notes += " | Potentially fill if we have another line"
-                                }
-                                $Sortie.Mission = " "
-                                $Sortie.Student = "For Sale"
-                                continue
-                }
-
-
-#=======================================================
-# SIM DEBT/SYLLABUS/NOTES:
-# Updates the Sim Debt and Syllabus for whatever event thats scheduled
-# Also carrys the Notes over to be outputted
-#
-#
-# This needs to change, apply the Sim Debt to the Student Object and then
-# We are going to output that at the very end
-#=======================================================
-                # Mission is already set to the highest-scoring event that survived hard rules
-                $Sortie.Student.SimDebt = SimDebtUpdate -Sortie $Sortie `
-                                                      -SimStopMult $SoftWeights.SimStopMult `
-                                                      -TransSimRatio $SoftWeights.TransSimRatio `
-                                                      -FormSimRatio $SoftWeights.FormSimRatio
-                if ($null -ne $BestMatch.PendingNote) {
-                                $Sortie.Notes += " | $($BestMatch.PendingNote)"
-                }
-
-
-# =====================================================
-# STUDENT SYLLABUS UPDATE:
-# This updates the student's syllabus locally, just keeps it in the local memory
-#
-# =====================================================
-                foreach ($Student in $Students) {
-                                if ($Student.Name -eq $BestMatch.Name) {
-                                                $Student.SimDebt = $Sortie.Student.SimDebt
-                                                foreach ($m in $Student.Syllabus) {
-                                                                if ($m.Mission -eq $SelectedMission.Mission) {
-                                                                                $m.IsComplete = $true
-                                                                                $m.Instructor = $SortieInstructor.Name
-                                                                                $m.ETD = $Sortie.ETD
-                                                                                break
-                                                                }
-                                                }
-                                                break
-                                }
-                }
+if ($null -eq $BoardResult -or $BoardResult.Action -ne 'Export') {
+    Write-Host "Puck board closed without exporting - nothing was written. Your lines are saved for next time." -ForegroundColor Yellow
+    return
+}
+$FillResult = $BoardResult.FillResult
+if ($Trace) {
+    foreach ($entry in $FillResult.Log) { Write-Host "  $entry" -ForegroundColor DarkGray }
+}
 
 
 # =====================================================================================
@@ -249,5 +160,24 @@ foreach ($Sortie in $Schedule){
 # | |___| |___| |___ / ___ \| |\  |  / ___ \| |\  | |_| | | |_| | |_| | | | |  __/| |_| | | |
 #  \____|_____|_____/_/   \_\_| \_| /_/   \_\_| \_|____/   \___/ \___/  |_| |_|    \___/  |_|
 # ====================================================================================
+$LockedPrompt = {
+    param($path)
+    $answer = [System.Windows.MessageBox]::Show("$path is open (probably in Excel).`n`nClose it, then press OK to try again.", 'File is open',
+        [System.Windows.MessageBoxButton]::OKCancel, [System.Windows.MessageBoxImage]::Warning)
+    return ($answer -eq [System.Windows.MessageBoxResult]::OK)
+}
 
-#>
+$Exported = Export-FaisOutput -FillResult $FillResult -OutputPath $excelOutputPath -MasterDataPath $excelInputPath -Settings $OutputSettings -LockedPrompt $LockedPrompt
+if (-not $Exported) {
+    Write-Host "The schedule was NOT written. Your board is saved; run FAIS again and Export when the file is closed." -ForegroundColor Red
+    return
+}
+
+$Stats = $FillResult.Stats
+Write-Host ""
+Write-Host ("Schedule written to {0}" -f $excelOutputPath) -ForegroundColor Green
+Write-Host ("  {0} lines: {1} hardcoded, {2} filled by the scheduler, {3} wingmen, {4} return legs, {5} direct support, {6} for sale" -f `
+        $Stats.Lines, $Stats.Pinned, $Stats.Filled, $Stats.Wing, $Stats.Return, $Stats.DS, $Stats.ForSale) -ForegroundColor Green
+foreach ($o in $FillResult.Overrides) {
+    Write-Host ("  OVERRIDE {0} {1}: {2}" -f (Format-EtdShort $o.ETD), $o.Student, ($o.Violations -join '; ')) -ForegroundColor Yellow
+}
