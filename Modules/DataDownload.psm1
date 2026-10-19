@@ -1,11 +1,8 @@
-# DATA Download.PSM1 DIRECTORY:
-# Contains all functions that downloads data to use in the program
-# IngestData
-# DownloadPrevSchedule (formally known as Import-MasterSchedule) - I have two down there rn, Download PrevSchedule links all the data back up whereas Import-MasterSchedule just returns strings TBD on what I wantInges
-# The Functions from DatabaseUpdate or Update From Daily Flying
-#
-#
-# ============================================================================================================
+# DATADOWNLOAD.PSM1 DIRECTORY:
+# Contains all functions that download data to use in the program
+# IngestData            (MasterData.xlsx + each student's tab in OutputSchedule.xlsx)
+# DownloadPrevSchedule  (previous MasterSchedule with students/missions/IPs linked back up)
+# Import-MasterSchedule (same sheet through Excel COM, strings only)
 
 
 # ========================================================================================
@@ -18,11 +15,13 @@
 # ========================================================================================
 # Reads MasterData.xlsx and OutputSchedule.xlsx and returns one object with:
 # Schedule, Instructors, Students, Formations, SoftWeights, StudentAbsences
+# The Schedule sheet is optional now that the puck board builds the lines.
 function IngestData {
                 param (
                                 [string]$excelInputPath,
                                 [string]$desktopPath,
-                                [string]$excelOutputPath
+                                [string]$excelOutputPath,
+                                [int]$MaxStudents = 20
                 )
 
                 # Build the output path from the Desktop folder when it was not passed in
@@ -31,16 +30,17 @@ function IngestData {
                 }
 
                 # ------------------------------------------------------------------
-                # Instructors
+                # Instructors (blank IsCounter counts as a counter)
                 # ------------------------------------------------------------------
                 $excelData = Import-Excel -Path $excelInputPath -WorksheetName "Instructors"
                 $Instructors = @(
                                 foreach ($IP in $excelData) {
+                                                if ([string]::IsNullOrWhiteSpace([string]$IP.IPName)) { continue }
                                                 [PSCustomObject]@{
-                                                                Name          = $IP.IPName
-                                                                IsCounter     = $IP.IsCounter
-                                                                IsExperienced = $IP.IsExperienced
-                                                                IsCheck       = $IP.IsCheck
+                                                                Name          = ([string]$IP.IPName).Trim()
+                                                                IsCounter     = (ConvertTo-FaisBool $IP.IsCounter -Default $true)
+                                                                IsExperienced = (ConvertTo-FaisBool $IP.IsExperienced)
+                                                                IsCheck       = (ConvertTo-FaisBool $IP.IsCheck)
                                                                 Callsign      = $IP.Callsign
                                                                 Num           = $IP.Num
                                                                 OSC           = $IP.OSC
@@ -53,12 +53,13 @@ function IngestData {
                 # Students (prefer each student's tab in OutputSchedule, else master Syllabus)
                 # ------------------------------------------------------------------
                 $rawStudents = Import-Excel -Path $excelInputPath -WorksheetName "Students"
-                $validStudents = @(
-                                $rawStudents |
-                                                Where-Object { -not [string]::IsNullOrWhiteSpace($_.SPName) } |
-                                                Select-Object -First 20
-                )
+                $named = @($rawStudents | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.SPName) })
+                if ($named.Count -gt $MaxStudents) {
+                                Write-Host "WARNING: Students sheet has $($named.Count) students; only the first $MaxStudents are used." -ForegroundColor Yellow
+                }
+                $validStudents = @($named | Select-Object -First $MaxStudents)
 
+                $masterSyllabus = $null
                 $Students = @(
                                 foreach ($Student in $validStudents) {
                                                 $studentSyllabus = $null
@@ -66,7 +67,7 @@ function IngestData {
                                                 # Prefer the student's own tab in OutputSchedule when that file exists
                                                 if (Test-Path $excelOutputPath) {
                                                                 try {
-                                                                                $studentSyllabus = Import-Excel -Path $excelOutputPath -WorksheetName $Student.SPName -ErrorAction Stop
+                                                                                $studentSyllabus = Import-Excel -Path $excelOutputPath -WorksheetName ([string]$Student.SPName).Trim() -ErrorAction Stop
                                                                 }
                                                                 catch {
                                                                                 Write-Host "WARNING: Could not read $($Student.SPName) from OutputSchedule. Is Excel currently open? (Ignore if you're starting a class)" -ForegroundColor Yellow
@@ -75,69 +76,74 @@ function IngestData {
 
                                                 # Fall back to the master Syllabus sheet when no student-specific tab was found
                                                 if ($null -eq $studentSyllabus) {
-                                                                $studentSyllabus = Import-Excel -Path $excelInputPath -WorksheetName "Syllabus"
+                                                                if ($null -eq $masterSyllabus) { $masterSyllabus = @(Import-Excel -Path $excelInputPath -WorksheetName "Syllabus") }
+                                                                $studentSyllabus = $masterSyllabus
                                                 }
 
                                                 # Normalize each mission into the standard syllabus object
                                                 $cleanSyllabus = @(
                                                                 foreach ($mission in $studentSyllabus) {
-                                                                                $isComp = $false
-                                                                                if ($mission.IsComplete -eq $true -or $mission.IsComplete -match "True") {
-                                                                                                $isComp = $true
-                                                                                }
-
+                                                                                if ([string]::IsNullOrWhiteSpace([string]$mission.Mission)) { continue }
+                                                                                $etd = Parse-ETD $mission.ETD
                                                                                 [PSCustomObject]@{
                                                                                                 SyllabusID = $mission.SyllabusID
-                                                                                                Mission    = $mission.Mission
+                                                                                                Mission    = ([string]$mission.Mission).Trim()
                                                                                                 Prereqs    = $mission.Prereqs
-                                                                                                Instructor = $mission.Instructor
-                                                                                                ETD        = $mission.ETD
-                                                                                                Type       = $mission.Type
-                                                                                                IsCheck    = $mission.IsCheck
-                                                                                                IsComplete = $isComp
+                                                                                                Instructor = if ($null -eq $mission.Instructor) { '' } else { [string]$mission.Instructor }
+                                                                                                ETD        = if ($null -ne $etd) { $etd.ToString('yyyy-MM-dd HH:mm:ss') } else { '' }
+                                                                                                Type       = if ($null -eq $mission.Type) { '' } else { ([string]$mission.Type).Trim() }
+                                                                                                IsCheck    = (ConvertTo-FaisBool $mission.IsCheck)
+                                                                                                IsComplete = (ConvertTo-FaisBool $mission.IsComplete)
                                                                                                 NumOpting  = $mission.OptingEvents
                                                                                                 Level      = $mission.Level
                                                                                 }
                                                                 }
                                                 )
 
+                                                $debt = 0.0
+                                                if ($null -ne $Student.SimDebt -and [string]$Student.SimDebt -ne '') { [void][double]::TryParse([string]$Student.SimDebt, [ref]$debt) }
+                                                $priority = 0.0
+                                                if ($null -ne $Student.Priority -and [string]$Student.Priority -ne '') { [void][double]::TryParse([string]$Student.Priority, [ref]$priority) }
+
                                                 [PSCustomObject]@{
-                                                                ID              = $Student.SPKey
-                                                                Name            = $Student.SPName
-                                                                IsCap           = $Student.IsCap
-                                                                IsInternational = $Student.IsInternational
-                                                                Priority        = $Student.Priority
-                                                                UnsatSim        = $Student.UnsatSim
-                                                                UnsatFlight     = $Student.UnsatFlight
-                                                                OnHold          = $Student.OnHold
-                                                                SimDebt         = if ($null -eq $Student.SimDebt -or $Student.SimDebt -eq "") {
-                                                                                0.0
-                                                                }
-                                                                else {
-                                                                                [double]$Student.SimDebt
-                                                                }
-                                                                Syllabus        = $cleanSyllabus
-                                                                Absences        = @()
+                                                                ID               = $Student.SPKey
+                                                                Name             = ([string]$Student.SPName).Trim()
+                                                                IsCap            = (ConvertTo-FaisBool $Student.IsCap)
+                                                                IsInternational  = (ConvertTo-FaisBool $Student.IsInternational)
+                                                                Priority         = $priority
+                                                                UnsatSim         = (ConvertTo-FaisBool $Student.UnsatSim)
+                                                                UnsatFlight      = (ConvertTo-FaisBool $Student.UnsatFlight)
+                                                                OnHold           = (ConvertTo-FaisBool $Student.OnHold)
+                                                                SimDebt          = $debt
+                                                                Syllabus         = $cleanSyllabus
+                                                                Absences         = @()
+                                                                Reservations     = @()
+                                                                SyllabusRevision = 0
                                                 }
                                 }
                 )
 
                 # ------------------------------------------------------------------
-                # Schedule (fixed column positions, skip pasted headers, stop on blank ETD)
+                # Schedule sheet (optional: the puck board replaces it)
+                # Fixed column positions, skip pasted headers, stop on blank ETD
                 # ------------------------------------------------------------------
-                $rawSchedule = Import-Excel -Path $excelInputPath -WorksheetName "Schedule" -NoHeader
+                $rawSchedule = @()
+                try {
+                                $rawSchedule = @(Import-Excel -Path $excelInputPath -WorksheetName "Schedule" -NoHeader -ErrorAction Stop)
+                }
+                catch {
+                                $rawSchedule = @()
+                }
                 $headerNames = @(
                                 "ETD", "Date", "Callsign", "Num", "Instructor", "Student", "Mission",
                                 "SortieType", "Notes", "Sortie Type", "Event Name", "#", "Remark",
                                 "Device", "Simulator Instructor", "Start Time"
                 )
-                $CleanSchedule = @()
+                $CleanSchedule = New-Object System.Collections.Generic.List[object]
 
                 foreach ($row in $rawSchedule) {
                                 # Skip rows whose first column is a known header name
-                                if ($row.P1 -in $headerNames) {
-                                                continue
-                                }
+                                if ($row.P1 -in $headerNames) { continue }
 
                                 $cleanRow = [PSCustomObject]@{
                                                 ETD        = $row.P1
@@ -151,27 +157,18 @@ function IngestData {
                                 }
 
                                 # Stop at the first row with a blank ETD
-                                if ([string]::IsNullOrWhiteSpace($cleanRow.ETD)) {
-                                                break
-                                }
+                                if ([string]::IsNullOrWhiteSpace([string]$cleanRow.ETD)) { break }
 
                                 # Convert Excel serial dates and date strings to a standard timestamp
-                                if ($cleanRow.ETD -match '^\d+(\.\d+)?$') {
-                                                $cleanRow.ETD = [datetime]::FromOADate([double]$cleanRow.ETD).ToString("yyyy-MM-dd HH:mm:ss")
-                                }
-                                else {
-                                                $parsed = $cleanRow.ETD -as [datetime]
-                                                if ($parsed) {
-                                                                $cleanRow.ETD = $parsed.ToString("yyyy-MM-dd HH:mm:ss")
-                                                }
-                                }
+                                $parsed = Parse-ETD $cleanRow.ETD
+                                if ($null -ne $parsed) { $cleanRow.ETD = $parsed.ToString("yyyy-MM-dd HH:mm:ss") }
 
                                 # OFT/IFT default Instructor to "SIM IP" only when that column was left blank
-                                if (($cleanRow.SortieType -like "*OFT*" -or $cleanRow.SortieType -like "*IFT*") -and [string]::IsNullOrWhiteSpace($cleanRow.Instructor)) {
+                                if ((Test-IsSimSortieType ([string]$cleanRow.SortieType)) -and [string]::IsNullOrWhiteSpace([string]$cleanRow.Instructor)) {
                                                 $cleanRow.Instructor = "SIM IP"
                                 }
 
-                                $CleanSchedule += $cleanRow
+                                $CleanSchedule.Add($cleanRow)
                 }
 
                 $Schedule = @($CleanSchedule | Sort-Object -Property ETD)
@@ -179,25 +176,32 @@ function IngestData {
                 # ------------------------------------------------------------------
                 # Formations
                 # ------------------------------------------------------------------
-                $formData = Import-Excel -Path $excelInputPath -WorksheetName "FormCallsigns"
-                $index = 1
-                $Formations = @(
-                                foreach ($row in $formData) {
-                                                [PSCustomObject]@{
-                                                                NumFormation = $index
-                                                                Callsign     = $row.Callsign
-                                                                Num          = $row.Num
+                $Formations = @()
+                try {
+                                $formData = Import-Excel -Path $excelInputPath -WorksheetName "FormCallsigns" -ErrorAction Stop
+                                $index = 1
+                                $Formations = @(
+                                                foreach ($row in $formData) {
+                                                                if ([string]::IsNullOrWhiteSpace([string]$row.Callsign)) { continue }
+                                                                [PSCustomObject]@{
+                                                                                NumFormation = $index
+                                                                                Callsign     = $row.Callsign
+                                                                                Num          = $row.Num
+                                                                }
+                                                                $index++
                                                 }
-                                                $index++
-                                }
-                )
+                                )
+                }
+                catch {
+                                Write-Host "Could not read the 'FormCallsigns' sheet: formation lines will not get formation callsigns." -ForegroundColor Yellow
+                }
 
                 # ------------------------------------------------------------------
                 # Soft Weights (first data row of the SoftWeights sheet)
                 # ------------------------------------------------------------------
                 $SoftWeights = $null
                 try {
-                                $RawWeights = Import-Excel -Path $excelInputPath -WorksheetName "SoftWeights"
+                                $RawWeights = @(Import-Excel -Path $excelInputPath -WorksheetName "SoftWeights" -ErrorAction Stop)
                                 $Row = $RawWeights[0]
                                 $SoftWeights = [PSCustomObject]@{
                                                 ContString        = $Row.ContString
@@ -220,8 +224,8 @@ function IngestData {
                                                 FormSimRatio      = $Row.FormSimRatio
                                                 SimStopMult       = $Row.SimStopMult
                                 }
-                                $SoftWeights.TransSimRatio = $SoftWeights.TransSimRatio * $SoftWeights.SimStopMult
-                                $SoftWeights.FormSimRatio = $SoftWeights.FormSimRatio * $SoftWeights.SimStopMult
+                                $SoftWeights.TransSimRatio = [double]$SoftWeights.TransSimRatio * [double]$SoftWeights.SimStopMult
+                                $SoftWeights.FormSimRatio = [double]$SoftWeights.FormSimRatio * [double]$SoftWeights.SimStopMult
                 }
                 catch {
                                 Write-Host "An error occurred while loading Soft Weights: $($_.Exception.Message)" -ForegroundColor Yellow
@@ -233,89 +237,39 @@ function IngestData {
                 $StudentAbsences = @()
                 try {
                                 $AbsenceData = Import-Excel -Path $excelInputPath -WorksheetName "StudentAbsences" -ErrorAction Stop
-
-                                foreach ($row in $AbsenceData) {
-                                                $studentName = if ($row.Student) { ([string]$row.Student).Trim() } else { "" }
-                                                $isActiveRaw = $row.IsActive
-                                                $startRaw = $row.StartTime
-                                                $endRaw = $row.EndTime
-
-                                                # Convert StartTime and EndTime to DateTime
-                                                $start = $null
-                                                $end = $null
-
-                                                if ($startRaw -is [datetime]) {
-                                                                $start = $startRaw
+                                $StudentAbsences = @(
+                                                foreach ($row in $AbsenceData) {
+                                                                $studentName = if ($row.Student) { ([string]$row.Student).Trim() } else { "" }
+                                                                if ([string]::IsNullOrWhiteSpace($studentName)) { continue }
+                                                                if (-not (ConvertTo-FaisBool $row.IsActive)) { continue }
+                                                                $start = Parse-ETD $row.StartTime
+                                                                $end = Parse-ETD $row.EndTime
+                                                                if ($null -eq $start -or $null -eq $end) { continue }
+                                                                [PSCustomObject]@{
+                                                                                Student   = $studentName
+                                                                                StartTime = $start
+                                                                                EndTime   = $end
+                                                                                Reason    = if ($row.Reason) { ([string]$row.Reason).Trim() } else { "" }
+                                                                }
                                                 }
-                                                elseif ([string]$startRaw -match '^\d+(\.\d+)?$') {
-                                                                $start = [datetime]::FromOADate([double]$startRaw)
-                                                }
-                                                else {
-                                                                $start = $startRaw -as [datetime]
-                                                }
-
-                                                if ($endRaw -is [datetime]) {
-                                                                $end = $endRaw
-                                                }
-                                                elseif ([string]$endRaw -match '^\d+(\.\d+)?$') {
-                                                                $end = [datetime]::FromOADate([double]$endRaw)
-                                                }
-                                                else {
-                                                                $end = $endRaw -as [datetime]
-                                                }
-
-                                                if ([string]::IsNullOrWhiteSpace($studentName)) {
-                                                                continue
-                                                }
-
-                                                $isActive = $false
-                                                if ($isActiveRaw -eq $true -or
-                                                                $isActiveRaw -eq 'True' -or
-                                                                $isActiveRaw -eq 'TRUE' -or
-                                                                $isActiveRaw -eq 'true' -or
-                                                                $isActiveRaw -eq 1 -or
-                                                                $isActiveRaw -eq '1' -or
-                                                                $isActiveRaw -eq 'Yes' -or
-                                                                $isActiveRaw -eq 'YES') {
-                                                                $isActive = $true
-                                                }
-
-                                                if (-not $isActive) {
-                                                                continue
-                                                }
-
-                                                if ($null -eq $start -or $null -eq $end) {
-                                                                continue
-                                                }
-
-                                                $StudentAbsences += [PSCustomObject]@{
-                                                                Student   = $studentName
-                                                                StartTime = $start
-                                                                EndTime   = $end
-                                                                Reason    = if ($row.Reason) { ([string]$row.Reason).Trim() } else { "" }
-                                                }
-                                }
+                                )
                 }
                 catch {
                                 Write-Host "Could not read the 'StudentAbsences' sheet." -ForegroundColor Yellow
                                 $StudentAbsences = @()
                 }
 
-                # Attach each absence to the student it belongs to so HardRules can read it off the student object
+                # Attach each absence to the student it belongs to so the hard rules can read it off the student object
                 foreach ($s in $Students) {
                                 $studentName = if ($s.Name) { $s.Name.Trim().ToLower() } else { "" }
-                                if ([string]::IsNullOrWhiteSpace($studentName)) {
-                                                continue
-                                }
+                                if ([string]::IsNullOrWhiteSpace($studentName)) { continue }
 
-                                $matched = @()
-                                foreach ($absence in $StudentAbsences) {
-                                                $absenceName = $absence.Student.Trim().ToLower()
-                                                if ($absenceName -eq $studentName -or $studentName -like "*$absenceName*" -or $absenceName -like "*$studentName*") {
-                                                                $matched += $absence
+                                $s.Absences = @(
+                                                foreach ($absence in $StudentAbsences) {
+                                                                $absenceName = $absence.Student.Trim().ToLower()
+                                                                if ($absenceName -eq $studentName -or $studentName -like "*$absenceName*" -or $absenceName -like "*$studentName*") { $absence }
                                                 }
-                                }
-                                $s.Absences = $matched
+                                )
                 }
 
                 return [PSCustomObject]@{
@@ -336,6 +290,8 @@ function IngestData {
 #| |__| (_) | (_| | (_| |  __/| | |  __/\ V /  ___) | (__| | | |  __/ (_| | |_| | |  __/
 #|_____\___/ \__,_|\__,_|_|   |_|  \___| \_/  |____/ \___|_| |_|\___|\__,_|\__,_|_|\___|
 # ====================================================================================
+# Brings in the previous MasterSchedule with the student, mission and IP objects linked
+# back up, so the pre-run menu can mark hooked / incomplete events.
 function DownloadPrevSchedule {
                 param (
                                 $Students,
@@ -343,35 +299,45 @@ function DownloadPrevSchedule {
                                 $desktopPath,
                                 $excelOutputPath
                 )
-                $desktopPath = [Environment]::GetFolderPath('Desktop')
-                $filePath = Join-Path $desktopPath "OutputSchedule.xlsx"
+
+                $filePath = $excelOutputPath
+                if ([string]::IsNullOrWhiteSpace($filePath)) {
+                                if ([string]::IsNullOrWhiteSpace($desktopPath)) { $desktopPath = [Environment]::GetFolderPath('Desktop') }
+                                $filePath = Join-Path $desktopPath "OutputSchedule.xlsx"
+                }
 
                 if (-not (Test-Path $filePath)) {
                                 Write-Warning "Could not find OutputSchedule.xlsx. Please run the main scheduler first."
                                 return @()
                 }
 
-                $RawSchedule = Import-Excel -Path $filePath -WorksheetName "MasterSchedule"
+                try {
+                                $RawSchedule = @(Import-Excel -Path $filePath -WorksheetName "MasterSchedule" -ErrorAction Stop)
+                }
+                catch {
+                                Write-Warning "Could not read the MasterSchedule sheet in $filePath. Is it open in Excel? $($_.Exception.Message)"
+                                return @()
+                }
 
                 foreach ($row in $RawSchedule) {
-                                if ($row.ETD -match '^\d+(\.\d+)?$') {
-                                                $row.ETD = [datetime]::FromOADate([double]$row.ETD).ToString("yyyy-MM-dd HH:mm:ss")
-                                } elseif ($row.ETD -as [datetime]) {
-                                                $row.ETD = ([datetime]$row.ETD).ToString("yyyy-MM-dd HH:mm:ss")
-                                }
+                                $dt = Parse-ETD $row.ETD
+                                if ($null -ne $dt) { $row.ETD = $dt.ToString("yyyy-MM-dd HH:mm:ss") }
 
-                                if (-not [string]::IsNullOrWhiteSpace($row.Student)) {
-                                                $matchedStudent = $Students | Where-Object { $_.Name -eq $row.Student } | Select-Object -First 1
+                                $studentName = Get-NameText $row.Student
+                                if ($studentName -ne '' -and -not (Test-IsSentinelStudent $studentName)) {
+                                                $matchedStudent = $Students | Where-Object { $_.Name -eq $studentName } | Select-Object -First 1
                                                 if ($matchedStudent) { $row.Student = $matchedStudent }
                                 }
 
-                                if (-not [string]::IsNullOrWhiteSpace($row.Mission) -and $row.Student -is [PSCustomObject]) {
-                                                $matchedMission = $row.Student.Syllabus | Where-Object { $_.Mission -eq $row.Mission } | Select-Object -First 1
+                                $missionName = Get-NameText $row.Mission
+                                if ($missionName -ne '' -and $row.Student -isnot [string] -and $null -ne $row.Student) {
+                                                $matchedMission = Find-SyllabusMission -Student $row.Student -Mission $missionName
                                                 if ($matchedMission) { $row.Mission = $matchedMission }
                                 }
 
-                                if (-not [string]::IsNullOrWhiteSpace($row.Instructor) -and $row.Instructor -notmatch "SIM IP") {
-                                                $matchedInst = $Instructors | Where-Object { $_.Name -eq $row.Instructor } | Select-Object -First 1
+                                $ipName = Get-NameText $row.Instructor
+                                if ($ipName -ne '' -and $ipName -notmatch "SIM IP") {
+                                                $matchedInst = $Instructors | Where-Object { $_.Name -eq $ipName } | Select-Object -First 1
                                                 if ($matchedInst) { $row.Instructor = $matchedInst }
                                 }
                 }
