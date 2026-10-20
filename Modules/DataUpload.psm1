@@ -4,6 +4,7 @@
 # Export-FormattedMasterSchedule / Apply-GroupBorders / Set-MasterScheduleFirst
 # Export-StudentSyllabusTabs
 # Update-MasterDataSimDebtColumnP
+# Export-AtisWorkbook (ATIS.xlsx, one tab per day)
 # Export-DailyScheduleSheets (Teams) / Get-DaySheetName / Get-SortieRowKey / Merge-DayRows
 # Test-FileWritable / Export-FaisOutput
 
@@ -276,6 +277,89 @@ function Update-MasterDataSimDebtColumnP {
 
 
 # ==========================================
+# ATIS.xlsx: one tab per day, flights in time order, then sims in time order below a
+# thick border. Each line goes on its day's tab in MasterSchedule columns. A day's tab
+# is rebuilt every time that day is exported; tabs for other days are kept.
+# ==========================================
+function Export-AtisWorkbook {
+                [CmdletBinding()]
+                param(
+                                [Parameter(Mandatory = $true)]
+                                [AllowEmptyCollection()]
+                                [array]$ScheduleData,
+                                [Parameter(Mandatory = $true)]
+                                [string]$FilePath
+                )
+
+                # Group by day; Index keeps the MasterSchedule order for lines at the same time
+                $byDay = @{}
+                $index = 0
+                $noEtd = 0
+                foreach ($s in $ScheduleData) {
+                                $dt = Parse-ETD $s.ETD
+                                if ($null -eq $dt) { $noEtd++; continue }
+                                $key = $dt.ToString('yyyy-MM-dd')
+                                if (-not $byDay.ContainsKey($key)) { $byDay[$key] = New-Object System.Collections.Generic.List[object] }
+                                $byDay[$key].Add([PSCustomObject]@{ Row = $s; Time = $dt; IsSim = [bool](Test-IsSimSortieType ([string]$s.SortieType)); Index = $index })
+                                $index++
+                }
+                if ($noEtd -gt 0) { Write-Warning "$noEtd line(s) have no ETD and were left off the ATIS." }
+                if ($byDay.Count -eq 0) { return }
+
+                $package = $null
+                try {
+                                $package = Open-ExcelPackage -Path $FilePath -Create
+                                $written = New-Object System.Collections.Generic.List[string]
+                                foreach ($key in ($byDay.Keys | Sort-Object)) {
+                                                $sheet = Get-DaySheetName -Date ([datetime]::ParseExact($key, 'yyyy-MM-dd', $null))
+                                                # Flights first ($false sorts before $true), each block by ETD
+                                                $lines = @($byDay[$key] | Sort-Object IsSim, Time, Index)
+                                                $rows = @($lines | ForEach-Object { $_.Row | Select-Object ETD, Instructor, SortieType, Student, Mission, Callsign, Num, Notes })
+                                                # -ClearSheet so a re-export of the day never leaves old lines or borders behind
+                                                $package = $rows | Export-Excel -ExcelPackage $package -WorksheetName $sheet -ClearSheet -AutoSize -PassThru
+                                                $ws = $package.Workbook.Worksheets[$sheet]
+                                                $ws.Row(1).Style.Font.Bold = $true
+
+                                                $firstSim = -1
+                                                for ($i = 0; $i -lt $lines.Count; $i++) {
+                                                                if ($lines[$i].IsSim) { $firstSim = $i; break }
+                                                }
+                                                # Thick border between the flights and the sims (row 1 is the header)
+                                                if ($firstSim -gt 0) {
+                                                                $border = $ws.Cells[($firstSim + 2), 1, ($firstSim + 2), $ws.Dimension.End.Column].Style.Border.Top
+                                                                $border.Style = [OfficeOpenXml.Style.ExcelBorderStyle]::Thick
+                                                                $border.Color.SetColor([System.Drawing.Color]::Black)
+                                                }
+                                                $written.Add($sheet)
+                                }
+
+                                # Day tabs in date order (names come from Get-DaySheetName); any other tabs stay in front
+                                $dayTabs = foreach ($w in $package.Workbook.Worksheets) {
+                                                $date = [datetime]::MinValue
+                                                if ([datetime]::TryParseExact($w.Name, 'dddd. MMMM d, yyyy', [cultureinfo]::CurrentCulture, [System.Globalization.DateTimeStyles]::None, [ref]$date)) {
+                                                                [PSCustomObject]@{ Name = $w.Name; Date = $date }
+                                                }
+                                }
+                                foreach ($t in @($dayTabs | Sort-Object Date)) { $package.Workbook.Worksheets.MoveToEnd($t.Name) }
+
+                                # Open on the first day just exported. EPPlus 4.5's TabSelected = $true also
+                                # unselects the sheet itself; TabSelectedMulti selects it without clearing.
+                                foreach ($w in $package.Workbook.Worksheets) { $w.View.TabSelected = $false }
+                                $view = $package.Workbook.Worksheets[$written[0]].View
+                                if ($null -ne $view.PSObject.Properties['TabSelectedMulti']) { $view.TabSelectedMulti = $true } else { $view.TabSelected = $true }
+
+                                Close-ExcelPackage -ExcelPackage $package
+                                $package = $null
+                                Write-Host ("ATIS written to {0}: {1}" -f $FilePath, ($written -join ', ')) -ForegroundColor Green
+                }
+                catch {
+                                if ($null -ne $package) { Close-ExcelPackage -ExcelPackage $package -NoSave }
+                                Write-Warning "ATIS was not written: $($_.Exception.Message)"
+                }
+}
+
+
+# ==========================================
 # TEAMS / ONEDRIVE DAILY SHEETS (optional, off by default)
 # ==========================================
 function Get-DaySheetName {
@@ -427,12 +511,13 @@ function Wait-FileWritable {
 }
 
 # Writes everything a run produces:
-# MasterSchedule, each student's syllabus tab, SimDebt to MasterData, optional Teams copy.
+# MasterSchedule, each student's syllabus tab, SimDebt to MasterData, ATIS, optional Teams copy.
 function Export-FaisOutput {
                 param (
                                 [Parameter(Mandatory)] $FillResult,
                                 [Parameter(Mandatory)] [string]$OutputPath,
                                 [string]$MasterDataPath,
+                                [string]$AtisPath,
                                 $Settings = @{},
                                 [scriptblock]$LockedPrompt
                 )
@@ -459,6 +544,17 @@ function Export-FaisOutput {
                                 }
                                 else {
                                                 Write-Warning "SimDebt was not saved to MasterData (file still open)."
+                                }
+                }
+
+                $writeAtis = -not [string]::IsNullOrWhiteSpace($AtisPath)
+                if ($writeAtis -and $null -ne $Settings -and $Settings.ContainsKey('WriteAtis')) { $writeAtis = [bool]$Settings.WriteAtis }
+                if ($writeAtis) {
+                                if (Wait-FileWritable -Path $AtisPath -Prompt $LockedPrompt) {
+                                                Export-AtisWorkbook -ScheduleData $rows -FilePath $AtisPath
+                                }
+                                else {
+                                                Write-Warning "ATIS was not written (file still open)."
                                 }
                 }
 

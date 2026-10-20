@@ -5,7 +5,8 @@
 #   1. Pre-run pop-ups: log hooked (unsat) / incomplete events from the last schedule
 #   2. Puck board: build the day's lines, hardcode IPs and students, see the + / - and rule flags
 #   3. "Fill the rest of the lines": the scheduler fills every open line, you review it
-#   4. Export: OutputSchedule.xlsx (MasterSchedule + each student's syllabus tab) and SimDebt to MasterData
+#   4. Export: OutputSchedule.xlsx (MasterSchedule + each student's syllabus tab), SimDebt to MasterData,
+#      and ATIS.xlsx (one tab per day: flights, then sims)
 #
 # -Trace prints every scheduling decision to the console.
 param (
@@ -49,6 +50,7 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne [System.Thr
 $excelInputPath = Join-Path (Split-Path $PSScriptRoot -Parent) "MasterData.xlsx"
 $desktopPath = [Environment]::GetFolderPath('Desktop')
 $excelOutputPath = Join-Path -Path $desktopPath -ChildPath "OutputSchedule.xlsx"
+$atisOutputPath = Join-Path -Path $desktopPath -ChildPath "ATIS.xlsx"
 
 # Puck board
 $BoardSettings = @{
@@ -63,6 +65,7 @@ $BoardSettings = @{
 # Output
 $OutputSettings = @{
     WriteStudentTabs = $true                            # each student's syllabus tab in OutputSchedule + SimDebt in MasterData
+    WriteAtis        = $true                            # ATIS.xlsx on the Desktop: one tab per day, flights then sims
     PublishToTeams   = $false                           # also write the daily sheets to the Teams / OneDrive workbook
     TeamsFolder      = ''                               # e.g. C:\Users\...\OneDrive - United States Air Force\ATIS - E Flight - E Flight
     TeamsFileName    = 'TESTING ATIS NOT OFFICIAL.xlsx'
@@ -167,7 +170,7 @@ $LockedPrompt = {
     return ($answer -eq [System.Windows.MessageBoxResult]::OK)
 }
 
-$Exported = Export-FaisOutput -FillResult $FillResult -OutputPath $excelOutputPath -MasterDataPath $excelInputPath -Settings $OutputSettings -LockedPrompt $LockedPrompt
+$Exported = Export-FaisOutput -FillResult $FillResult -OutputPath $excelOutputPath -MasterDataPath $excelInputPath -AtisPath $atisOutputPath -Settings $OutputSettings -LockedPrompt $LockedPrompt
 if (-not $Exported) {
     Write-Host "The schedule was NOT written. Your board is saved; run FAIS again and Export when the file is closed." -ForegroundColor Red
     return
