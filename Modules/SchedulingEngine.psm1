@@ -77,7 +77,10 @@ function Get-LinkedReturnRow {
                 $linked = [string](Get-OptionalProperty $Sortie 'LinkedLineId' '')
                 if ($linked -ne '') {
                                 foreach ($r in $Schedule) {
-                                                if ([string](Get-OptionalProperty $r 'BoardLineId' '') -eq $linked) { return $r }
+                                                if ([string](Get-OptionalProperty $r 'BoardLineId' '') -ne $linked) { continue }
+                                                # A line retyped to Day Local / sim, or pinned to someone else, is no longer the return leg
+                                                $who = Get-NameText $r.Student
+                                                if ((Test-IsReturnSortieType ([string]$r.SortieType)) -and ($who -eq '' -or $who -ieq $StudentName -or (Test-IsSentinelStudent $who))) { return $r }
                                 }
                 }
 
@@ -351,8 +354,9 @@ function Test-HardRules {
                 if ($after.Count -gt 0) {
                                 $next = $after[0]
                                 $dayEnd = if ($null -ne $returnStart -and $returnStart -gt $start) { $returnStart } else { $start }
-                                foreach ($evt in $today) { if ($evt.Start -gt $dayEnd) { $dayEnd = $evt.Start } }
-                                if ($next.Start.Date -eq $start.Date.AddDays(1)) {
+                                # A later event the same day is checked on its own line, so only the day's last event answers for tomorrow
+                                $laterToday = @($today | Where-Object { $_.Start -gt $dayEnd })
+                                if ($laterToday.Count -eq 0 -and $next.Start.Date -eq $start.Date.AddDays(1)) {
                                                 $rest = ($next.Start - $dayEnd).TotalHours
                                                 if ($rest -lt 15) {
                                                                 $violations.Add((New-RuleViolation 'CREW_REST_NEXT' ("Crew rest {0} hr < 15 hr before {1}" -f (Format-Hours $rest), (Format-EventLabel $next.Start $next.Mission -WithDay))))
@@ -1261,6 +1265,51 @@ function Invoke-FillSchedule {
 }
 
 # One pinned line: keep the student, pick the event, record it, flag rule breaks
+# Which event a pinned student flies on a line: the explicit mission, otherwise the best-scoring
+# event that passes the rules (Form events only for a wing, and preferred for a lead with a paired wing).
+# Returns {Mission, Soft, Hard}. Mission is $null when nothing can be flown.
+function Select-PinnedMission {
+                param ($Student, $Sortie, [array]$Rows, [array]$Students, [array]$Instructors, $SoftWeights, [double]$FormLookAhead = 22)
+
+                $isWing = Test-IsPairedWing -Sortie $Sortie -Schedule $Rows
+                $hasWing = $null -ne (Get-PinnedWingRow -Sortie $Sortie -Schedule $Rows)
+                $explicitName = Get-NameText $Sortie.Mission
+                $missionArg = if ($explicitName -ne '') { $explicitName } else { $null }
+                $hr = Test-HardRules -Student $Student -Sortie $Sortie -Schedule $Rows -Students $Students -Instructors $Instructors `
+                                -FormLookAhead $FormLookAhead -Mission $missionArg -IsWingCandidate:$isWing -Explain
+
+                $mission = $null
+                $soft = $null
+                if ($explicitName -ne '') {
+                                $mission = Find-SyllabusMission -Student $Student -Mission $explicitName
+                }
+                else {
+                                # (auto) = the best-scoring event that passes the event-level rules
+                                $passed = @($hr.EventResults | Where-Object { $_.Passed })
+                                $formPassed = @($passed | Where-Object { [string]$_.Event.Type -like '*Form*' })
+                                $pool = if (($isWing -or $hasWing) -and $formPassed.Count -gt 0) { $formPassed } elseif ($isWing) { @() } else { $passed }
+                                $best = $null
+                                foreach ($er in $pool) {
+                                                $sr = Get-EventScore -Student $Student -Sortie $Sortie -Evt $er.Event -SoftWeights $SoftWeights -Instructors $Instructors
+                                                $cand = [PSCustomObject]@{ Student = $Student; Event = $er.Event; Score = $sr.Score; Soft = $sr }
+                                                if (Test-CandidateBetter $cand $best) { $best = $cand }
+                                }
+                                if ($null -ne $best) {
+                                                $mission = $best.Event
+                                                $soft = $best.Soft
+                                }
+                                else {
+                                                $fallback = @($hr.EventResults | ForEach-Object { $_.Event })
+                                                if ($isWing) { $formOnly = @($fallback | Where-Object { [string]$_.Type -like '*Form*' }); if ($formOnly.Count -gt 0) { $fallback = $formOnly } }
+                                                if ($fallback.Count -gt 0) { $mission = $fallback[0] }
+                                }
+                }
+                if ($null -ne $mission -and $null -eq $soft) {
+                                $soft = Get-EventScore -Student $Student -Sortie $Sortie -Evt $mission -SoftWeights $SoftWeights -Instructors $Instructors
+                }
+                return [PSCustomObject]@{ Mission = $mission; Soft = $soft; Hard = $hr }
+}
+
 function Invoke-PinnedLine {
                 param ($Sortie, $Student, [array]$Rows, [array]$Students, [array]$Instructors, $SoftWeights, [array]$Formations, [int]$FormIndex, [double]$FormLookAhead, $Overrides)
 
@@ -1280,43 +1329,25 @@ function Invoke-PinnedLine {
                 }
                 Remove-StudentReservation -Student $Student -LineId $release
 
-                $isWing = Test-IsPairedWing -Sortie $Sortie -Schedule $Rows
                 $explicitName = Get-NameText $Sortie.Mission
-                $missionArg = if ($explicitName -ne '') { $explicitName } else { $null }
-                $hr = Test-HardRules -Student $Student -Sortie $Sortie -Schedule $Rows -Students $Students -Instructors $Instructors `
-                                -FormLookAhead $FormLookAhead -Mission $missionArg -IsWingCandidate:$isWing -Explain
-
-                $mission = $null
-                $soft = $null
-                if ($explicitName -ne '') {
-                                $mission = Find-SyllabusMission -Student $Student -Mission $explicitName
-                }
-                else {
-                                # (auto) = the best-scoring event that passes the event-level rules
-                                $best = $null
-                                foreach ($er in @($hr.EventResults | Where-Object { $_.Passed })) {
-                                                if ($isWing -and [string]$er.Event.Type -notlike '*Form*') { continue }
-                                                $sr = Get-EventScore -Student $Student -Sortie $Sortie -Evt $er.Event -SoftWeights $SoftWeights -Instructors $Instructors
-                                                $cand = [PSCustomObject]@{ Student = $Student; Event = $er.Event; Score = $sr.Score; Soft = $sr }
-                                                if (Test-CandidateBetter $cand $best) { $best = $cand }
-                                }
-                                if ($null -ne $best) {
-                                                $mission = $best.Event
-                                                $soft = $best.Soft
-                                }
-                                else {
-                                                $fallback = @($hr.EventResults | ForEach-Object { $_.Event })
-                                                if ($isWing) { $formOnly = @($fallback | Where-Object { [string]$_.Type -like '*Form*' }); if ($formOnly.Count -gt 0) { $fallback = $formOnly } }
-                                                if ($fallback.Count -gt 0) { $mission = $fallback[0] }
-                                }
-                }
-                if ($null -ne $mission -and $null -eq $soft) {
-                                $soft = Get-EventScore -Student $Student -Sortie $Sortie -Evt $mission -SoftWeights $SoftWeights -Instructors $Instructors
-                }
+                $pick = Select-PinnedMission -Student $Student -Sortie $Sortie -Rows $Rows -Students $Students -Instructors $Instructors -SoftWeights $SoftWeights -FormLookAhead $FormLookAhead
+                $hr = $pick.Hard
+                $mission = $pick.Mission
+                $soft = $pick.Soft
 
                 $FormIndex = Process-HardcodedSortie -Sortie $Sortie -Student $Student -Mission $mission -Schedule $Rows -Students $Students `
                                 -Instructors $Instructors -SoftWeights $SoftWeights -Formations $Formations -FormIndex $FormIndex
                 if ($null -eq $mission -and $explicitName -ne '') { $Sortie.Mission = $explicitName }
+                if ($null -eq $mission) {
+                                # Nothing was marked complete, so keep holding the student's time on this line (and its return)
+                                # or later lines could double- or triple-book them
+                                foreach ($rid in $release) {
+                                                $held = $Rows | Where-Object { [string]$_.BoardLineId -eq $rid } | Select-Object -First 1
+                                                if ($null -ne $held) {
+                                                                Add-StudentReservation -Student $Student -LineId $rid -ETD $held.ETD -SortieType ([string]$held.SortieType) -Mission $(if ($rid -eq [string]$Sortie.BoardLineId) { $explicitName } else { '' }) -Instructor (Get-NameText $Sortie.Instructor)
+                                                }
+                                }
+                }
 
                 foreach ($note in (Get-ChosenEventNotes -Hard $hr -Evt $mission -Soft $soft)) { Add-SortieNote -Sortie $Sortie -Note $note }
 

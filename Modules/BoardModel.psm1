@@ -214,6 +214,9 @@ function Add-BoardLine {
                 param (
                                 $Board,
                                 [array]$Line,
+                                # O&B -> return links a quick-entry parse found for lines already on the board.
+                                # Applied here, after the undo point, so a failed entry changes nothing and undo reverses them.
+                                [array]$Link = @(),
                                 [switch]$NoUndo
                 )
 
@@ -222,6 +225,11 @@ function Add-BoardLine {
                                 if ($null -eq $l) { continue }
                                 if (-not $Board.Days.Contains($l.Day)) { $Board.Days.Add($l.Day); $Board.Days.Sort() }
                                 $Board.Lines.Add($l)
+                }
+                foreach ($k in $Link) {
+                                if ($null -eq $k) { continue }
+                                $ob = Get-BoardLine $Board ([string]$k.ObId)
+                                if ($null -ne $ob -and -not $ob.LinkedLineId) { $ob.LinkedLineId = [string]$k.ReturnId }
                 }
                 Step-BoardVersion $Board
 }
@@ -265,6 +273,7 @@ function Set-BoardLineEtd {
                                 if ($null -ne $ret) {
                                                 $ret.ETD = $ret.ETD + $delta
                                                 $ret.Day = $ret.ETD.ToString('yyyy-MM-dd')
+                                                if (-not $Board.Days.Contains($ret.Day)) { $Board.Days.Add($ret.Day); $Board.Days.Sort() }
                                 }
                 }
                 Step-BoardVersion $Board
@@ -279,8 +288,21 @@ function Set-BoardLineType {
                 Save-BoardUndoPoint $Board
 
                 $wasOB = Test-BoardLineIsOB $line
+                $wasReturn = Test-BoardLineIsReturn $line
                 $line.SortieType = $SortieType
                 $isOB = Test-BoardLineIsOB $line
+
+                # A return line retyped to something else is no longer anyone's return leg
+                if ($wasReturn -and -not (Test-BoardLineIsReturn $line) -and $line.LinkedLineId) {
+                                $ob = Get-BoardLine $Board $line.LinkedLineId
+                                if ($null -ne $ob) { $ob.LinkedLineId = '' }
+                                $line.LinkedLineId = ''
+                }
+                # OFT / IFT / O&B / Return lines can never fly formation: drop their pairings both ways
+                if (-not (Test-IsWingCapableType ([string]$line.SortieType))) {
+                                $line.WingOfLineId = ''
+                                foreach ($l in $Board.Lines.ToArray()) { if ($l.WingOfLineId -eq $line.Id) { $l.WingOfLineId = '' } }
+                }
 
                 if ($wasOB -and -not $isOB -and $line.LinkedLineId) {
                                 $retId = $line.LinkedLineId
@@ -524,6 +546,7 @@ function ConvertFrom-QuickEntry {
                 $dayText = ConvertTo-BoardDay $Day
                 $dayDate = [datetime]::ParseExact($dayText, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
                 $lines = New-Object System.Collections.Generic.List[object]
+                $links = New-Object System.Collections.Generic.List[object]
                 $errors = New-Object System.Collections.Generic.List[string]
                 $warnings = New-Object System.Collections.Generic.List[string]
                 $offset = [int]$Settings.OBReturnOffsetMinutes
@@ -596,9 +619,12 @@ function ConvertFrom-QuickEntry {
                                                                 $lines.Add((New-ReturnLineFor -Board ([PSCustomObject]@{ Settings = $Settings }) -OBLine $line -ReturnETD $retEtd))
                                                 }
                                                 elseif (Test-IsReturnSortieType $type) {
-                                                                $ob = Find-UnlinkedOBForReturn -Board $Board -Pending $lines -ReturnLine $line
+                                                                $claimed = @($links | ForEach-Object { $_.ObId })
+                                                                $ob = Find-UnlinkedOBForReturn -Board $Board -Pending $lines -ReturnLine $line -ClaimedIds $claimed
                                                                 if ($null -ne $ob) {
-                                                                                $ob.LinkedLineId = $line.Id
+                                                                                # Lines from this same entry can be linked now; board lines are linked by Add-BoardLine
+                                                                                if ($lines.Contains($ob)) { $ob.LinkedLineId = $line.Id }
+                                                                                $links.Add(@{ ObId = $ob.Id; ReturnId = $line.Id })
                                                                                 $line.LinkedLineId = $ob.Id
                                                                                 if ($line.Instructor -eq '') { $line.Instructor = $ob.Instructor }
                                                                 }
@@ -609,6 +635,7 @@ function ConvertFrom-QuickEntry {
 
                 return [PSCustomObject]@{
                                 Lines    = $lines.ToArray()
+                                Links    = $links.ToArray()
                                 Errors   = $errors.ToArray()
                                 Warnings = $warnings.ToArray()
                 }
@@ -625,13 +652,13 @@ function Find-InstructorForEntry {
 }
 
 function Find-UnlinkedOBForReturn {
-                param ($Board, $Pending, $ReturnLine)
+                param ($Board, $Pending, $ReturnLine, [array]$ClaimedIds = @())
 
                 $pool = New-Object System.Collections.Generic.List[object]
                 if ($null -ne $Board) { foreach ($l in $Board.Lines) { $pool.Add($l) } }
                 foreach ($l in $Pending) { if ($l.Id -ne $ReturnLine.Id) { $pool.Add($l) } }
                 $cands = @($pool | Where-Object {
-                                (Test-BoardLineIsOB $_) -and -not $_.LinkedLineId -and $_.Day -eq $ReturnLine.Day -and $_.ETD -lt $ReturnLine.ETD
+                                (Test-BoardLineIsOB $_) -and -not $_.LinkedLineId -and $ClaimedIds -notcontains $_.Id -and $_.Day -eq $ReturnLine.Day -and $_.ETD -lt $ReturnLine.ETD
                 } | Sort-Object -Property ETD -Descending)
                 if ($cands.Count -gt 0) { return $cands[0] }
                 return $null
@@ -692,6 +719,8 @@ function ConvertFrom-ScheduleRows {
                 )
 
                 $lines = New-Object System.Collections.Generic.List[object]
+                $newIdByOldId = @{}
+                $oldLinkByNewId = @{}
                 foreach ($r in $Rows) {
                                 $etd = Parse-ETD $r.ETD
                                 if ($null -eq $etd) { continue }
@@ -712,7 +741,23 @@ function ConvertFrom-ScheduleRows {
                                 $callsign = if ($NoInstructors) { '' } else { [string](Get-OptionalProperty $r 'Callsign' '') }
                                 $num = if ($NoInstructors) { '' } else { [string](Get-OptionalProperty $r 'Num' '') }
                                 if (-not $KeepStudents) { $callsign = ''; $num = '' }
-                                $lines.Add((New-BoardLine -ETD $etd -SortieType $type -Instructor $ip -Student $student -Mission $mission -Callsign $callsign -Num $num -Notes $notes -Source $Source))
+                                $newLine = New-BoardLine -ETD $etd -SortieType $type -Instructor $ip -Student $student -Mission $mission -Callsign $callsign -Num $num -Notes $notes -Source $Source
+                                $lines.Add($newLine)
+                                $oldId = [string](Get-OptionalProperty $r 'BoardLineId' '')
+                                $oldLink = [string](Get-OptionalProperty $r 'LinkedLineId' '')
+                                if ($oldId -ne '') { $newIdByOldId[$oldId] = $newLine }
+                                if ($oldLink -ne '') { $oldLinkByNewId[$newLine.Id] = $oldLink }
+                }
+
+                # Rows that carry their own link ids (from the board) keep their exact O&B / return pairs
+                foreach ($l in $lines) {
+                                if (-not $oldLinkByNewId.ContainsKey($l.Id) -or $l.LinkedLineId) { continue }
+                                $other = $newIdByOldId[$oldLinkByNewId[$l.Id]]
+                                if ($null -ne $other -and -not $other.LinkedLineId -and $other.Id -ne $l.Id -and
+                                                (((Test-BoardLineIsOB $l) -and (Test-BoardLineIsReturn $other)) -or ((Test-BoardLineIsReturn $l) -and (Test-BoardLineIsOB $other)))) {
+                                                $l.LinkedLineId = $other.Id
+                                                $other.LinkedLineId = $l.Id
+                                }
                 }
 
                 # Link each O&B to the next unlinked return that day with the same IP (any IP if blank)
@@ -862,8 +907,8 @@ function Get-SavedBoardDays {
 
                 if (-not (Test-Path -LiteralPath $Dir)) { return }
                 $out = foreach ($f in (Get-ChildItem -LiteralPath $Dir -Filter '*.json' -File)) {
-                                $d = $null
-                                if ([datetime]::TryParseExact($f.BaseName, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture, 'None', [ref]$d) -and $d.Date -ge $From.Date) { $f.BaseName }
+                                $d = [datetime]::MinValue
+                                if ([datetime]::TryParseExact($f.BaseName, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$d) -and $d.Date -ge $From.Date) { $f.BaseName }
                 }
                 return @($out | Sort-Object)
 }

@@ -80,6 +80,13 @@ Describe 'Source file <Name>' -ForEach $script:SourceFiles {
                                 }
                                 @($bad) | Should -BeNullOrEmpty
                 }
+
+                It 'never wraps the board''s Lines list in @() (it is a generic List[object])' {
+                                $bad = foreach ($sub in $parsed.Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.ArrayExpressionAst] }, $true)) {
+                                                if ($sub.SubExpression.Statements.Count -eq 1 -and $sub.SubExpression.Statements[0].Extent.Text.Trim() -match '(?i)board\.(Lines|Undo)$') { "$($sub.Extent.StartLineNumber): $($sub.Extent.Text)" }
+                                }
+                                @($bad) | Should -BeNullOrEmpty
+                }
 }
 
 Describe 'Module set' {

@@ -488,7 +488,7 @@ Describe "Get-PlacementAssessment: the student's other pins" {
                                 (@($a2.EligibleEvents) -join ',') | Should -Be 'FT5102'
                 }
 
-                It 'applies an earlier (auto) pin as the event its own assessment picks' -Tag 'Bug' {
+                It 'applies an earlier (auto) pin as the event its own assessment picks' {
                                 # The 0730 pin's own assessment (and the fill) fly the checkride FT5190 there:
                                 # FF5201 has no wing line. The 1200 line must then see FT5190 as flown,
                                 # leaving FF5201. Instead the context marks the lowest-ID valid event
@@ -641,7 +641,7 @@ Describe "Get-PlacementAssessment: the student's other pins" {
                                 (Get-Viol $a 'TURN_TIME').Message | Should -Be 'Turn time 1.5 hr < 3.25 hr minimum (vs 0730)'
                 }
 
-                It 'holds the time of an earlier pin that has no flyable event' -Tag 'Bug' {
+                It 'holds the time of an earlier pin that has no flyable event' {
                                 # Same IFT pin, target after it: the pin is neither completed (no event) nor
                                 # reserved, so it drops out of the timeline and the 1.5 hr turn is not flagged
                                 $b = New-AsBoard @(

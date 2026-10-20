@@ -1412,7 +1412,8 @@ function Invoke-PBCommand {
                                 'Explain' { Show-PBPlacementPopup $id }
                                 'AddLines' {
                                                 $lines = @($Cmd.Lines)
-                                                Invoke-PBChange { Add-BoardLine -Board $board -Line $lines } -Status $Cmd.Status
+                                                $links = if ($Cmd.ContainsKey('Links')) { @($Cmd.Links) } else { @() }
+                                                Invoke-PBChange { Add-BoardLine -Board $board -Line $lines -Link $links } -Status $Cmd.Status
                                 }
                                 'Undo' {
                                                 if ($script:PB.Mode -eq 'Review') { Exit-PBReview }
@@ -1451,7 +1452,7 @@ function Invoke-PBQuickEntry {
                 if ($r.Warnings.Count -gt 0) { $msg += '  ' + ($r.Warnings -join '  |  ') }
                 $C.QuickEntryFeedback.Foreground = Get-PBBrush $(if ($r.Warnings.Count -gt 0) { '#FDE68A' } else { '#86EFAC' })
                 $C.QuickEntryFeedback.Text = $msg
-                Request-PBCommand @{ Cmd = 'AddLines'; Lines = $r.Lines; Status = $msg }
+                Request-PBCommand @{ Cmd = 'AddLines'; Lines = $r.Lines; Links = $r.Links; Status = $msg }
 }
 
 function Update-PBTemplateList {
@@ -1695,7 +1696,7 @@ function Test-PuckBoardWindow {
                                 $ip2 = Get-NormalizedLastName ([string]$Data.Instructors[1].Name)
                                 $q = ConvertFrom-QuickEntry -Text "0730 DL $ip1, 0745 DL $ip2, 1015 OB 1315 $ip1, 1300 OFT" -Day $Day -Instructors $Data.Instructors -Students $Data.Students -Board $script:PB.Board
                                 & $check ($q.Errors.Count -eq 0) ("quick entry errors: " + ($q.Errors -join '; '))
-                                Invoke-PBCommand @{ Cmd = 'AddLines'; Lines = $q.Lines; Status = 'test' }
+                                Invoke-PBCommand @{ Cmd = 'AddLines'; Lines = $q.Lines; Links = $q.Links; Status = 'test' }
                                 Invoke-PBDoEvents
                                 $lines = @(Get-BoardDayLines -Board $script:PB.Board -Day $Day)
                                 & $check ($lines.Count -eq 5) "expected 5 lines, got $($lines.Count)"
@@ -1721,9 +1722,9 @@ function Test-PuckBoardWindow {
                                 Invoke-PBCommand @{ Cmd = 'SetEtd'; LineId = $lines[1].Id; Value = $lines[1].ETD.AddMinutes(5) }
                                 & $check ((Get-BoardLine $script:PB.Board $lines[1].Id).ETD -eq $lines[1].ETD.AddMinutes(5)) 'ETD changed'
                                 Invoke-PBCommand @{ Cmd = 'SetType'; LineId = $lines[1].Id; Value = 'O&B' }
-                                & $check (@($script:PB.Board.Lines).Count -eq 6) 'O&B added its return line'
+                                & $check ($script:PB.Board.Lines.Count -eq 6) 'O&B added its return line'
                                 Invoke-PBCommand @{ Cmd = 'Undo' }
-                                & $check (@($script:PB.Board.Lines).Count -eq 5) 'undo removed the return line'
+                                & $check ($script:PB.Board.Lines.Count -eq 5) 'undo removed the return line'
                                 $choices = @(Get-PBMissionChoices (Get-BoardLine $script:PB.Board $lines[0].Id))
                                 & $check ($choices.Count -ge 2) 'mission dropdown has events'
                                 if ($choices.Count -ge 2) { Invoke-PBCommand @{ Cmd = 'SetMission'; LineId = $lines[0].Id; Value = $choices[1] } }

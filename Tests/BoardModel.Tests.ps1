@@ -418,7 +418,9 @@ Describe 'ConvertFrom-QuickEntry' {
             $ret.ETD | Should -Be ([datetime]'2026-10-20 13:30')
             $ret.LinkedLineId | Should -BeExactly $script:Ob1000.Id
             $ret.Instructor | Should -BeExactly 'Jones, Bob'
-            Add-BoardLine -Board $script:B -Line $r.Lines
+            # Parsing alone changes nothing; the link is applied when the lines are added
+            $script:Ob1000.LinkedLineId | Should -BeExactly ''
+            Add-BoardLine -Board $script:B -Line $r.Lines -Link $r.Links
             $script:Ob1000.LinkedLineId | Should -BeExactly $ret.Id
             $script:Ob0800.LinkedLineId | Should -BeExactly ''
             $script:Linked.OB.LinkedLineId | Should -BeExactly $script:Linked.Ret.Id
@@ -491,7 +493,7 @@ Describe 'ConvertFrom-QuickEntry' {
             $r.Warnings[0] | Should -BeExactly "Return lines follow their O&B; student ignored on '1330 RTN sp:Adams'"
         }
 
-        It 'does not change the board when an entry in the text fails' -Tag 'Bug' {
+        It 'does not change the board when an entry in the text fails' {
             # Parsing must be side-effect free: the box shows the error and adds nothing,
             # so the board's O&B must not be left pointing at a line that never got added.
             $before = Get-TSnap $script:B
@@ -501,7 +503,7 @@ Describe 'ConvertFrom-QuickEntry' {
             (Get-TSnap $script:B) | Should -BeExactly $before
         }
 
-        It 'undoing the added return leaves the O&B unlinked' -Tag 'Bug' {
+        It 'undoing the added return leaves the O&B unlinked' {
             $r = Get-TQ '1330 RTN' -Board $script:B
             Add-BoardLine -Board $script:B -Line $r.Lines
             (Undo-Board $script:B) | Should -BeTrue
@@ -731,7 +733,7 @@ Describe 'Set-BoardLineEtd' {
         $script:B.Days.Contains('2026-10-21') | Should -BeTrue
     }
 
-    It 'a return pushed past midnight stays on the board, in the rows and in the saved files' -Tag 'Bug' {
+    It 'a return pushed past midnight stays on the board, in the rows and in the saved files' {
         # Set-BoardLineEtd adds the O&B's new day but not the return's, so a 1900 O&B moved
         # to 2200 leaves its 0100 return on a day the board does not have: ConvertTo-ScheduleRows
         # and Save-BoardState only walk Board.Days, so the return is dropped and lost on reload.
@@ -825,7 +827,7 @@ Describe 'Set-BoardLineType' {
         $b.Lines[0].LinkedLineId | Should -BeExactly ''
     }
 
-    It 'turning a paired wing into <To> drops the wing pairing' -Tag 'Bug' -TestCases @(
+    It 'turning a paired wing into <To> drops the wing pairing' -TestCases @(
         @{ To = 'OFT' }
         @{ To = 'IFT' }
         @{ To = 'O&B' }
@@ -841,7 +843,7 @@ Describe 'Set-BoardLineType' {
         $wing.WingOfLineId | Should -BeExactly ''
     }
 
-    It 'turning a lead into <To> drops the wing that pointed at it' -Tag 'Bug' -TestCases @(
+    It 'turning a lead into <To> drops the wing that pointed at it' -TestCases @(
         @{ To = 'OFT' }
         @{ To = 'IFT' }
         @{ To = 'O&B' }
@@ -855,7 +857,7 @@ Describe 'Set-BoardLineType' {
         $wing.WingOfLineId | Should -BeExactly ''
     }
 
-    It 'a linked return changed to Day Local is no longer the O&B return' -Tag 'Bug' {
+    It 'a linked return changed to Day Local is no longer the O&B return' {
         # The type box is enabled on return rows. After the change the O&B still points
         # at the Day Local line: the rows hand the engine that link (Schedule-ReturnLeg then
         # overwrites the pinned student with the O&B student), and deleting the O&B deletes it.
@@ -1531,7 +1533,7 @@ Describe 'ConvertFrom-ScheduleRows' {
         $lines[3].LinkedLineId | Should -BeExactly ''
     }
 
-    It 'rows from the board keep each O&B with its own return without the IPs' -Tag 'Bug' {
+    It 'rows from the board keep each O&B with its own return without the IPs' {
         # The 0800 O&B comes back at 1300 and the 0900 O&B at 1200. The rows carry
         # BoardLineId / LinkedLineId, but -NoInstructors (copy previous day's default)
         # pairs by order only and swaps the returns.
@@ -1649,7 +1651,7 @@ Describe 'Save-BoardState / Open-BoardState' {
         @(Get-SavedBoardDays -Dir (Join-Path $TestDrive 'missing')).Count | Should -Be 0
     }
 
-    It 'Get-SavedBoardDays lists the saved days on or after -From' -Tag 'Bug' {
+    It 'Get-SavedBoardDays lists the saved days on or after -From' {
         # [datetime]::TryParseExact(..., [ref]$d) with $d = $null finds no overload on
         # PowerShell 7 (span overloads), so this throws as soon as a board file exists.
         # Show-PuckBoard calls it on every start.

@@ -74,16 +74,21 @@ function Get-BoardStudentContext {
                                 $ret = if ($isOB) { Get-LinkedReturnRow -Sortie $pin -Schedule $Rows -StudentName $Student.Name } else { $null }
 
                                 if ($null -ne $start -and $null -ne $targetStart -and $start -lt $targetStart) {
-                                                $explicit = Get-NameText $pin.Mission
-                                                $m = $null
-                                                if ($explicit -ne '') { $m = Find-SyllabusMission -Student $clone -Mission $explicit }
-                                                if ($null -eq $m) { $m = @(Get-ValidOptedEvents -Student $clone -Sortie $pin) | Select-Object -First 1 }
+                                                # The same pick the fill makes: explicit mission, else the best-scoring event that passes
+                                                $pick = Select-PinnedMission -Student $clone -Sortie $pin -Rows $Rows -Students $Data.Students -Instructors $Data.Instructors -SoftWeights $Data.SoftWeights `
+                                                                -FormLookAhead (Get-Weight $Data.SoftWeights 'FormLookAhead' 22)
+                                                $m = $pick.Mission
                                                 if ($null -ne $m -and -not (Test-MissionComplete $m)) {
                                                                 [void](Complete-StudentMission -Student $clone -Mission $m -InstructorName $ipName -ETD $pin.ETD -SoftWeights $Data.SoftWeights)
                                                 }
+                                                else {
+                                                                # No event could be flown: the student still occupies that time
+                                                                Add-StudentReservation -Student $clone -LineId ([string]$pin.BoardLineId) -ETD $pin.ETD -SortieType ([string]$pin.SortieType) -Mission (Get-NameText $pin.Mission) -Instructor $ipName
+                                                }
                                                 if ($null -ne $ret) {
                                                                 $rm = @(Get-ValidOptedEvents -Student $clone -Sortie $ret -NoLookahead) | Select-Object -First 1
-                                                                if ($null -ne $rm) { [void](Complete-StudentMission -Student $clone -Mission $rm -InstructorName $ipName -ETD $ret.ETD -SoftWeights $Data.SoftWeights) }
+                                                                if ($null -ne $m -and $null -ne $rm) { [void](Complete-StudentMission -Student $clone -Mission $rm -InstructorName $ipName -ETD $ret.ETD -SoftWeights $Data.SoftWeights) }
+                                                                else { Add-StudentReservation -Student $clone -LineId ([string]$ret.BoardLineId) -ETD $ret.ETD -SortieType ([string]$ret.SortieType) -Instructor $ipName }
                                                 }
                                 }
                                 else {
