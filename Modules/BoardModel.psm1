@@ -7,7 +7,8 @@
 #        Set-BoardLineType / Set-BoardInstructor / Set-BoardPin / Clear-BoardPin / Move-BoardPin
 #        Set-BoardMission / Set-BoardLineField / Set-FormationPair / Unlink-ReturnLine
 # Typing: ConvertTo-BoardTime / Format-BoardTime / ConvertTo-BoardSortieType / ConvertFrom-QuickEntry
-# Engine: ConvertTo-ScheduleRows / ConvertFrom-ScheduleRows / Get-FillOverlay / Test-BoardReadyToFill
+# Engine: ConvertTo-ScheduleRows / ConvertFrom-ScheduleRows / Add-ScheduleSheetLines
+#         Get-FillOverlay / Test-BoardReadyToFill
 # Files:  Save-BoardState / Open-BoardState / Get-SavedBoardDays
 #         Save-BoardTemplate / Get-BoardTemplateList / Import-BoardTemplate / Copy-BoardPreviousDay
 # Get-NextFlyingDay
@@ -737,7 +738,8 @@ function ConvertFrom-ScheduleRows {
                                                 $student = Get-NameText $r.Student
                                                 $mission = Get-NameText $r.Mission
                                 }
-                                $notes = if ($KeepNotes) { [string]$r.Notes } else { '' }
+                                # "Clears Unsat ..." is written by the fill, so it never comes in from a sheet
+                                $notes = if ($KeepNotes) { (@(([string]$r.Notes) -split '\s*\|\s*' | Where-Object { $_ -ne '' -and $_ -notlike 'Clears Unsat*' })) -join ' | ' } else { '' }
                                 $callsign = if ($NoInstructors) { '' } else { [string](Get-OptionalProperty $r 'Callsign' '') }
                                 $num = if ($NoInstructors) { '' } else { [string](Get-OptionalProperty $r 'Num' '') }
                                 if (-not $KeepStudents) { $callsign = ''; $num = '' }
@@ -774,6 +776,42 @@ function ConvertFrom-ScheduleRows {
                                 }
                 }
                 return $lines.ToArray()
+}
+
+# Puts the MasterData Schedule sheet on the board when it opens (students stay hardcoded).
+# Only days on/after -FromDate that have no lines yet are loaded, so a saved board is never
+# doubled up and a past day is never re-planned. No undo step: it is the board's starting state.
+# Returns {Lines; Days; Pending}. Pending are the rows left off (day already has lines, or
+# before -FromDate); the Import Schedule sheet button can still add them.
+function Add-ScheduleSheetLines {
+                param (
+                                $Board,
+                                [array]$Rows,
+                                [datetime]$FromDate
+                )
+
+                $busy = @{}
+                foreach ($l in $Board.Lines) { $busy[[string]$l.Day] = $true }
+                $take = New-Object System.Collections.Generic.List[object]
+                $pending = New-Object System.Collections.Generic.List[object]
+                foreach ($r in @($Rows)) {
+                                if ($null -eq $r) { continue }
+                                $etd = Parse-ETD $r.ETD
+                                if ($null -eq $etd) { continue }
+                                if ($etd.Date -lt $FromDate.Date -or $busy.ContainsKey($etd.ToString('yyyy-MM-dd'))) { $pending.Add($r) }
+                                else { $take.Add($r) }
+                }
+
+                $lines = @()
+                if ($take.Count -gt 0) {
+                                $lines = @(ConvertFrom-ScheduleRows -Rows $take.ToArray() -Source 'Imported' -KeepStudents -KeepNotes)
+                                if ($lines.Count -gt 0) { Add-BoardLine -Board $Board -Line $lines -NoUndo }
+                }
+                return [PSCustomObject]@{
+                                Lines   = $lines.Count
+                                Days    = @($lines | ForEach-Object { $_.Day } | Sort-Object -Unique)
+                                Pending = $pending.ToArray()
+                }
 }
 
 # What the fill put on each board line: lineId -> {Student, Mission, FilledBy, Notes, Callsign, Num, Instructor}

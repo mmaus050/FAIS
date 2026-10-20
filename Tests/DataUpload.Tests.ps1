@@ -199,6 +199,9 @@ Describe 'Export-FaisOutput writes ATIS' -Skip:$script:NoExcel {
                                                 )
                                                 Students = @()
                                 }
+                                # Export always writes MasterData too (nothing to change here: no students)
+                                $script:MD = Join-Path $script:Dir 'MasterData.xlsx'
+                                @([PSCustomObject][ordered]@{ SPKey = 1; SPName = 'Nobody, No' }) | Export-Excel -Path $script:MD -WorksheetName 'Students' 3>$null
                 }
                 AfterEach {
                                 Remove-Item -LiteralPath $script:Dir -Recurse -Force -ErrorAction SilentlyContinue
@@ -206,15 +209,27 @@ Describe 'Export-FaisOutput writes ATIS' -Skip:$script:NoExcel {
 
                 It 'writes ATIS.xlsx next to OutputSchedule when -AtisPath is given' {
                                 $atis = Join-Path $script:Dir 'ATIS.xlsx'
-                                Export-FaisOutput -FillResult $script:Fill -OutputPath (Join-Path $script:Dir 'OutputSchedule.xlsx') -AtisPath $atis -Settings @{ WriteStudentTabs = $false } 6>$null | Should -BeTrue
+                                Export-FaisOutput -FillResult $script:Fill -OutputPath (Join-Path $script:Dir 'OutputSchedule.xlsx') -MasterDataPath $script:MD -AtisPath $atis 3>$null 6>$null | Should -BeTrue
 
                                 @(Import-Excel -Path $atis -WorksheetName $script:Day1 | ForEach-Object { $_.SortieType }) | Should -Be @('Day Local', 'IFT')
                 }
 
                 It 'skips ATIS when WriteAtis is off' {
                                 $atis = Join-Path $script:Dir 'ATIS.xlsx'
-                                Export-FaisOutput -FillResult $script:Fill -OutputPath (Join-Path $script:Dir 'OutputSchedule.xlsx') -AtisPath $atis -Settings @{ WriteStudentTabs = $false; WriteAtis = $false } 6>$null | Should -BeTrue
+                                Export-FaisOutput -FillResult $script:Fill -OutputPath (Join-Path $script:Dir 'OutputSchedule.xlsx') -MasterDataPath $script:MD -AtisPath $atis -Settings @{ WriteAtis = $false } 3>$null 6>$null | Should -BeTrue
 
                                 Test-Path -LiteralPath $atis | Should -BeFalse
+                }
+
+                It 'writes nothing anywhere when ATIS can''t be written' {
+                                $atis = Join-Path $script:Dir 'ATIS.xlsx'
+                                $out = Join-Path $script:Dir 'OutputSchedule.xlsx'
+                                [System.IO.File]::WriteAllText($atis, 'not a workbook')
+                                $mdBefore = [System.IO.File]::ReadAllBytes($script:MD)
+
+                                Export-FaisOutput -FillResult $script:Fill -OutputPath $out -MasterDataPath $script:MD -AtisPath $atis 3>$null 6>$null | Should -BeFalse
+                                Test-Path -LiteralPath $out | Should -BeFalse
+                                [System.IO.File]::ReadAllBytes($script:MD) | Should -Be $mdBefore
+                                [System.IO.File]::ReadAllText($atis) | Should -BeExactly 'not a workbook'
                 }
 }

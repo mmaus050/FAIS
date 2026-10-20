@@ -94,8 +94,11 @@ function Initialize-PuckBoardWindow {
                 $allDays = @(@($Days) + $savedDays | Sort-Object -Unique)
                 $board = Open-BoardState -Dir $set.BoardDir -Days $allDays -Settings $set
 
+                # The MasterData Schedule sheet loads by itself (days with no lines yet)
+                $sheet = Add-ScheduleSheetLines -Board $board -Rows @($Data.ImportSchedule) -FromDate $firstDate
+
                 # Events a previous run planned on these days are plans, not flown events
-                $reset = @(Reset-PlannedCompletions -Students $Data.Students -FromDate $firstDate -SoftWeights $Data.SoftWeights)
+                $reset = @(Reset-PlannedCompletions -Students $Data.Students -FromDate $firstDate -SoftWeights $Data.SoftWeights -PrevSchedule @($Data.PrevSchedule))
                 Clear-AssessmentCache
 
                 $xamlPath = Join-Path $PSScriptRoot 'PuckBoard.xaml'
@@ -139,18 +142,21 @@ function Initialize-PuckBoardWindow {
                                 HoverElement = $null
                                 TypeOptions = @('Day Local', 'O&B', [string]$set.ReturnSortieType, 'OFT', 'IFT')
                                 LastFocusDay = $firstDay
+                                ImportPending = @($sheet.Pending)
                 }
 
                 Initialize-PBTimers
                 Register-PBHandlers
-                $controls.ImportSheetButton.Visibility = if (@($Data.ImportSchedule).Count -gt 0) { 'Visible' } else { 'Collapsed' }
-                $controls.AddDayPicker.SelectedDate = (Get-NextFlyingDay -From ([datetime]::ParseExact(@($allDays)[-1], 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)))
+                $controls.ImportSheetButton.Visibility = if (@($sheet.Pending).Count -gt 0) { 'Visible' } else { 'Collapsed' }
+                $controls.AddDayPicker.SelectedDate = (Get-NextFlyingDay -From ([datetime]::ParseExact($board.Days[$board.Days.Count - 1], 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)))
                 Update-PBTemplateList
                 Set-PBMode 'Edit'
                 Update-PBAll
                 Start-PBAssessQueue
 
                 $msg = "Board opened for $(@($board.Days) -join ', ')."
+                if ($sheet.Lines -gt 0) { $msg += " Loaded $($sheet.Lines) line(s) from the Schedule sheet ($(@($sheet.Days) -join ', '))." }
+                if (@($sheet.Pending).Count -gt 0) { $msg += " $(@($sheet.Pending).Count) Schedule sheet row(s) were not loaded (their day already has lines, or is before $firstDay): Import Schedule sheet adds them." }
                 if ($reset.Count -gt 0) { $msg += " Cleared planned events on/after $firstDay for $($reset.Count) student(s) so they can be rescheduled." }
                 Set-PBStatus $msg
                 return $window
@@ -1571,14 +1577,17 @@ function Invoke-PBCopyPrevDay {
                 else { Set-PBStatus "Copied $($res.Count) line(s) from $($res.Source). Students were not copied." 'Good' }
 }
 
+# The Schedule sheet rows the board didn't load by itself when it opened
 function Invoke-PBImportSheet {
-                $rows = @($script:PB.Data.ImportSchedule)
+                $rows = @($script:PB.ImportPending)
                 if ($rows.Count -eq 0) { return }
-                $ans = [System.Windows.MessageBox]::Show("Add the $($rows.Count) line(s) from the MasterData Schedule sheet to the board (students on them stay hardcoded)?",
+                $ans = [System.Windows.MessageBox]::Show("Add the $($rows.Count) Schedule sheet line(s) that weren't loaded when the board opened (their day already has lines, or is before the first board day)? Students on them stay hardcoded.",
                                 'Import Schedule sheet', [System.Windows.MessageBoxButton]::OKCancel, [System.Windows.MessageBoxImage]::Question)
                 if ($ans -ne [System.Windows.MessageBoxResult]::OK) { return }
                 $lines = @(ConvertFrom-ScheduleRows -Rows $rows -Source 'Imported' -KeepStudents -KeepNotes)
                 Invoke-PBChange { Add-BoardLine -Board $script:PB.Board -Line $lines } -Status "Imported $($lines.Count) line(s) from the Schedule sheet."
+                $script:PB.ImportPending = @()
+                $script:PB.C.ImportSheetButton.Visibility = 'Collapsed'
                 Reset-PBPlannedFromBoard
 }
 
@@ -1597,7 +1606,7 @@ function Invoke-PBAddDay {
 function Reset-PBPlannedFromBoard {
                 if ($script:PB.Board.Days.Count -eq 0) { return }
                 $first = [datetime]::ParseExact($script:PB.Board.Days[0], 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
-                $changed = @(Reset-PlannedCompletions -Students $script:PB.Data.Students -FromDate $first -SoftWeights $script:PB.Data.SoftWeights)
+                $changed = @(Reset-PlannedCompletions -Students $script:PB.Data.Students -FromDate $first -SoftWeights $script:PB.Data.SoftWeights -PrevSchedule @($script:PB.Data.PrevSchedule))
                 if ($changed.Count -gt 0) {
                                 Clear-AssessmentCache
                                 $script:PB.Assess = @{}

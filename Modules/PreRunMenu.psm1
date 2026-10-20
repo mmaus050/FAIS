@@ -6,6 +6,7 @@
 # Show-EventSelectionMenu
 # Process-HookedEvents
 # Process-IncompleteEvents
+# Save-PreRunChanges
 # Invoke-PreRunMenu
 
 
@@ -169,7 +170,9 @@ function Show-EventSelectionMenu {
 
 
 # ========================================================================================
-# HOOKED (UNSAT): sim unsat blocks later flights; flight unsat blocks later sims
+# HOOKED (UNSAT): sim unsat blocks later flights; flight unsat blocks later sims.
+# A hooked OFT needs an OFT to clean it up; a hooked IFT an OFT or IFT.
+# Returns the students whose unsat flag was set
 # ========================================================================================
 function Process-HookedEvents {
                 param (
@@ -177,7 +180,7 @@ function Process-HookedEvents {
                                 [Parameter(Mandatory)] $Students
                 )
 
-                $updatedCount = 0
+                $hooked = New-Object System.Collections.Generic.List[object]
                 foreach ($Item in $SelectedItems) {
                                 $Sortie = $Item.Sortie
                                 if ($null -eq $Sortie -or (Test-IsSentinelStudent $Sortie.Student)) {
@@ -193,7 +196,9 @@ function Process-HookedEvents {
                                 }
 
                                 if (Test-IsSimSortieType ([string]$Sortie.SortieType)) {
+                                                $kind = if ([string]$Sortie.SortieType -like '*OFT*') { 'OFT' } else { 'IFT' }
                                                 $matchedStudent.UnsatSim = $true
+                                                $matchedStudent | Add-Member -NotePropertyName 'UnsatSimType' -NotePropertyValue $kind -Force
                                                 Write-Host "Logged UnsatSim for $($matchedStudent.Name) (sortie type: $($Sortie.SortieType))." -ForegroundColor Cyan
                                 }
                                 else {
@@ -203,15 +208,15 @@ function Process-HookedEvents {
 
                                 # Annotate the schedule row so the unsat is visible on output
                                 Add-SortieNote -Sortie $Sortie -Note 'Event Hooked (Unsat)'
-                                $updatedCount++
+                                if (-not $hooked.Contains($matchedStudent)) { $hooked.Add($matchedStudent) }
                 }
-                return $updatedCount
+                return $hooked.ToArray()
 }
 
 
 # ========================================================================================
-# INCOMPLETE: the event goes back to not-complete and SimDebt is recalculated
-# Returns the students whose SimDebt changed
+# INCOMPLETE: the event goes back to not-complete and only its sim debt is backed out
+# Returns the students that changed
 # ========================================================================================
 function Process-IncompleteEvents {
                 param(
@@ -221,7 +226,7 @@ function Process-IncompleteEvents {
                 )
 
                 if ($null -eq $SoftWeights) {
-                                Write-Warning "SoftWeights was not provided. Incomplete events can be processed, but SimDebt will not be recalculated or saved."
+                                Write-Warning "SoftWeights was not provided. Incomplete events can be processed, but SimDebt will not change."
                 }
 
                 $updatedStudents = New-Object System.Collections.Generic.List[object]
@@ -244,20 +249,15 @@ function Process-IncompleteEvents {
                                 }
                                 else {
                                                 $syllabusMission = Find-SyllabusMission -Student $matchedStudent -Mission $missionName
-                                                if ($null -ne $syllabusMission) {
-                                                                $syllabusMission.IsComplete = $false
-                                                                $syllabusMission.Instructor = ''
-                                                                $syllabusMission.ETD = ''
-                                                                if ($null -ne $SoftWeights) {
-                                                                                $newDebt = Update-StudentSimDebtFromSyllabus -Student $matchedStudent -SoftWeights $SoftWeights
-                                                                                if ($null -ne $newDebt) {
-                                                                                                Write-Host "Updated SimDebt for $($matchedStudent.Name): $newDebt" -ForegroundColor Cyan
-                                                                                                if (-not $updatedStudents.Contains($matchedStudent)) { $updatedStudents.Add($matchedStudent) }
-                                                                                }
-                                                                }
+                                                if ($null -eq $syllabusMission) {
+                                                                Write-Warning "Mission '$missionName' was not found in $studentName's syllabus. SimDebt was not changed."
+                                                }
+                                                elseif (Undo-StudentMission -Student $matchedStudent -Mission $syllabusMission -SoftWeights $SoftWeights) {
+                                                                Write-Host "$missionName is incomplete for $($matchedStudent.Name); SimDebt is now $($matchedStudent.SimDebt)." -ForegroundColor Cyan
+                                                                if (-not $updatedStudents.Contains($matchedStudent)) { $updatedStudents.Add($matchedStudent) }
                                                 }
                                                 else {
-                                                                Write-Warning "Mission '$missionName' was not found in $studentName's syllabus. SimDebt was not changed."
+                                                                Write-Host "$missionName was already incomplete for $($matchedStudent.Name); nothing changed." -ForegroundColor Yellow
                                                 }
                                 }
 
@@ -271,6 +271,51 @@ function Process-IncompleteEvents {
 
 
 # ========================================================================================
+# Saves a pre-run change right away, both files or neither: SimDebt / unsat flags to
+# MasterData and, for incomplete events, those events' cells on the students' tabs in
+# OutputSchedule (so the two files agree even if the board is closed without exporting).
+# A change that can't be saved stays in memory and goes out with the Export.
+# Returns $true when saved.
+# ========================================================================================
+function Save-PreRunChanges {
+                param (
+                                [string]$MasterDataPath,
+                                [string]$OutputPath,
+                                [hashtable]$SimDebtByName = @{},
+                                [hashtable]$FlagsByName = @{},
+                                [array]$TabStudents = @(),
+                                [scriptblock]$LockedPrompt
+                )
+
+                if ([string]::IsNullOrWhiteSpace($MasterDataPath) -or -not (Test-Path -LiteralPath $MasterDataPath)) {
+                                Write-Warning "MasterData.xlsx was not found, so this change is only kept for this run (Export writes it)."
+                                return $false
+                }
+                $writeTabs = ($TabStudents.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($OutputPath) -and (Test-Path -LiteralPath $OutputPath))
+                $toSave = @($MasterDataPath)
+                if ($writeTabs) { $toSave += $OutputPath }
+                foreach ($file in $toSave) {
+                                if (-not (Wait-FileWritable -Path $file -Prompt $LockedPrompt)) {
+                                                Write-Warning "$file is still open, so this change is only kept for this run (Export writes it)."
+                                                return $false
+                                }
+                }
+
+                try {
+                                Invoke-WithFileBackup -Files $toSave -Action {
+                                                Update-MasterDataStudents -MasterDataPath $MasterDataPath -SimDebtByName $SimDebtByName -FlagsByName $FlagsByName
+                                                if ($writeTabs) { Export-StudentSyllabusTabs -Students $TabStudents -FilePath $OutputPath }
+                                }
+                                return $true
+                }
+                catch {
+                                Write-Warning "This change could not be saved, so it is only kept for this run (Export writes it): $($_.Exception.Message)"
+                                return $false
+                }
+}
+
+
+# ========================================================================================
 # The pre-run loop. Returns $true to continue to the puck board, $false to stop.
 # ========================================================================================
 function Invoke-PreRunMenu {
@@ -278,8 +323,19 @@ function Invoke-PreRunMenu {
                                 $Schedule,
                                 $Students,
                                 $SoftWeights,
-                                [string]$MasterDataPath
+                                [string]$MasterDataPath,
+                                [string]$OutputPath,
+                                [scriptblock]$LockedPrompt
                 )
+
+                if ($null -eq $LockedPrompt) {
+                                $LockedPrompt = {
+                                                param($path)
+                                                $answer = [System.Windows.Forms.MessageBox]::Show("$path is open (probably in Excel).`n`nClose it, then press OK to try again.", 'File is open',
+                                                                [System.Windows.Forms.MessageBoxButtons]::OKCancel, [System.Windows.Forms.MessageBoxIcon]::Warning)
+                                                return ($answer -eq [System.Windows.Forms.DialogResult]::OK)
+                                }
+                }
 
                 while ($true) {
                                 $UserChoice = Show-PreRunMenu
@@ -287,9 +343,19 @@ function Invoke-PreRunMenu {
                                 if ($UserChoice -eq "Hook") {
                                                 $SelectedItems = Show-EventSelectionMenu -Schedule $Schedule -Title "Select Hooked Events"
                                                 if ($null -ne $SelectedItems) {
-                                                                $hookedCount = Process-HookedEvents -SelectedItems $SelectedItems -Students $Students
-                                                                if ($hookedCount -gt 0) {
-                                                                                [void][System.Windows.Forms.MessageBox]::Show("Hooked events recorded successfully ($hookedCount).", "Success",
+                                                                $hooked = @(Process-HookedEvents -SelectedItems $SelectedItems -Students $Students)
+                                                                if ($hooked.Count -gt 0) {
+                                                                                # UnsatSim / UnsatFlight = TRUE in MasterData now
+                                                                                $flags = Get-UnsatFlagUpdates -Students $hooked
+                                                                                $saved = ($flags.Count -eq 0) -or (Save-PreRunChanges -MasterDataPath $MasterDataPath -OutputPath $OutputPath -FlagsByName $flags -LockedPrompt $LockedPrompt)
+                                                                                if ($saved) {
+                                                                                                foreach ($s in $hooked) {
+                                                                                                                $s | Add-Member -NotePropertyName 'UnsatSimInMasterData' -NotePropertyValue (ConvertTo-FaisBool $s.UnsatSim) -Force
+                                                                                                                $s | Add-Member -NotePropertyName 'UnsatFlightInMasterData' -NotePropertyValue (ConvertTo-FaisBool $s.UnsatFlight) -Force
+                                                                                                }
+                                                                                }
+                                                                                $where = if ($saved) { 'and saved to MasterData' } else { 'for this run only (MasterData could not be saved; Export will write it)' }
+                                                                                [void][System.Windows.Forms.MessageBox]::Show("Hooked events recorded for $($hooked.Count) student(s) $where.", "Success",
                                                                                                 [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
                                                                 }
                                                                 else {
@@ -303,28 +369,20 @@ function Invoke-PreRunMenu {
                                                 if ($null -ne $SelectedItems) {
                                                                 $updatedStudents = @(Process-IncompleteEvents -SelectedItems $SelectedItems -Students $Students -SoftWeights $SoftWeights)
 
-                                                                # Persist SimDebt only for students changed during this selection
+                                                                # SimDebt and those events' tab cells, for the students changed by this selection
                                                                 $simDebtByName = @{}
                                                                 foreach ($student in $updatedStudents) {
                                                                                 if (-not [string]::IsNullOrWhiteSpace([string]$student.Name) -and $null -ne $student.SimDebt) {
-                                                                                                $simDebtByName[$student.Name] = [double]$student.SimDebt
+                                                                                                $simDebtByName[([string]$student.Name).Trim()] = [double]$student.SimDebt
                                                                                 }
                                                                 }
-                                                                if ($simDebtByName.Count -gt 0) {
-                                                                                if (-not [string]::IsNullOrWhiteSpace($MasterDataPath) -and (Test-Path -LiteralPath $MasterDataPath)) {
-                                                                                                try {
-                                                                                                                Update-MasterDataSimDebtColumnP -SimDebtByName $simDebtByName -MasterDataPath $MasterDataPath
-                                                                                                }
-                                                                                                catch {
-                                                                                                                Write-Warning "SimDebt changed in memory but could not be saved to MasterData.xlsx: $($_.Exception.Message)"
-                                                                                                }
-                                                                                }
-                                                                                else {
-                                                                                                Write-Warning "SimDebt changed in memory but was not saved because MasterDataPath is unavailable."
-                                                                                }
+                                                                $text = "No events changed (they were already incomplete). Check the console for details."
+                                                                if ($updatedStudents.Count -gt 0) {
+                                                                                $saved = Save-PreRunChanges -MasterDataPath $MasterDataPath -OutputPath $OutputPath -SimDebtByName $simDebtByName -TabStudents $updatedStudents -LockedPrompt $LockedPrompt
+                                                                                $text = "Incomplete events processed. SimDebt and the students' tabs are saved."
+                                                                                if (-not $saved) { $text = "Incomplete events processed for this run only (the files could not be saved; Export will write them)." }
                                                                 }
-
-                                                                [void][System.Windows.Forms.MessageBox]::Show("Incomplete events processed and SimDebt recalculated.", "Success",
+                                                                [void][System.Windows.Forms.MessageBox]::Show($text, "Incomplete Events",
                                                                                 [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
                                                 }
                                 }

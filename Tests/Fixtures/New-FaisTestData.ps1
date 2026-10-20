@@ -54,6 +54,7 @@ function New-TestStudent {
                                 [switch]$IsInternational,
                                 [switch]$OnHold,
                                 [switch]$UnsatSim,
+                                [string]$UnsatSimType = '',
                                 [switch]$UnsatFlight,
                                 [double]$Priority = 0,
                                 [double]$SimDebt = 0,
@@ -77,6 +78,7 @@ function New-TestStudent {
                                 IsInternational = [bool]$IsInternational
                                 Priority        = $Priority
                                 UnsatSim        = [bool]$UnsatSim
+                                UnsatSimType    = $UnsatSimType
                                 UnsatFlight     = [bool]$UnsatFlight
                                 OnHold          = [bool]$OnHold
                                 SimDebt         = $SimDebt

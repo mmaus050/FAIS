@@ -516,6 +516,26 @@ Describe "Get-PlacementAssessment: the student's other pins" {
                                 $a.Mission | Should -Be 'FT5102'
                 }
 
+                It 'an earlier pinned re-sim cleans up an unsat sim for a later line, a later one does not' {
+                                $u = New-TestStudent -Name 'Unsat, Uma' -UnsatSim -UnsatSimType 'OFT' -Done 'FI3101|2026-02-20 08:00'
+                                $ud = New-AsData @($u)
+                                $b = New-AsBoard @(
+                                                @{ Id = 'S1'; ETD = '2026-03-03 07:30'; Type = 'OFT'; Student = 'Unsat, Uma' },
+                                                @{ Id = 'E2'; ETD = '2026-03-03 12:00'; Type = 'Day Local'; IP = 'Ortiz, Sam' }
+                                )
+                                $a = Get-Assess $b 'E2' 'Unsat, Uma' $ud
+                                Get-RuleList $a | Should -Not -Match 'UNSAT_SIM'
+                                $a.AutoMission | Should -Be 'FT5001'
+
+                                Clear-AssessmentCache
+                                $b2 = New-AsBoard @(
+                                                @{ Id = 'E1'; ETD = '2026-03-03 07:30'; Type = 'Day Local'; IP = 'Ortiz, Sam' },
+                                                @{ Id = 'S2'; ETD = '2026-03-03 12:00'; Type = 'OFT'; Student = 'Unsat, Uma' }
+                                )
+                                Get-RuleList (Get-Assess $b2 'E1' 'Unsat, Uma' $ud) | Should -Match 'UNSAT_SIM'
+                                $u.UnsatSim | Should -BeTrue
+                }
+
                 It 'applies an earlier O&B pin and its return leg as two completed events (triple turn)' {
                                 $b = New-AsBoard @(@{ Id = 'T1'; ETD = '2026-03-03 13:30'; Type = 'Day Local'; IP = 'Lee, Ann' })
                                 [void](Add-AsQuickEntry -Board $b -Text '0700 O&B Ortiz sp:Able' -Students @($able, $baker))

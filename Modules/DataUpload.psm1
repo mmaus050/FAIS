@@ -2,11 +2,11 @@
 # Contains all functions that move data from the Program to an output destination
 # ConvertTo-ExportRows
 # Export-FormattedMasterSchedule / Apply-GroupBorders / Set-MasterScheduleFirst
-# Export-StudentSyllabusTabs
-# Update-MasterDataSimDebtColumnP
+# Export-StudentSyllabusTabs / ConvertTo-SyllabusTabRow / Update-SyllabusTabCells / Format-TabEtd
+# Update-MasterDataStudents / Get-UnsatFlagUpdates
 # Export-AtisWorkbook (ATIS.xlsx, one tab per day)
 # Export-DailyScheduleSheets (Teams) / Get-DaySheetName / Get-SortieRowKey / Merge-DayRows
-# Test-FileWritable / Export-FaisOutput
+# Test-FileWritable / Wait-FileWritable / Invoke-WithFileBackup / Export-FaisOutput
 
 
 # =================================================================================
@@ -67,8 +67,8 @@ function Export-FormattedMasterSchedule {
                 # Final columns - Day is intentionally omitted (date already lives in ETD)
                 $exportData = $sorted | Select-Object ETD, Instructor, SortieType, Student, Mission, Callsign, Num, Notes
 
-                # -ClearSheet so a shorter schedule never leaves old rows behind
-                $excel = $exportData | Export-Excel -Path $FilePath -WorksheetName $WorksheetName -AutoSize -ClearSheet -PassThru
+                # -ClearSheet so a shorter schedule never leaves old rows behind (the only sheet FAIS clears)
+                $excel = $exportData | Export-Excel -Path $FilePath -WorksheetName $WorksheetName -AutoSize -ClearSheet -PassThru -ErrorAction Stop
 
                 try {
                                 $ws = $excel.Workbook.Worksheets[$WorksheetName]
@@ -176,9 +176,33 @@ function Set-MasterScheduleFirst {
 
 
 # ==========================================
-# One tab per student in OutputSchedule.xlsx, in the exact columns IngestData reads
-# back, so tomorrow's run starts from today's schedule
+# One tab per student in OutputSchedule.xlsx, in the columns IngestData reads back,
+# so tomorrow's run starts from today's schedule.
+# A student with no tab gets a full one. An existing tab is never cleared: only the
+# Instructor / ETD / IsComplete cells of events that changed are written, and every
+# other cell, row, column and format on it stays as it was.
 # ==========================================
+
+# FAIS's columns on a student tab, in the order a new tab gets them
+$script:SyllabusTabColumns = @('SyllabusID', 'Mission', 'Prereqs', 'Instructor', 'ETD', 'Type', 'IsCheck', 'IsComplete', 'OptingEvents', 'Level')
+
+function ConvertTo-SyllabusTabRow {
+                param ($Mission)
+
+                return [PSCustomObject]@{
+                                SyllabusID   = $Mission.SyllabusID
+                                Mission      = $Mission.Mission
+                                Prereqs      = $Mission.Prereqs
+                                Instructor   = Get-NameText $Mission.Instructor
+                                ETD          = [string]$Mission.ETD
+                                Type         = $Mission.Type
+                                IsCheck      = [bool](ConvertTo-FaisBool $Mission.IsCheck)
+                                IsComplete   = [bool](Test-MissionComplete $Mission)
+                                OptingEvents = $Mission.NumOpting
+                                Level        = $Mission.Level
+                }
+}
+
 function Export-StudentSyllabusTabs {
                 param (
                                 [array]$Students,
@@ -188,6 +212,8 @@ function Export-StudentSyllabusTabs {
                 $package = $null
                 try {
                                 $package = Open-ExcelPackage -Path $FilePath -Create
+                                $created = 0
+                                $cells = 0
                                 foreach ($s in $Students) {
                                                 $sheet = ([string]$s.Name).Trim()
                                                 if ($sheet -eq '') { continue }
@@ -195,26 +221,21 @@ function Export-StudentSyllabusTabs {
                                                                 Write-Warning "Student name '$sheet' can't be an Excel sheet name (31 chars, no []*?/\:). Their tab was not written."
                                                                 continue
                                                 }
-                                                $rows = @(foreach ($m in @($s.Syllabus)) {
-                                                                [PSCustomObject]@{
-                                                                                SyllabusID   = $m.SyllabusID
-                                                                                Mission      = $m.Mission
-                                                                                Prereqs      = $m.Prereqs
-                                                                                Instructor   = Get-NameText $m.Instructor
-                                                                                ETD          = [string]$m.ETD
-                                                                                Type         = $m.Type
-                                                                                IsCheck      = [bool](ConvertTo-FaisBool $m.IsCheck)
-                                                                                IsComplete   = [bool](Test-MissionComplete $m)
-                                                                                OptingEvents = $m.NumOpting
-                                                                                Level        = $m.Level
-                                                                }
-                                                })
+                                                $rows = @(foreach ($m in @($s.Syllabus)) { if ($null -ne $m) { ConvertTo-SyllabusTabRow $m } })
                                                 if ($rows.Count -eq 0) { continue }
-                                                $package = $rows | Export-Excel -ExcelPackage $package -WorksheetName $sheet -ClearSheet -AutoSize -PassThru
+
+                                                $ws = $package.Workbook.Worksheets[$sheet]
+                                                if ($null -eq $ws -or $null -eq $ws.Dimension) {
+                                                                $package = $rows | Export-Excel -ExcelPackage $package -WorksheetName $sheet -AutoSize -PassThru -ErrorAction Stop
+                                                                $created++
+                                                }
+                                                else {
+                                                                $cells += Update-SyllabusTabCells -Worksheet $ws -Rows $rows
+                                                }
                                 }
                                 Close-ExcelPackage -ExcelPackage $package
                                 $package = $null
-                                Write-Host "Student syllabus tabs written to $FilePath" -ForegroundColor Green
+                                Write-Host "Student syllabus tabs updated in $FilePath ($cells cell(s) changed, $created new tab(s))." -ForegroundColor Green
                 }
                 catch {
                                 if ($null -ne $package) { Close-ExcelPackage -ExcelPackage $package -NoSave }
@@ -222,57 +243,186 @@ function Export-StudentSyllabusTabs {
                 }
 }
 
-
-# ==========================================
-# Writes SimDebt into Column P of the MasterData Students sheet.
-# Matches by SPName in column B so only the debt cell is changed.
-# ==========================================
-function Update-MasterDataSimDebtColumnP {
+# Writes the Instructor / ETD / IsComplete cells that differ from -Rows, matched to the
+# tab's rows by Mission (a name listed twice matches in order). A mission missing from
+# the tab is added at the bottom. Returns how many cells were written.
+function Update-SyllabusTabCells {
                 param (
-                                [Parameter(Mandatory = $true)]
-                                [hashtable]$SimDebtByName,
-                                [Parameter(Mandatory = $true)]
-                                [string]$MasterDataPath
+                                [Parameter(Mandatory)] $Worksheet,
+                                [array]$Rows
                 )
 
-                if (-not (Test-Path $MasterDataPath)) {
-                                Write-Error "MasterData.xlsx not found at: $MasterDataPath"
-                                return
+                $lastRow = $Worksheet.Dimension.End.Row
+                $lastCol = $Worksheet.Dimension.End.Column
+                $col = @{}
+                for ($c = 1; $c -le $lastCol; $c++) {
+                                $heading = ([string]$Worksheet.Cells[1, $c].Value).Trim()
+                                if ($heading -ne '' -and -not $col.ContainsKey($heading)) { $col[$heading] = $c }
                 }
+                if (-not $col.ContainsKey('Mission')) {
+                                throw "The '$($Worksheet.Name)' tab has no Mission heading in row 1, so its events can't be matched."
+                }
+                foreach ($heading in @('Instructor', 'ETD', 'IsComplete')) {
+                                if (-not $col.ContainsKey($heading)) {
+                                                $lastCol++
+                                                $Worksheet.Cells[1, $lastCol].Value = $heading
+                                                $col[$heading] = $lastCol
+                                }
+                }
+
+                # Mission -> the tab's row numbers for it, top to bottom
+                $rowsOf = @{}
+                for ($r = 2; $r -le $lastRow; $r++) {
+                                $name = ([string]$Worksheet.Cells[$r, $col['Mission']].Value).Trim()
+                                if ($name -eq '') { continue }
+                                if (-not $rowsOf.ContainsKey($name)) { $rowsOf[$name] = New-Object System.Collections.Generic.List[int] }
+                                $rowsOf[$name].Add($r)
+                }
+                $used = @{}
+
+                $count = 0
+                foreach ($row in $Rows) {
+                                $name = ([string]$row.Mission).Trim()
+                                if ($name -eq '') { continue }
+                                $n = if ($used.ContainsKey($name)) { $used[$name] } else { 0 }
+                                $used[$name] = $n + 1
+
+                                if (-not $rowsOf.ContainsKey($name) -or $n -ge $rowsOf[$name].Count) {
+                                                $lastRow++
+                                                foreach ($heading in $script:SyllabusTabColumns) {
+                                                                if ($col.ContainsKey($heading) -and $null -ne $row.$heading -and [string]$row.$heading -ne '') {
+                                                                                $Worksheet.Cells[$lastRow, $col[$heading]].Value = $row.$heading
+                                                                                $count++
+                                                                }
+                                                }
+                                                continue
+                                }
+
+                                $r = $rowsOf[$name][$n]
+                                $cell = $Worksheet.Cells[$r, $col['IsComplete']]
+                                if ((ConvertTo-FaisBool $cell.Value) -ne [bool]$row.IsComplete) {
+                                                $cell.Value = [bool]$row.IsComplete
+                                                $count++
+                                }
+                                $etd = Format-TabEtd $row.ETD
+                                $cell = $Worksheet.Cells[$r, $col['ETD']]
+                                if ((Format-TabEtd $cell.Value) -ne $etd) {
+                                                $cell.Value = if ($etd -eq '') { $null } else { $etd }
+                                                $count++
+                                }
+                                $ip = ([string]$row.Instructor).Trim()
+                                $cell = $Worksheet.Cells[$r, $col['Instructor']]
+                                if (([string]$cell.Value).Trim() -cne $ip) {
+                                                $cell.Value = if ($ip -eq '') { $null } else { $ip }
+                                                $count++
+                                }
+                }
+                return $count
+}
+
+# An ETD cell as the text FAIS writes ('' when blank or not a date), for comparing
+function Format-TabEtd {
+                param ($Value)
+
+                $dt = Parse-ETD $Value
+                if ($null -eq $dt) { return '' }
+                return $dt.ToString('yyyy-MM-dd HH:mm:ss')
+}
+
+
+# ==========================================
+# Writes student values into the MasterData Students sheet, matched by SPName in column B:
+# SimDebt into column P, UnsatSim / UnsatFlight into the columns with those headings.
+# Only the cells passed in change. Throws when MasterData can't be written.
+#   -FlagsByName: name -> @{ UnsatSim = $true/$false; UnsatFlight = $true/$false } (either key)
+# ==========================================
+function Update-MasterDataStudents {
+                param (
+                                [Parameter(Mandatory)] [string]$MasterDataPath,
+                                [hashtable]$SimDebtByName = @{},
+                                [hashtable]$FlagsByName = @{}
+                )
+
+                if (-not (Test-Path -LiteralPath $MasterDataPath)) { throw "MasterData.xlsx not found at: $MasterDataPath" }
+                if ($SimDebtByName.Count -eq 0 -and $FlagsByName.Count -eq 0) { return }
 
                 $package = $null
                 try {
                                 $package = Open-ExcelPackage -Path $MasterDataPath
                                 $ws = $package.Workbook.Worksheets["Students"]
-                                if (-not $ws) {
-                                                Write-Error "Worksheet 'Students' not found in MasterData.xlsx"
-                                                Close-ExcelPackage -ExcelPackage $package -NoSave
-                                                return
-                                }
+                                if ($null -eq $ws) { throw "Worksheet 'Students' not found in MasterData.xlsx" }
 
                                 # Column B = SPName, Column P = SimDebt
                                 $nameCol = 2
                                 $debtCol = 16
+
+                                # UnsatSim / UnsatFlight: the columns IngestData reads them from
+                                $flagCol = @{}
+                                $lastCol = if ($null -ne $ws.Dimension) { $ws.Dimension.End.Column } else { 0 }
+                                for ($c = 1; $c -le $lastCol; $c++) {
+                                                $heading = ([string]$ws.Cells[1, $c].Value).Trim()
+                                                if ($heading -in @('UnsatSim', 'UnsatFlight') -and -not $flagCol.ContainsKey($heading)) { $flagCol[$heading] = $c }
+                                }
+                                foreach ($flags in $FlagsByName.Values) {
+                                                foreach ($key in $flags.Keys) {
+                                                                if (-not $flagCol.ContainsKey($key)) { throw "The MasterData Students sheet has no '$key' heading in row 1." }
+                                                }
+                                }
+
                                 $row = 2
-                                $updatedCount = 0
+                                $found = @{}
                                 while ($true) {
                                                 $nameVal = $ws.Cells[$row, $nameCol].Value
                                                 if ([string]::IsNullOrWhiteSpace([string]$nameVal)) { break }
                                                 $studentName = $nameVal.ToString().Trim()
                                                 if ($SimDebtByName.ContainsKey($studentName)) {
                                                                 $ws.Cells[$row, $debtCol].Value = [double]$SimDebtByName[$studentName]
-                                                                $updatedCount++
+                                                                $found[$studentName] = $true
+                                                }
+                                                if ($FlagsByName.ContainsKey($studentName)) {
+                                                                $flags = $FlagsByName[$studentName]
+                                                                foreach ($key in $flags.Keys) { $ws.Cells[$row, $flagCol[$key]].Value = [bool]$flags[$key] }
+                                                                $found[$studentName] = $true
                                                 }
                                                 $row++
                                 }
 
                                 Close-ExcelPackage -ExcelPackage $package
-                                Write-Host "Successfully updated SimDebt (Column P) for $updatedCount students." -ForegroundColor Green
+                                $package = $null
+
+                                $missing = @(@($SimDebtByName.Keys) + @($FlagsByName.Keys) | Sort-Object -Unique | Where-Object { -not $found.ContainsKey($_) })
+                                if ($missing.Count -gt 0) {
+                                                Write-Warning "Not found in column B of the MasterData Students sheet (above the first blank name), so nothing was written for: $($missing -join '; ')"
+                                }
+                                Write-Host ("MasterData updated: SimDebt (column P) for {0} student(s), unsat flags for {1}." -f @($SimDebtByName.Keys | Where-Object { $found.ContainsKey($_) }).Count, @($FlagsByName.Keys | Where-Object { $found.ContainsKey($_) }).Count) -ForegroundColor Green
                 }
                 catch {
-                                Write-Error "Failed to update SimDebt in MasterData: $_"
-                                if ($package) { Close-ExcelPackage -ExcelPackage $package -NoSave }
+                                if ($null -ne $package) { Close-ExcelPackage -ExcelPackage $package -NoSave }
+                                throw
                 }
+}
+
+# The UnsatSim / UnsatFlight values that no longer match what was read from MasterData:
+# $false where this run's schedule cleaned up the unsat, $true where a hook (or a re-planned
+# clean-up) set one that MasterData doesn't have yet. Same shape as -FlagsByName above.
+function Get-UnsatFlagUpdates {
+                param ([array]$Students)
+
+                $out = @{}
+                foreach ($s in @($Students)) {
+                                if ($null -eq $s) { continue }
+                                $name = ([string]$s.Name).Trim()
+                                if ($name -eq '') { continue }
+                                $flags = @{}
+                                foreach ($key in @('UnsatSim', 'UnsatFlight')) {
+                                                $saved = $s.PSObject.Properties["${key}InMasterData"]
+                                                if ($null -eq $saved) { continue }
+                                                $now = ConvertTo-FaisBool $s.$key
+                                                if ($now -ne (ConvertTo-FaisBool $saved.Value)) { $flags[$key] = $now }
+                                }
+                                if ($flags.Count -gt 0) { $out[$name] = $flags }
+                }
+                return $out
 }
 
 
@@ -280,6 +430,7 @@ function Update-MasterDataSimDebtColumnP {
 # ATIS.xlsx: one tab per day, flights in time order, then sims in time order below a
 # thick border. Each line goes on its day's tab in MasterSchedule columns. A day's tab
 # is rebuilt every time that day is exported; tabs for other days are kept.
+# Throws when ATIS can't be written.
 # ==========================================
 function Export-AtisWorkbook {
                 [CmdletBinding()]
@@ -316,7 +467,7 @@ function Export-AtisWorkbook {
                                                 $lines = @($byDay[$key] | Sort-Object IsSim, Time, Index)
                                                 $rows = @($lines | ForEach-Object { $_.Row | Select-Object ETD, Instructor, SortieType, Student, Mission, Callsign, Num, Notes })
                                                 # -ClearSheet so a re-export of the day never leaves old lines or borders behind
-                                                $package = $rows | Export-Excel -ExcelPackage $package -WorksheetName $sheet -ClearSheet -AutoSize -PassThru
+                                                $package = $rows | Export-Excel -ExcelPackage $package -WorksheetName $sheet -ClearSheet -AutoSize -PassThru -ErrorAction Stop
                                                 $ws = $package.Workbook.Worksheets[$sheet]
                                                 $ws.Row(1).Style.Font.Bold = $true
 
@@ -354,7 +505,8 @@ function Export-AtisWorkbook {
                 }
                 catch {
                                 if ($null -ne $package) { Close-ExcelPackage -ExcelPackage $package -NoSave }
-                                Write-Warning "ATIS was not written: $($_.Exception.Message)"
+                                # Export-FaisOutput puts every file back when this fails
+                                throw "ATIS was not written: $($_.Exception.Message)"
                 }
 }
 
@@ -510,51 +662,103 @@ function Wait-FileWritable {
                 return $true
 }
 
-# Writes everything a run produces:
-# MasterSchedule, each student's syllabus tab, SimDebt to MasterData, ATIS, optional Teams copy.
+# Runs -Action. If it throws, every file in -Files goes back to how it was before (a file
+# that didn't exist is removed), so a write that fails part-way leaves nothing half-done.
+# The error is rethrown.
+function Invoke-WithFileBackup {
+                param (
+                                [string[]]$Files,
+                                [Parameter(Mandatory)] [scriptblock]$Action
+                )
+
+                $backupOf = @{}
+                try {
+                                foreach ($target in $Files) {
+                                                if ([string]::IsNullOrWhiteSpace($target)) { continue }
+                                                if (Test-Path -LiteralPath $target) {
+                                                                $copy = Join-Path ([System.IO.Path]::GetTempPath()) ('FAIS_' + [guid]::NewGuid().ToString('N') + [System.IO.Path]::GetExtension($target))
+                                                                Copy-Item -LiteralPath $target -Destination $copy -Force -ErrorAction Stop
+                                                                $backupOf[$target] = $copy
+                                                }
+                                                else {
+                                                                $backupOf[$target] = $null
+                                                }
+                                }
+                                & $Action
+                }
+                catch {
+                                foreach ($target in @($backupOf.Keys)) {
+                                                try {
+                                                                if ($null -ne $backupOf[$target]) { Copy-Item -LiteralPath $backupOf[$target] -Destination $target -Force -ErrorAction Stop }
+                                                                elseif (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Force -ErrorAction Stop }
+                                                }
+                                                catch {
+                                                                Write-Warning "Could not put $target back the way it was: $($_.Exception.Message)"
+                                                }
+                                }
+                                throw
+                }
+                finally {
+                                foreach ($copy in @($backupOf.Values)) {
+                                                if ($null -ne $copy -and (Test-Path -LiteralPath $copy)) { Remove-Item -LiteralPath $copy -Force -ErrorAction SilentlyContinue }
+                                }
+                }
+}
+
+# Writes everything a run produces, or nothing: MasterSchedule, each student's syllabus
+# tab, SimDebt and the unsat flags that changed to MasterData, ATIS, then the optional Teams
+# copy. Every file must be closed first; if any write fails, all of them are put back as they were.
+# Returns $true when everything was written.
 function Export-FaisOutput {
                 param (
                                 [Parameter(Mandatory)] $FillResult,
                                 [Parameter(Mandatory)] [string]$OutputPath,
-                                [string]$MasterDataPath,
+                                [Parameter(Mandatory)] [string]$MasterDataPath,
                                 [string]$AtisPath,
                                 $Settings = @{},
                                 [scriptblock]$LockedPrompt
                 )
 
                 $rows = ConvertTo-ExportRows -Schedule $FillResult.Schedule
-                $writeTabs = $true
-                if ($null -ne $Settings -and $Settings.ContainsKey('WriteStudentTabs')) { $writeTabs = [bool]$Settings.WriteStudentTabs }
-
-                if (-not (Wait-FileWritable -Path $OutputPath -Prompt $LockedPrompt)) {
-                                Write-Warning "OutputSchedule was not written (file still open)."
-                                return $false
+                $debts = @{}
+                foreach ($s in $FillResult.Students) {
+                                if (-not [string]::IsNullOrWhiteSpace([string]$s.Name)) { $debts[([string]$s.Name).Trim()] = [double]$s.SimDebt }
                 }
-                Export-FormattedMasterSchedule -ScheduleData $rows -FilePath $OutputPath -WorksheetName 'MasterSchedule'
-                if ($writeTabs) { Export-StudentSyllabusTabs -Students $FillResult.Students -FilePath $OutputPath }
-                Set-MasterScheduleFirst -FilePath $OutputPath
-
-                if ($writeTabs -and -not [string]::IsNullOrWhiteSpace($MasterDataPath)) {
-                                if (Wait-FileWritable -Path $MasterDataPath -Prompt $LockedPrompt) {
-                                                $debts = @{}
-                                                foreach ($s in $FillResult.Students) {
-                                                                if (-not [string]::IsNullOrWhiteSpace([string]$s.Name)) { $debts[[string]$s.Name] = [double]$s.SimDebt }
-                                                }
-                                                Update-MasterDataSimDebtColumnP -SimDebtByName $debts -MasterDataPath $MasterDataPath
-                                }
-                                else {
-                                                Write-Warning "SimDebt was not saved to MasterData (file still open)."
-                                }
-                }
+                $flags = Get-UnsatFlagUpdates -Students $FillResult.Students
 
                 $writeAtis = -not [string]::IsNullOrWhiteSpace($AtisPath)
                 if ($writeAtis -and $null -ne $Settings -and $Settings.ContainsKey('WriteAtis')) { $writeAtis = [bool]$Settings.WriteAtis }
-                if ($writeAtis) {
-                                if (Wait-FileWritable -Path $AtisPath -Prompt $LockedPrompt) {
-                                                Export-AtisWorkbook -ScheduleData $rows -FilePath $AtisPath
+                $outFiles = @($OutputPath, $MasterDataPath)
+                if ($writeAtis) { $outFiles += $AtisPath }
+
+                if (-not (Test-Path -LiteralPath $MasterDataPath)) {
+                                Write-Warning "MasterData.xlsx was not found at $MasterDataPath, so nothing was written."
+                                return $false
+                }
+                foreach ($file in $outFiles) {
+                                if (-not (Wait-FileWritable -Path $file -Prompt $LockedPrompt)) {
+                                                Write-Warning "$file is still open, so nothing was written."
+                                                return $false
                                 }
-                                else {
-                                                Write-Warning "ATIS was not written (file still open)."
+                }
+
+                try {
+                                Invoke-WithFileBackup -Files $outFiles -Action {
+                                                Export-FormattedMasterSchedule -ScheduleData $rows -FilePath $OutputPath -WorksheetName 'MasterSchedule'
+                                                Export-StudentSyllabusTabs -Students $FillResult.Students -FilePath $OutputPath
+                                                Set-MasterScheduleFirst -FilePath $OutputPath
+                                                Update-MasterDataStudents -MasterDataPath $MasterDataPath -SimDebtByName $debts -FlagsByName $flags
+                                                if ($writeAtis) { Export-AtisWorkbook -ScheduleData $rows -FilePath $AtisPath }
+                                }
+                }
+                catch {
+                                Write-Warning "Export failed, so OutputSchedule, MasterData and ATIS were left as they were: $($_.Exception.Message)"
+                                return $false
+                }
+                foreach ($name in @($flags.Keys | Sort-Object)) {
+                                foreach ($key in @($flags[$name].Keys | Sort-Object)) {
+                                                $what = if ($flags[$name][$key]) { 'set' } else { 'cleared (cleaned up on this schedule)' }
+                                                Write-Host "  $key $what for $name" -ForegroundColor Cyan
                                 }
                 }
 
