@@ -199,6 +199,17 @@ if (Get-Module -ListAvailable -Name ImportExcel) {
         $prev = @(DownloadPrevSchedule -Students $copyA -Instructors $ips -excelOutputPath $xlsx)
         $prev.Count -eq @($fill.Schedule).Count -and @($prev | Where-Object { $_.Student -isnot [string] -and $null -ne $_.Student }).Count -gt 0
     }
+    Assert-That 'ATIS has a tab for the day: flights by ETD, then the IFT under a thick border' {
+        $atis = Join-Path $work 'ATIS.xlsx'
+        Export-AtisWorkbook -ScheduleData (ConvertTo-ExportRows -Schedule $fill.Schedule) -FilePath $atis 6>$null
+        $sheet = Get-DaySheetName -Date ([datetime]'2026-10-20')
+        $types = @(Import-Excel -Path $atis -WorksheetName $sheet | ForEach-Object { $_.SortieType })
+        $pkg = Open-ExcelPackage -Path $atis
+        $simRow = [array]::IndexOf($types, 'IFT') + 2
+        $thick = $pkg.Workbook.Worksheets[$sheet].Cells[$simRow, 1].Style.Border.Top.Style -eq [OfficeOpenXml.Style.ExcelBorderStyle]::Thick
+        Close-ExcelPackage -ExcelPackage $pkg -NoSave
+        $types.Count -eq @($fill.Schedule).Count -and $types[$types.Count - 1] -eq 'IFT' -and $thick
+    }
 }
 else {
     Write-Host "  SKIP  ImportExcel is not installed" -ForegroundColor Yellow

@@ -9,7 +9,7 @@ powershell.exe -STA -File .\FAIS.ps1
 ```
 Add `-Trace` to print every scheduling decision to the console. FAIS restarts itself in STA mode if needed.
 
-**Needs:** Windows PowerShell 5.1 and the ImportExcel module. `MasterData.xlsx` lives in the folder *above* the FAIS folder. `OutputSchedule.xlsx` is written to the Desktop.
+**Needs:** Windows PowerShell 5.1 and the ImportExcel module. `MasterData.xlsx` lives in the folder *above* the FAIS folder. `OutputSchedule.xlsx` and `ATIS.xlsx` are written to the Desktop.
 
 **What happens:**
 1. **Pre-run pop-ups.** Log any hooked (unsat) or incomplete events from the last schedule, then click **Open Puck Board**.
@@ -19,6 +19,8 @@ Add `-Trace` to print every scheduling decision to the console. FAIS restarts it
    - **MasterSchedule** sheet (first tab),
    - **each student's syllabus tab** (tomorrow's run starts from it),
    - **SimDebt** to MasterData.
+
+   It also writes **ATIS.xlsx**: one tab per day (named like `Wednesday. October 21, 2026`). Each tab lists that day's flights in ETD order, then a thick border, then that day's sims (OFT / IFT) in ETD order, in the same columns as MasterSchedule. Each export rebuilds the tabs for the days it covers and keeps every other day's tab, so ATIS builds up a day-by-day history. The file opens on the first day you just exported. Set `WriteAtis = $false` in `$OutputSettings` to turn it off.
 
 Closing the board without exporting writes nothing. Your lines are autosaved either way.
 
