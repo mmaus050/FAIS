@@ -202,7 +202,8 @@
                     <Button x:Name="SaveTemplateButton" Content="Save day as template..." Style="{StaticResource BarButton}"/>
                     <Rectangle Width="1" Height="20" Fill="#94A3B8" Margin="8,0"/>
                     <Button x:Name="CopyPrevDayButton" Content="Copy previous day's lines" Style="{StaticResource BarButton}"/>
-                    <Button x:Name="ImportSheetButton" Content="Import Schedule sheet" Style="{StaticResource BarButton}" Visibility="Collapsed"/>
+                    <Button x:Name="LoadDayButton" Content="Load a day..." Style="{StaticResource BarButton}" FontWeight="SemiBold"
+                            ToolTip="Load one day's lines from MasterData's Schedule sheet, or from the schedule you last exported (to change a day already sent out)."/>
                     <Rectangle Width="1" Height="20" Fill="#94A3B8" Margin="8,0"/>
                     <DatePicker x:Name="AddDayPicker" Width="125" VerticalAlignment="Center"/>
                     <Button x:Name="AddDayButton" Content="Add day" Style="{StaticResource BarButton}"/>
@@ -219,6 +220,8 @@
                         <Button x:Name="RefillButton" Content="Re-fill" Style="{StaticResource BarButton}" Visibility="Collapsed"/>
                         <Button x:Name="ExportButton" Content="Export to OutputSchedule" Style="{StaticResource BarButton}" Visibility="Collapsed"
                                 Background="#1D4ED8" Foreground="White" FontWeight="Bold" Padding="16,6"/>
+                        <CheckBox x:Name="FillDayOnlyCheck" Content="Only this day" VerticalAlignment="Center" Margin="8,0,4,0"
+                                  ToolTip="Fill and export only the day you are looking at. Days already exported stay exactly as they are."/>
                         <Button x:Name="FillButton" Content="Fill the rest of the lines" Style="{StaticResource BarButton}"
                                 Background="#16A34A" Foreground="White" FontWeight="Bold" Padding="16,6"/>
                     </StackPanel>
@@ -261,6 +264,17 @@
                     <Border x:Name="ModeBanner" DockPanel.Dock="Top" Background="#FEF3C7" BorderBrush="#F59E0B" BorderThickness="1"
                             CornerRadius="4" Padding="8,5" Margin="0,0,0,6" Visibility="Collapsed">
                         <TextBlock x:Name="ModeBannerText" TextWrapping="Wrap" Foreground="#78350F"/>
+                    </Border>
+                    <!-- MasterData's Schedule sheet has lines the board does not (it is re-read whenever MasterData is saved) -->
+                    <Border x:Name="SheetBanner" DockPanel.Dock="Top" Background="#EFF6FF" BorderBrush="#60A5FA" BorderThickness="1"
+                            CornerRadius="4" Padding="8,4" Margin="0,0,0,6" Visibility="Collapsed">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <Button x:Name="SheetBannerLoadButton" Content="Load" Style="{StaticResource BarButton}" FontWeight="SemiBold"/>
+                                <Button x:Name="SheetBannerIgnoreButton" Content="Keep the board's lines" Style="{StaticResource BarButton}"/>
+                            </StackPanel>
+                            <TextBlock x:Name="SheetBannerText" TextWrapping="Wrap" Foreground="#1E3A8A" VerticalAlignment="Center"/>
+                        </DockPanel>
                     </Border>
                     <TabControl x:Name="DayTabs" Background="White"/>
                 </DockPanel>

@@ -1,0 +1,37 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Load a day" Height="560" Width="600" MinHeight="420" MinWidth="480"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False" Background="#F8FAFC"
+        FontFamily="Segoe UI" FontSize="12">
+    <DockPanel Margin="14">
+        <TextBlock DockPanel.Dock="Top" Text="Load one day onto the board" FontSize="15" FontWeight="Bold" Margin="0,0,0,8"/>
+
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,4">
+            <RadioButton x:Name="SourceSheetRadio" GroupName="Source" Content="MasterData - Schedule sheet" IsChecked="True" Margin="0,0,18,0"/>
+            <RadioButton x:Name="SourceExportRadio" GroupName="Source" Content="Last exported schedule (OutputSchedule)"/>
+        </StackPanel>
+        <TextBlock DockPanel.Dock="Top" x:Name="SourceInfoText" TextWrapping="Wrap" Foreground="#475569" Margin="0,2,0,8"/>
+
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button x:Name="RefreshButton" Content="Read the file again" Padding="10,3" Margin="3,0"/>
+            <Button x:Name="LoadButton" Content="Load" Padding="18,4" Margin="3,0" FontWeight="Bold" IsDefault="True"/>
+            <Button x:Name="CancelButton" Content="Cancel" Padding="10,3" Margin="3,0" IsCancel="True"/>
+        </StackPanel>
+
+        <Border DockPanel.Dock="Bottom" Background="White" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,10,0,0">
+            <StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                    <TextBlock Text="Put the lines on:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <DatePicker x:Name="TargetDayPicker" Width="140"/>
+                    <TextBlock x:Name="TargetInfoText" VerticalAlignment="Center" Foreground="#64748B" Margin="10,0,0,0"/>
+                </StackPanel>
+                <RadioButton x:Name="ReplaceRadio" GroupName="Mode" Content="Replace that day's lines on the board" IsChecked="True" Margin="0,0,0,2"/>
+                <RadioButton x:Name="AddRadio" GroupName="Mode" Content="Add them to that day's lines" Margin="0,0,0,6"/>
+                <CheckBox x:Name="KeepStudentsCheck" Content="Keep the students and missions (they go on as hardcoded)" IsChecked="True"/>
+                <TextBlock x:Name="SkippedText" TextWrapping="Wrap" Foreground="#B45309" Margin="0,6,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <ListBox x:Name="DayList" DisplayMemberPath="Text" FontFamily="Consolas" FontSize="12"/>
+    </DockPanel>
+</Window>

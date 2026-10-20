@@ -4,7 +4,8 @@
 #
 # Checks, under the real Windows PowerShell 5.1:
 #   - the scheduling engine, board model and placement checks (synthetic students)
-#   - Excel round trip through ImportExcel (temp files only), when ImportExcel is installed
+#   - Excel round trip through ImportExcel (temp files only), when ImportExcel is installed:
+#     MasterSchedule + student tabs, the Schedule sheet reader, exporting one day at a time
 #   - the puck board: the XAML loads, every template builds, and the real window is driven
 #     off-screen through pin / move / undo / ETD / fill / export (a window may flash briefly)
 # Exit code 0 = everything passed. -SkipWindow skips the window part.
@@ -223,6 +224,27 @@ if (Get-Module -ListAvailable -Name ImportExcel) {
         Close-ExcelPackage -ExcelPackage $pkg -NoSave
         $types.Count -eq @($fill.Schedule).Count -and $types[$types.Count - 1] -eq 'IFT' -and $thick
     }
+    $md = Join-Path $work 'MasterData.xlsx'
+    Assert-That 'Schedule sheet: headings, a blank row, a date row and time-only cells all read' {
+        $pkg = Open-ExcelPackage -Path $md -Create
+        $ws = Add-Worksheet -ExcelPackage $pkg -WorksheetName 'Schedule'
+        $cells = @(@('Type', 'Time', 'IP'), @('Wednesday, October 21, 2026'), @('DL', '0730', 'Jones, Bob'), @(), @('OFT', '1300'))
+        for ($r = 0; $r -lt $cells.Count; $r++) { for ($c = 0; $c -lt @($cells[$r]).Count; $c++) { $ws.Cells[($r + 1), ($c + 1)].Value = $cells[$r][$c] } }
+        $st = Add-Worksheet -ExcelPackage $pkg -WorksheetName 'Students'
+        $st.Cells[1, 1].Value = 'SPKey'; $st.Cells[1, 2].Value = 'SPName'; $st.Cells[1, 3].Value = 'SimDebt'
+        $st.Cells[2, 1].Value = 1; $st.Cells[2, 2].Value = 'Adams, Al'; $st.Cells[2, 3].Value = 0
+        Close-ExcelPackage $pkg
+        $read = Read-ScheduleSheet -Path $md
+        $read.Error -eq '' -and @($read.Rows).Count -eq 2 -and $read.Rows[0].ETD -eq '2026-10-21 07:30:00' -and $read.Rows[1].ETD -eq '2026-10-21 13:00:00' -and $read.Rows[1].Instructor -eq 'SIM IP'
+    }
+    Assert-That 'exporting one day keeps the other days in MasterSchedule, and SimDebt goes to the SimDebt column' {
+        $days = @($fill.Schedule | ForEach-Object { (Parse-ETD $_.ETD).ToString('yyyy-MM-dd') } | Sort-Object -Unique)
+        $other = New-TestRow -ETD '2026-10-22 08:00' -Instructor 'Jones, Bob' -Student 'Brown, Bea' -Mission 'FF5201'
+        $ok = Export-FaisOutput -FillResult ([PSCustomObject]@{ Schedule = @($other); Students = $copyA; Days = @('2026-10-22') }) -OutputPath $xlsx -MasterDataPath $md -Today ([datetime]'2026-10-20') -Settings @{ ReopenExcel = $false } 6>$null 3>$null
+        $back = @(Import-Excel -Path $xlsx -WorksheetName 'MasterSchedule' | ForEach-Object { (Parse-ETD $_.ETD).ToString('yyyy-MM-dd') } | Sort-Object -Unique)
+        $debt = @(Import-Excel -Path $md -WorksheetName 'Students')[0].SimDebt
+        $ok -and (($back -join ',') -eq ((@($days) + '2026-10-22' | Sort-Object -Unique) -join ',')) -and [double]$debt -eq [double]$copyA[0].SimDebt
+    }
 }
 else {
     Write-Host "  SKIP  ImportExcel is not installed" -ForegroundColor Yellow
@@ -253,7 +275,7 @@ else {
         SoftWeights    = $sw
         Formations     = $forms
         PrevSchedule   = @()
-        ImportSchedule = @()
+        ScheduleSheet  = $null
     }
     $problems = @(Test-PuckBoardWindow -Data $windowData -Day '2026-10-21' -WorkDir $work)
     foreach ($p in $problems) { $script:Failed.Add("window: $p"); Write-Host "  FAIL  window: $p" -ForegroundColor Red }

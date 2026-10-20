@@ -1,6 +1,8 @@
 # DATADOWNLOAD.PSM1 DIRECTORY:
 # Contains all functions that download data to use in the program
 # IngestData            (MasterData.xlsx + each student's tab in OutputSchedule.xlsx)
+# Open-FaisWorkbookForRead / Close-FaisWorkbookForRead (read a workbook even while Excel has it open)
+# Read-ScheduleSheet / Get-ScheduleSheetDays / Get-ScheduleDayFingerprint (MasterData Schedule sheet)
 # DownloadPrevSchedule  (previous MasterSchedule with students/missions/IPs linked back up)
 # Import-MasterSchedule (same sheet through Excel COM, strings only)
 
@@ -14,8 +16,8 @@
 #            |___/
 # ========================================================================================
 # Reads MasterData.xlsx and OutputSchedule.xlsx and returns one object with:
-# Schedule, Instructors, Students, Formations, SoftWeights, StudentAbsences
-# The Schedule sheet is optional now that the puck board builds the lines.
+# Schedule, ScheduleSheet, Instructors, Students, Formations, SoftWeights, StudentAbsences
+# The Schedule sheet is optional: the puck board loads it one day at a time.
 function IngestData {
                 param (
                                 [string]$excelInputPath,
@@ -59,19 +61,25 @@ function IngestData {
                 }
                 $validStudents = @($named | Select-Object -First $MaxStudents)
 
+                # OutputSchedule is opened once for every student's tab (it is read even while open in Excel)
                 $masterSyllabus = $null
+                $outputBook = Open-FaisWorkbookForRead -Path $excelOutputPath
                 $Students = @(
                                 foreach ($Student in $validStudents) {
                                                 $studentSyllabus = $null
 
-                                                # Prefer the student's own tab in OutputSchedule when that file exists
-                                                if (Test-Path $excelOutputPath) {
+                                                # Prefer the student's own tab in OutputSchedule when it has one
+                                                $tabName = ([string]$Student.SPName).Trim()
+                                                if ($null -ne $outputBook.Package -and $null -ne $outputBook.Package.Workbook.Worksheets[$tabName]) {
                                                                 try {
-                                                                                $studentSyllabus = Import-Excel -Path $excelOutputPath -WorksheetName ([string]$Student.SPName).Trim() -ErrorAction Stop
+                                                                                $studentSyllabus = @(Import-Excel -ExcelPackage $outputBook.Package -WorksheetName $tabName -ErrorAction Stop)
                                                                 }
                                                                 catch {
-                                                                                Write-Host "WARNING: Could not read $($Student.SPName) from OutputSchedule. Is Excel currently open? (Ignore if you're starting a class)" -ForegroundColor Yellow
+                                                                                Write-Host "WARNING: Could not read $tabName's tab in OutputSchedule ($($_.Exception.Message)). Using the master Syllabus." -ForegroundColor Yellow
                                                                 }
+                                                }
+                                                elseif ($null -ne $outputBook.Package) {
+                                                                Write-Host "No tab for $tabName in OutputSchedule yet: starting from the master Syllabus." -ForegroundColor DarkGray
                                                 }
 
                                                 # Fall back to the master Syllabus sheet when no student-specific tab was found
@@ -131,56 +139,19 @@ function IngestData {
                                                 }
                                 }
                 )
+                Close-FaisWorkbookForRead $outputBook
 
                 # ------------------------------------------------------------------
-                # Schedule sheet (optional: the puck board replaces it)
-                # Fixed column positions, skip pasted headers, stop on blank ETD
+                # Schedule sheet (optional: the puck board loads it one day at a time)
                 # ------------------------------------------------------------------
-                $rawSchedule = @()
-                try {
-                                $rawSchedule = @(Import-Excel -Path $excelInputPath -WorksheetName "Schedule" -NoHeader -ErrorAction Stop)
+                $ScheduleSheet = Read-ScheduleSheet -Path $excelInputPath
+                if ($ScheduleSheet.Error) { Write-Host "Schedule sheet: $($ScheduleSheet.Error)" -ForegroundColor Yellow }
+                elseif (@($ScheduleSheet.Rows).Count -gt 0) {
+                                $dayText = @(Get-ScheduleSheetDays -Rows $ScheduleSheet.Rows | ForEach-Object { "$($_.Label) ($($_.Count))" }) -join ', '
+                                Write-Host "Schedule sheet: $(@($ScheduleSheet.Rows).Count) line(s): $dayText" -ForegroundColor Cyan
                 }
-                catch {
-                                $rawSchedule = @()
-                }
-                $headerNames = @(
-                                "ETD", "Date", "Callsign", "Num", "Instructor", "Student", "Mission",
-                                "SortieType", "Notes", "Sortie Type", "Event Name", "#", "Remark",
-                                "Device", "Simulator Instructor", "Start Time"
-                )
-                $CleanSchedule = New-Object System.Collections.Generic.List[object]
-
-                foreach ($row in $rawSchedule) {
-                                # Skip rows whose first column is a known header name
-                                if ($row.P1 -in $headerNames) { continue }
-
-                                $cleanRow = [PSCustomObject]@{
-                                                ETD        = $row.P1
-                                                Instructor = $row.P2
-                                                SortieType = $row.P3
-                                                Student    = $row.P4
-                                                Mission    = $row.P5
-                                                Callsign   = $row.P6
-                                                Num        = $row.P7
-                                                Notes      = $row.P8
-                                }
-
-                                # Stop at the first row with a blank ETD
-                                if ([string]::IsNullOrWhiteSpace([string]$cleanRow.ETD)) { break }
-
-                                # Convert Excel serial dates and date strings to a standard timestamp
-                                $parsed = Parse-ETD $cleanRow.ETD
-                                if ($null -ne $parsed) { $cleanRow.ETD = $parsed.ToString("yyyy-MM-dd HH:mm:ss") }
-
-                                # OFT/IFT default Instructor to "SIM IP" only when that column was left blank
-                                if ((Test-IsSimSortieType ([string]$cleanRow.SortieType)) -and [string]::IsNullOrWhiteSpace([string]$cleanRow.Instructor)) {
-                                                $cleanRow.Instructor = "SIM IP"
-                                }
-
-                                $CleanSchedule.Add($cleanRow)
-                }
-
-                $Schedule = @($CleanSchedule | Sort-Object -Property ETD)
+                foreach ($skip in @($ScheduleSheet.Skipped)) { Write-Host "  Schedule sheet $skip" -ForegroundColor Yellow }
+                $Schedule = @($ScheduleSheet.Rows | Where-Object { $_.ETD } | Sort-Object -Property ETD)
 
                 # ------------------------------------------------------------------
                 # Formations
@@ -288,13 +259,312 @@ function IngestData {
                 }
 
                 return [PSCustomObject]@{
+                                # Set when OutputSchedule exists but could not be opened: the students' progress is unknown
+                                OutputError     = $outputBook.Error
                                 Schedule        = $Schedule
+                                ScheduleSheet   = $ScheduleSheet
                                 Instructors     = $Instructors
                                 Students        = $Students
                                 Formations      = $Formations
                                 SoftWeights     = $SoftWeights
                                 StudentAbsences = $StudentAbsences
                 }
+}
+
+
+# =================================================================================
+#  READING A WORKBOOK THAT MAY BE OPEN IN EXCEL
+# =================================================================================
+
+# Opens a workbook for reading even while Excel has it open (it reads the last saved copy).
+# Returns {Package; Stream; Error}. Package is $null when the file is missing or unreadable.
+function Open-FaisWorkbookForRead {
+                param ([string]$Path)
+
+                $book = [PSCustomObject]@{ Package = $null; Stream = $null; Error = '' }
+                if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return $book }
+                try {
+                                $book.Stream = New-Object System.IO.FileStream -ArgumentList $Path, 'Open', 'Read', 'ReadWrite'
+                                $pkg = New-Object OfficeOpenXml.ExcelPackage
+                                $pkg.Load($book.Stream)
+                                $book.Package = $pkg
+                } catch {
+                                $book.Error = $_.Exception.Message
+                                Write-Host "WARNING: Could not open $Path : $($book.Error)" -ForegroundColor Yellow
+                                Close-FaisWorkbookForRead $book
+                }
+                return $book
+}
+
+function Close-FaisWorkbookForRead {
+                param ($Book)
+
+                if ($null -eq $Book) { return }
+                if ($null -ne $Book.Package) { try { $Book.Package.Dispose() } catch { } ; $Book.Package = $null }
+                if ($null -ne $Book.Stream) { try { $Book.Stream.Close() } catch { } ; $Book.Stream = $null }
+}
+
+
+# =================================================================================
+#  ____       _              _       _        ____  _               _
+# / ___|  ___| |__   ___  __| |_   _| | ___  / ___|| |__   ___  ___| |_
+# \___ \ / __| '_ \ / _ \/ _` | | | | |/ _ \ \___ \| '_ \ / _ \/ _ \ __|
+#  ___) | (__| | | |  __/ (_| | |_| | |  __/  ___) | | | |  __/  __/ |_
+# |____/ \___|_| |_|\___|\__,_|\__,_|_|\___| |____/|_| |_|\___|\___|\__|
+#
+# The MasterData Schedule sheet: the lines to fly, one row each. The puck board loads it
+# one day at a time and reloads it whenever MasterData is saved.
+#  - Columns are found by their headings (ETD / Time, Date, Instructor / IP, SortieType / Type,
+#    Student / SP, Mission / Event, Callsign, Num / #, Notes / Remarks), in any order.
+#    With no heading row, the legacy order is used: ETD, Instructor, SortieType, Student,
+#    Mission, Callsign, Num, Notes.
+#  - Blank rows and repeated heading rows are skipped (they no longer end the sheet).
+#  - A row with only a date on it ("Tuesday, October 21, 2026") dates the rows under it.
+#  - ETDs can be full dates or times only (0730, 730, 7:30, a time-formatted cell). A time
+#    only row takes its day from a Date column or the date row above it; with neither it
+#    goes onto whichever day it is loaded onto.
+# =================================================================================
+
+$script:ScheduleHeadings = @{
+                # heading (letters and digits only, lower case) = column it fills
+                Primary   = @{
+                                etd = 'ETD'; starttime = 'ETD'; date = 'Date'; instructor = 'Instructor'; ip = 'Instructor'
+                                sortietype = 'SortieType'; type = 'SortieType'; student = 'Student'; sp = 'Student'; spname = 'Student'
+                                mission = 'Mission'; callsign = 'Callsign'; num = 'Num'; notes = 'Notes'; remarks = 'Notes'
+                }
+                # used only when no primary heading claimed that column
+                Secondary = @{
+                                time = 'ETD'; takeoff = 'ETD'; takeofftime = 'ETD'; etdlocal = 'ETD'; day = 'Date'; flydate = 'Date'
+                                ipname = 'Instructor'; simulatorinstructor = 'Instructor'; simip = 'Instructor'; device = 'SortieType'
+                                linetype = 'SortieType'; sortie = 'SortieType'; studentname = 'Student'; event = 'Mission'
+                                eventname = 'Mission'; msn = 'Mission'; cs = 'Callsign'; number = 'Num'; note = 'Notes'
+                                remark = 'Notes'; comments = 'Notes'; comment = 'Notes'
+                }
+}
+$script:ScheduleLegacyColumns = @('ETD', 'Instructor', 'SortieType', 'Student', 'Mission', 'Callsign', 'Num', 'Notes')
+
+# Which column each heading names: field -> column number (1-based), from one row's cells
+function Get-ScheduleHeadingMap {
+                param ([array]$Cells)
+
+                $map = @{}
+                foreach ($pass in @('Primary', 'Secondary')) {
+                                $names = $script:ScheduleHeadings[$pass]
+                                for ($c = 0; $c -lt $Cells.Count; $c++) {
+                                                $raw = ([string]$Cells[$c]).Trim()
+                                                if ($raw -eq '') { continue }
+                                                $key = if ($raw -eq '#') { 'num' } else { ($raw -replace '[^a-zA-Z0-9]', '').ToLowerInvariant() }
+                                                if (-not $names.ContainsKey($key)) { continue }
+                                                $field = $names[$key]
+                                                if (-not $map.ContainsKey($field) -and ($map.Values -notcontains ($c + 1))) { $map[$field] = $c + 1 }
+                                }
+                }
+                return $map
+}
+
+# A heading row names the ETD column and at least one other, or any three columns
+function Test-ScheduleHeadingRow {
+                param ([array]$Cells)
+
+                $map = Get-ScheduleHeadingMap $Cells
+                return (($map.ContainsKey('ETD') -and $map.Count -ge 2) -or $map.Count -ge 3)
+}
+
+function ConvertTo-ScheduleCellText {
+                param ($Value)
+
+                if ($null -eq $Value) { return '' }
+                if ($Value -is [double] -and $Value -eq [math]::Floor($Value) -and [math]::Abs($Value) -lt 1e9) { return ([long]$Value).ToString() }
+                return ([string]$Value).Trim()
+}
+
+# Reads the Schedule sheet. Returns
+#   {Path; Worksheet; Found; Error; Layout; HeaderRow; Rows; Skipped; ReadAt}
+# Each row: {ETD ('yyyy-MM-dd HH:mm:ss', $null for a time with no day); Day ('yyyy-MM-dd' or '');
+#            Time ('HH:mm'); TimeOnly; Instructor; SortieType; Student; Mission; Callsign; Num; Notes; SheetRow}
+# Skipped holds one 'row N: why' line for each row that looked like a line but could not be read.
+function Read-ScheduleSheet {
+                param (
+                                [string]$Path,
+                                [string]$WorksheetName = 'Schedule',
+                                [string]$ReturnType = 'O&B Return',
+                                [string]$SimInstructor = 'SIM IP'
+                )
+
+                $result = [PSCustomObject]@{
+                                Path      = $Path
+                                Worksheet = $WorksheetName
+                                Found     = $false
+                                Error     = ''
+                                Layout    = ''
+                                HeaderRow = 0
+                                Rows      = @()
+                                Skipped   = @()
+                                ReadAt    = (Get-Date)
+                }
+                if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+                                $result.Error = "$Path was not found."
+                                return $result
+                }
+
+                $raw = @()
+                $book = Open-FaisWorkbookForRead -Path $Path
+                try {
+                                if ($null -eq $book.Package) { $result.Error = "Could not open $Path : $($book.Error)"; return $result }
+                                $ws = $book.Package.Workbook.Worksheets[$WorksheetName]
+                                if ($null -eq $ws) { return $result }
+                                $result.Found = $true
+                                if ($null -eq $ws.Dimension) { return $result }
+                                $raw = @(Import-Excel -ExcelPackage $book.Package -WorksheetName $WorksheetName -NoHeader -ErrorAction Stop)
+                } catch {
+                                $result.Error = "Could not read the '$WorksheetName' sheet: $($_.Exception.Message)"
+                                return $result
+                } finally {
+                                Close-FaisWorkbookForRead $book
+                }
+
+                $cellsOf = {
+                                param($row)
+                                @(foreach ($p in $row.PSObject.Properties) { $p.Value })
+                }
+
+                # Heading row: the first row (of the first 15 with anything in them) that names the columns
+                $map = $null
+                $seen = 0
+                for ($i = 0; $i -lt $raw.Count -and $seen -lt 15; $i++) {
+                                $cells = & $cellsOf $raw[$i]
+                                if (@($cells | Where-Object { ([string]$_).Trim() -ne '' }).Count -eq 0) { continue }
+                                $seen++
+                                if (Test-ScheduleHeadingRow $cells) {
+                                                $map = Get-ScheduleHeadingMap $cells
+                                                $result.HeaderRow = $i + 1
+                                                break
+                                }
+                }
+                if ($null -eq $map) {
+                                $map = @{}
+                                for ($c = 0; $c -lt $script:ScheduleLegacyColumns.Count; $c++) { $map[$script:ScheduleLegacyColumns[$c]] = $c + 1 }
+                                $result.Layout = 'Fixed columns (ETD, Instructor, SortieType, Student, Mission, Callsign, Num, Notes)'
+                }
+                else {
+                                $result.Layout = 'Headings on row ' + $result.HeaderRow
+                                if (-not $map.ContainsKey('ETD') -or -not $map.ContainsKey('SortieType')) {
+                                                $missing = @(@('ETD', 'SortieType') | Where-Object { -not $map.ContainsKey($_) }) -join ' and '
+                                                $result.Error = "The '$WorksheetName' sheet has headings on row $($result.HeaderRow) but no $missing column."
+                                                return $result
+                                }
+                }
+
+                $rows = New-Object System.Collections.Generic.List[object]
+                $skipped = New-Object System.Collections.Generic.List[string]
+                $currentDay = $null
+                for ($i = 0; $i -lt $raw.Count; $i++) {
+                                $sheetRow = $i + 1
+                                if ($sheetRow -eq $result.HeaderRow) { continue }
+                                $cells = & $cellsOf $raw[$i]
+                                $filled = @($cells | Where-Object { $null -ne $_ -and ([string]$_).Trim() -ne '' })
+                                if ($filled.Count -eq 0) { continue }
+                                if (Test-ScheduleHeadingRow $cells) { continue }
+
+                                $get = @{}
+                                foreach ($f in @('ETD', 'Date', 'Instructor', 'SortieType', 'Student', 'Mission', 'Callsign', 'Num', 'Notes')) {
+                                                $get[$f] = if ($map.ContainsKey($f) -and $map[$f] -le $cells.Count) { $cells[$map[$f] - 1] } else { $null }
+                                }
+                                $typeText = ConvertTo-ScheduleCellText $get.SortieType
+
+                                # A row with a date and no line on it (or a lone date in any column) dates the rows below it
+                                $noLine = ($typeText -eq '' -and (ConvertTo-ScheduleCellText $get.Instructor) -eq '' -and (ConvertTo-ScheduleCellText $get.Student) -eq '')
+                                if ($noLine -or $filled.Count -eq 1) {
+                                                $dayMark = $null
+                                                foreach ($v in $filled) {
+                                                                $tv = ConvertTo-FaisTimeValue $v
+                                                                if ($null -ne $tv -and $tv.HasDate) { $dayMark = $tv.Value.Date; break }
+                                                }
+                                                if ($null -ne $dayMark) { $currentDay = $dayMark; continue }
+                                }
+                                if ($noLine) {
+                                                if ($null -ne $get.ETD -and ([string]$get.ETD).Trim() -ne '') { $skipped.Add("row ${sheetRow}: no sortie type") }
+                                                continue
+                                }
+
+                                $type = ConvertTo-CanonicalSortieType -Text $typeText -ReturnType $ReturnType
+                                $etdText = ConvertTo-ScheduleCellText $get.ETD
+                                if ($etdText -eq '') { $skipped.Add("row ${sheetRow}: no ETD ($type line)"); continue }
+                                $tv = ConvertTo-FaisTimeValue $get.ETD
+                                if ($null -eq $tv) { $skipped.Add("row ${sheetRow}: ETD '$etdText' is not a time (use 0730, 7:30 or a date and time)"); continue }
+                                if ($typeText -eq '') { $skipped.Add("row ${sheetRow}: no sortie type"); continue }
+
+                                $day = $null
+                                if ($tv.HasDate) { $day = $tv.Value.Date }
+                                else {
+                                                $dv = ConvertTo-FaisTimeValue $get.Date
+                                                if ($null -ne $dv -and $dv.HasDate) { $day = $dv.Value.Date }
+                                                elseif ($null -ne $currentDay) { $day = $currentDay }
+                                }
+                                $time = $tv.Value.TimeOfDay
+                                $ip = ConvertTo-ScheduleCellText $get.Instructor
+                                if ($ip -eq '' -and (Test-IsSimSortieType $type)) { $ip = $SimInstructor }
+                                $student = ConvertTo-ScheduleCellText $get.Student
+                                $mission = ConvertTo-ScheduleCellText $get.Mission
+                                $notes = ConvertTo-ScheduleCellText $get.Notes
+                                $callsign = ConvertTo-ScheduleCellText $get.Callsign
+                                $num = ConvertTo-ScheduleCellText $get.Num
+
+                                $rows.Add([PSCustomObject]@{
+                                                ETD        = $(if ($null -ne $day) { $day.Add($time).ToString('yyyy-MM-dd HH:mm:ss') } else { $null })
+                                                Instructor = $(if ($ip -eq '') { $null } else { $ip })
+                                                SortieType = $type
+                                                Student    = $(if ($student -eq '') { $null } else { $student })
+                                                Mission    = $(if ($mission -eq '') { $null } else { $mission })
+                                                Callsign   = $(if ($callsign -eq '') { $null } else { $callsign })
+                                                Num        = $(if ($num -eq '') { $null } else { $num })
+                                                Notes      = $(if ($notes -eq '') { $null } else { $notes })
+                                                Day        = $(if ($null -ne $day) { $day.ToString('yyyy-MM-dd') } else { '' })
+                                                Time       = ('{0:00}:{1:00}' -f $time.Hours, $time.Minutes)
+                                                TimeOnly   = ($null -eq $day)
+                                                SheetRow   = $sheetRow
+                                })
+                }
+                $result.Rows = $rows.ToArray()
+                $result.Skipped = $skipped.ToArray()
+                return $result
+}
+
+# The days a schedule sheet read has lines for, in date order, plus one entry with Day = ''
+# for rows that have a time but no date. Each: {Day; Count; Students; Label}
+function Get-ScheduleSheetDays {
+                param ([array]$Rows = @())
+
+                $groups = @{}
+                foreach ($r in $Rows) {
+                                $d = [string]$r.Day
+                                if (-not $groups.ContainsKey($d)) { $groups[$d] = New-Object System.Collections.Generic.List[object] }
+                                $groups[$d].Add($r)
+                }
+                $out = foreach ($d in ($groups.Keys | Sort-Object)) {
+                                $list = $groups[$d]
+                                $label = if ($d -eq '') { 'No date' } else { ([datetime]::ParseExact($d, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)).ToString('ddd dd MMM yyyy') }
+                                [PSCustomObject]@{
+                                                Day      = $d
+                                                Count    = $list.Count
+                                                Students = @($list | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Student) }).Count
+                                                Label    = $label
+                                }
+                }
+                # Dated days first, the no-date group last
+                return @(@($out | Where-Object { $_.Day -ne '' }) + @($out | Where-Object { $_.Day -eq '' }))
+}
+
+# The sheet's rows for one day (time-only rows too with -IncludeTimeOnly), as one short
+# text that changes whenever any of those lines change. Row order does not matter.
+function Get-ScheduleDayFingerprint {
+                param ([array]$Rows = @(), [string]$Day, [switch]$IncludeTimeOnly)
+
+                $lines = foreach ($r in $Rows) {
+                                if ([string]$r.Day -ne $Day -and -not ($IncludeTimeOnly -and $r.TimeOnly)) { continue }
+                                (@($r.Time, $r.SortieType, $r.Instructor, $r.Student, $r.Mission, $r.Callsign, $r.Num, $r.Notes) | ForEach-Object { ([string]$_).Trim() }) -join '|'
+                }
+                return (Get-FaisFingerprint -Parts @($lines))
 }
 
 

@@ -274,6 +274,7 @@ function Process-IncompleteEvents {
 # Saves a pre-run change right away, both files or neither: SimDebt / unsat flags to
 # MasterData and, for incomplete events, those events' cells on the students' tabs in
 # OutputSchedule (so the two files agree even if the board is closed without exporting).
+# A file open in Excel is saved and closed for the write, then opened again.
 # A change that can't be saved stays in memory and goes out with the Export.
 # Returns $true when saved.
 # ========================================================================================
@@ -294,23 +295,29 @@ function Save-PreRunChanges {
                 $writeTabs = ($TabStudents.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($OutputPath) -and (Test-Path -LiteralPath $OutputPath))
                 $toSave = @($MasterDataPath)
                 if ($writeTabs) { $toSave += $OutputPath }
-                foreach ($file in $toSave) {
-                                if (-not (Wait-FileWritable -Path $file -Prompt $LockedPrompt)) {
-                                                Write-Warning "$file is still open, so this change is only kept for this run (Export writes it)."
+                $closed = New-Object System.Collections.Generic.List[string]
+                try {
+                                foreach ($file in $toSave) {
+                                                if (-not (Request-FaisFileWritable -Path $file -Prompt $LockedPrompt -Closed $closed)) {
+                                                                Write-Warning "$file is still open, so this change is only kept for this run (Export writes it)."
+                                                                return $false
+                                                }
+                                }
+
+                                try {
+                                                Invoke-WithFileBackup -Files $toSave -Action {
+                                                                Update-MasterDataStudents -MasterDataPath $MasterDataPath -SimDebtByName $SimDebtByName -FlagsByName $FlagsByName
+                                                                if ($writeTabs) { Export-StudentSyllabusTabs -Students $TabStudents -FilePath $OutputPath }
+                                                }
+                                                return $true
+                                }
+                                catch {
+                                                Write-Warning "This change could not be saved, so it is only kept for this run (Export writes it): $($_.Exception.Message)"
                                                 return $false
                                 }
                 }
-
-                try {
-                                Invoke-WithFileBackup -Files $toSave -Action {
-                                                Update-MasterDataStudents -MasterDataPath $MasterDataPath -SimDebtByName $SimDebtByName -FlagsByName $FlagsByName
-                                                if ($writeTabs) { Export-StudentSyllabusTabs -Students $TabStudents -FilePath $OutputPath }
-                                }
-                                return $true
-                }
-                catch {
-                                Write-Warning "This change could not be saved, so it is only kept for this run (Export writes it): $($_.Exception.Message)"
-                                return $false
+                finally {
+                                if ($closed.Count -gt 0) { Open-FaisWorkbooks -Path $closed.ToArray() }
                 }
 }
 
@@ -331,7 +338,7 @@ function Invoke-PreRunMenu {
                 if ($null -eq $LockedPrompt) {
                                 $LockedPrompt = {
                                                 param($path)
-                                                $answer = [System.Windows.Forms.MessageBox]::Show("$path is open (probably in Excel).`n`nClose it, then press OK to try again.", 'File is open',
+                                                $answer = [System.Windows.Forms.MessageBox]::Show("$path is still open and FAIS could not close it (a cell may be in edit mode, or someone else has it open).`n`nClose it, then press OK to try again.", 'File is open',
                                                                 [System.Windows.Forms.MessageBoxButtons]::OKCancel, [System.Windows.Forms.MessageBoxIcon]::Warning)
                                                 return ($answer -eq [System.Windows.Forms.DialogResult]::OK)
                                 }

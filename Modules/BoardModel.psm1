@@ -7,8 +7,9 @@
 #        Set-BoardLineType / Set-BoardInstructor / Set-BoardPin / Clear-BoardPin / Move-BoardPin
 #        Set-BoardMission / Set-BoardLineField / Set-FormationPair / Unlink-ReturnLine
 # Typing: ConvertTo-BoardTime / Format-BoardTime / ConvertTo-BoardSortieType / ConvertFrom-QuickEntry
-# Engine: ConvertTo-ScheduleRows / ConvertFrom-ScheduleRows / Add-ScheduleSheetLines
-#         Get-FillOverlay / Test-BoardReadyToFill
+# Engine: ConvertTo-ScheduleRows / ConvertFrom-ScheduleRows / Get-FillOverlay / Test-BoardReadyToFill
+# One day at a time: Resolve-SheetRowDays / ConvertFrom-SheetRows / Import-BoardDayLines / Get-BoardSheetState / Get-SheetBannerInfo
+#         Set-BoardSheetSync / ConvertFrom-PublishedRows / Get-PublishedContextRows / Split-FillResult
 # Files:  Save-BoardState / Open-BoardState / Get-SavedBoardDays
 #         Save-BoardTemplate / Get-BoardTemplateList / Import-BoardTemplate / Copy-BoardPreviousDay
 # Get-NextFlyingDay
@@ -47,6 +48,9 @@ function New-Board {
                                 Version       = 0
                                 Undo          = (New-Object System.Collections.Generic.List[string])
                                 Settings      = $s
+                                # Day -> what MasterData's Schedule sheet held for that day when it was last loaded
+                                # or ignored: {Fingerprint; Action 'Loaded'|'Ignored'; At}
+                                SheetSync     = @{}
                 }
 }
 
@@ -142,6 +146,7 @@ function ConvertTo-BoardSnapshot {
                 $dto = [PSCustomObject]@{
                                 Days  = $Board.Days.ToArray()
                                 Lines = @(foreach ($l in $Board.Lines) { ConvertTo-LineDto $l })
+                                Sync  = @(foreach ($d in @(Get-BoardSheetSyncDays $Board)) { [ordered]@{ Day = $d; Entry = $Board.SheetSync[$d] } })
                 }
                 return (ConvertTo-Json -InputObject $dto -Depth 6 -Compress)
 }
@@ -154,6 +159,30 @@ function Restore-BoardSnapshot {
                 foreach ($d in @($dto.Days)) { if ($d) { $Board.Days.Add([string]$d) } }
                 $Board.Lines.Clear()
                 foreach ($l in @($dto.Lines)) { if ($null -ne $l) { $Board.Lines.Add((ConvertFrom-LineDto $l)) } }
+                if ($null -ne $Board.PSObject.Properties['SheetSync']) {
+                                $Board.SheetSync = @{}
+                                foreach ($e in @($dto.Sync)) { if ($null -ne $e -and $e.Day) { $Board.SheetSync[[string]$e.Day] = ConvertTo-SheetSyncEntry $e.Entry } }
+                }
+}
+
+# Days with a sheet sync record, in order (empty for boards made before sync existed)
+function Get-BoardSheetSyncDays {
+                param ($Board)
+
+                if ($null -eq $Board.PSObject.Properties['SheetSync'] -or $null -eq $Board.SheetSync) { return @() }
+                return @($Board.SheetSync.Keys | Sort-Object)
+}
+
+function ConvertTo-SheetSyncEntry {
+                param ($Entry)
+
+                if ($null -eq $Entry) { return $null }
+                return [PSCustomObject]@{
+                                Fingerprint      = [string]$Entry.Fingerprint
+                                Action           = [string]$Entry.Action
+                                At               = [string]$Entry.At
+                                BoardFingerprint = [string](Get-OptionalProperty $Entry 'BoardFingerprint' '')
+                }
 }
 
 function Save-BoardUndoPoint {
@@ -204,6 +233,7 @@ function Remove-BoardDay {
                 if (-not $Board.Days.Contains($Day)) { return }
                 Save-BoardUndoPoint $Board
                 [void]$Board.Days.Remove($Day)
+                if (@(Get-BoardSheetSyncDays $Board) -contains $Day) { $Board.SheetSync.Remove($Day) }
                 $keep = @($Board.Lines | Where-Object { $_.Day -ne $Day })
                 $Board.Lines.Clear()
                 foreach ($l in $keep) { $Board.Lines.Add($l) }
@@ -778,42 +808,6 @@ function ConvertFrom-ScheduleRows {
                 return $lines.ToArray()
 }
 
-# Puts the MasterData Schedule sheet on the board when it opens (students stay hardcoded).
-# Only days on/after -FromDate that have no lines yet are loaded, so a saved board is never
-# doubled up and a past day is never re-planned. No undo step: it is the board's starting state.
-# Returns {Lines; Days; Pending}. Pending are the rows left off (day already has lines, or
-# before -FromDate); the Import Schedule sheet button can still add them.
-function Add-ScheduleSheetLines {
-                param (
-                                $Board,
-                                [array]$Rows,
-                                [datetime]$FromDate
-                )
-
-                $busy = @{}
-                foreach ($l in $Board.Lines) { $busy[[string]$l.Day] = $true }
-                $take = New-Object System.Collections.Generic.List[object]
-                $pending = New-Object System.Collections.Generic.List[object]
-                foreach ($r in @($Rows)) {
-                                if ($null -eq $r) { continue }
-                                $etd = Parse-ETD $r.ETD
-                                if ($null -eq $etd) { continue }
-                                if ($etd.Date -lt $FromDate.Date -or $busy.ContainsKey($etd.ToString('yyyy-MM-dd'))) { $pending.Add($r) }
-                                else { $take.Add($r) }
-                }
-
-                $lines = @()
-                if ($take.Count -gt 0) {
-                                $lines = @(ConvertFrom-ScheduleRows -Rows $take.ToArray() -Source 'Imported' -KeepStudents -KeepNotes)
-                                if ($lines.Count -gt 0) { Add-BoardLine -Board $Board -Line $lines -NoUndo }
-                }
-                return [PSCustomObject]@{
-                                Lines   = $lines.Count
-                                Days    = @($lines | ForEach-Object { $_.Day } | Sort-Object -Unique)
-                                Pending = $pending.ToArray()
-                }
-}
-
 # What the fill put on each board line: lineId -> {Student, Mission, FilledBy, Notes, Callsign, Num, Instructor}
 function Get-FillOverlay {
                 param ($FillResult)
@@ -837,18 +831,22 @@ function Get-FillOverlay {
 }
 
 # Things worth a second look before filling. Returns a list of strings.
+# -Days limits the checks to the days being filled (default: every board day).
 function Test-BoardReadyToFill {
                 param (
                                 $Board,
                                 [array]$Students = @(),
-                                [array]$Instructors = @()
+                                [array]$Instructors = @(),
+                                [string[]]$Days = @()
                 )
 
                 $w = New-Object System.Collections.Generic.List[string]
                 if ($Board.Lines.Count -eq 0) { $w.Add('There are no lines on the board.'); return $w.ToArray() }
+                $checkDays = if ($Days.Count -gt 0) { $Days } else { @($Board.Days) }
 
                 $seen = @{}
                 foreach ($l in (Get-BoardDayLines -Board $Board -Day '')) {
+                                if ($checkDays -notcontains $l.Day) { continue }
                                 $label = "$($l.ETD.ToString('ddd HHmm')) $($l.SortieType)"
                                 $isSim = Test-IsSimSortieType ([string]$l.SortieType)
                                 if (-not $isSim -and [string]::IsNullOrWhiteSpace($l.Instructor)) { $w.Add("$label has no IP (it will be NEED IP)") }
@@ -861,10 +859,345 @@ function Test-BoardReadyToFill {
                                                 $seen[$key] = $true
                                 }
                 }
-                foreach ($d in $Board.Days) {
+                foreach ($d in $checkDays) {
                                 if (@($Board.Lines | Where-Object { $_.Day -eq $d }).Count -eq 0) { $w.Add("$d has no lines") }
                 }
                 return $w.ToArray()
+}
+
+
+# =================================================================================
+#  ONE DAY AT A TIME
+#  A day can be loaded from MasterData's Schedule sheet or from the last exported
+#  schedule (OutputSchedule's MasterSchedule), filled on its own and exported on its own.
+#  Exported days the fill does not touch go in as fixed context so nobody is double-booked.
+# =================================================================================
+
+function Format-BoardDayLabel {
+                param ([string]$Day)
+
+                if ([string]::IsNullOrWhiteSpace($Day)) { return 'no date' }
+                return ([datetime]::ParseExact($Day, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)).ToString('ddd dd MMM')
+}
+
+# Sheet rows that have a time but no date belong to the day being built (-DefaultDay, the
+# board's first day). Returns copies of those rows dated that day; dated rows are unchanged.
+function Resolve-SheetRowDays {
+                param ([array]$Rows = @(), [string]$DefaultDay = '')
+
+                return @(foreach ($r in $Rows) {
+                                if ($null -eq $r) { continue }
+                                if ([string]$r.Day -ne '' -or $DefaultDay -eq '') { $r; continue }
+                                $c = $r.PSObject.Copy()
+                                $c.Day = $DefaultDay
+                                $c.ETD = "$DefaultDay $($r.Time):00"
+                                $c
+                })
+}
+
+# The Schedule sheet's lines for one day as board lines (Read-ScheduleSheet rows).
+# -FromDay takes another day's rows ('' = the rows with no date) and puts them on -Day.
+# -IncludeTimeOnly also adds the rows that have no date. -KeepStudents hardcodes the
+# students (and missions) the sheet names.
+function ConvertFrom-SheetRows {
+                param (
+                                [array]$Rows = @(),
+                                [Parameter(Mandatory)] [string]$Day,
+                                [AllowEmptyString()] [string]$FromDay,
+                                [switch]$IncludeTimeOnly,
+                                [switch]$KeepStudents,
+                                [switch]$KeepNotes
+                )
+
+                if (-not $PSBoundParameters.ContainsKey('FromDay')) { $FromDay = $Day }
+                $pick = @(foreach ($r in $Rows) {
+                                $match = if ($FromDay -eq '') { [bool]$r.TimeOnly -and [string]$r.Day -eq '' } else { [string]$r.Day -eq $FromDay }
+                                if (-not $match -and -not ($IncludeTimeOnly -and [string]$r.Day -eq '')) { continue }
+                                $c = $r.PSObject.Copy()
+                                $c.ETD = "$Day $($r.Time):00"
+                                $c
+                })
+                return @(ConvertFrom-ScheduleRows -Rows $pick -Source 'Sheet' -KeepStudents:$KeepStudents -KeepNotes:$KeepNotes)
+}
+
+function New-SheetSyncEntry {
+                param ([string]$Fingerprint, [ValidateSet('Loaded', 'Ignored')] [string]$Action = 'Loaded', [string]$BoardFingerprint = '')
+
+                return [PSCustomObject]@{ Fingerprint = $Fingerprint; Action = $Action; At = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ss'); BoardFingerprint = $BoardFingerprint }
+}
+
+# A board day's lines as a short text that changes with any edit to them (times, types, IPs,
+# students, missions, callsigns, notes, O&B and wing links). Line ids do not count.
+function Get-BoardDayFingerprint {
+                param ($Board, [string]$Day)
+
+                $parts = foreach ($l in (Get-BoardDayLines -Board $Board -Day $Day)) {
+                                $link = ''; $wing = ''
+                                if ($l.LinkedLineId) { $o = Get-BoardLine $Board $l.LinkedLineId; $link = if ($null -ne $o) { $o.ETD.ToString('HHmm') } else { '?' } }
+                                if ($l.WingOfLineId) { $o = Get-BoardLine $Board $l.WingOfLineId; $wing = if ($null -ne $o) { $o.ETD.ToString('HHmm') + [string]$o.Student } else { '?' } }
+                                (@($l.ETD.ToString('HHmm'), $l.SortieType, $l.Instructor, $l.Student, $l.Mission, $l.Callsign, $l.Num, $l.Notes, $link, $wing) | ForEach-Object { ([string]$_).Trim() }) -join '|'
+                }
+                return (Get-FaisFingerprint -Parts @($parts))
+}
+
+# Records what the sheet held for a day when the user loaded it or chose to keep the board's lines
+function Set-BoardSheetSync {
+                param ($Board, [Parameter(Mandatory)] [string]$Day, $Entry)
+
+                if ($null -eq $Board.PSObject.Properties['SheetSync']) { $Board | Add-Member -MemberType NoteProperty -Name 'SheetSync' -Value @{} }
+                if ($null -eq $Entry) { $Board.SheetSync.Remove($Day) } else { $Board.SheetSync[$Day] = ConvertTo-SheetSyncEntry $Entry }
+}
+
+# Puts one day's lines on the board as one undo step. -Replace clears the day first.
+# -Sync records what the Schedule sheet held for that day. Returns {Added; Removed}.
+function Import-BoardDayLines {
+                param (
+                                $Board,
+                                [Parameter(Mandatory)] [string]$Day,
+                                [array]$Lines = @(),
+                                [switch]$Replace,
+                                $Sync
+                )
+
+                Save-BoardUndoPoint $Board
+                $removed = 0
+                if ($Replace) {
+                                $gone = @($Board.Lines | Where-Object { $_.Day -eq $Day } | ForEach-Object { $_.Id })
+                                foreach ($l in $Board.Lines.ToArray()) {
+                                                if ($gone -contains $l.Id) { [void]$Board.Lines.Remove($l); $removed++; continue }
+                                                if ($gone -contains $l.LinkedLineId) { $l.LinkedLineId = '' }
+                                                if ($gone -contains $l.WingOfLineId) { $l.WingOfLineId = '' }
+                                }
+                }
+                if (-not $Board.Days.Contains($Day)) { $Board.Days.Add($Day); $Board.Days.Sort() }
+                $added = 0
+                foreach ($l in $Lines) {
+                                if ($null -eq $l) { continue }
+                                if (-not $Board.Days.Contains($l.Day)) { $Board.Days.Add($l.Day); $Board.Days.Sort() }
+                                $Board.Lines.Add($l)
+                                $added++
+                }
+                if ($null -ne $Sync) {
+                                # Remember how the day looked right after loading, to tell later whether it was edited
+                                $entry = ConvertTo-SheetSyncEntry $Sync
+                                $entry.BoardFingerprint = Get-BoardDayFingerprint -Board $Board -Day $Day
+                                Set-BoardSheetSync -Board $Board -Day $Day -Entry $entry
+                }
+                Step-BoardVersion $Board
+                return [PSCustomObject]@{ Added = $added; Removed = $removed }
+}
+
+# How a board day stands against MasterData's Schedule sheet (Read-ScheduleSheet rows):
+#   NoSheetLines  the sheet has no dated lines for the day
+#   InSync        the board last loaded (or chose to keep its own lines over) exactly what the sheet has now
+#   EmptyDay      the board has no lines that day and the sheet does
+#   Outdated      the sheet changed since the day was loaded and nobody has touched the day on
+#                 the board since, so it can be updated without losing anything
+#   Changed       the sheet changed since the day was loaded or kept, and the board's day was edited
+#   New           the sheet has lines for a day the board built some other way
+# Returns {Day; State; SheetCount; BoardCount; Fingerprint}
+function Get-BoardSheetState {
+                param ($Board, [array]$SheetRows = @(), [Parameter(Mandatory)] [string]$Day)
+
+                $count = @($SheetRows | Where-Object { [string]$_.Day -eq $Day }).Count
+                $fp = Get-ScheduleDayFingerprint -Rows $SheetRows -Day $Day
+                $boardCount = @($Board.Lines | Where-Object { $_.Day -eq $Day }).Count
+                $entry = $null
+                if (@(Get-BoardSheetSyncDays $Board) -contains $Day) { $entry = $Board.SheetSync[$Day] }
+
+                $state = 'New'
+                if ($count -eq 0) { $state = 'NoSheetLines' }
+                elseif ($null -ne $entry -and [string]$entry.Fingerprint -eq $fp) { $state = 'InSync' }
+                elseif ($boardCount -eq 0) { $state = 'EmptyDay' }
+                elseif ($null -ne $entry -and $entry.Action -eq 'Loaded' -and $entry.BoardFingerprint -ne '' -and $entry.BoardFingerprint -eq (Get-BoardDayFingerprint -Board $Board -Day $Day)) { $state = 'Outdated' }
+                elseif ($null -ne $entry) { $state = 'Changed' }
+                return [PSCustomObject]@{ Day = $Day; State = $state; SheetCount = $count; BoardCount = $boardCount; Fingerprint = $fp }
+}
+
+# The one thing about the Schedule sheet worth telling the user, or $null. First a board day
+# (the active one first) whose sheet lines changed or were never loaded, else a later day the
+# sheet has lines for that is not on the board yet. -Ignore holds 'day|fingerprint' keys of
+# later days the user already waved off.
+# Returns {Day; State; Count; Fingerprint; Text; ActionText}
+function Get-SheetBannerInfo {
+                param ($Board, [array]$SheetRows = @(), [string]$ActiveDay = '', [string[]]$Ignore = @())
+
+                if (@($SheetRows).Count -eq 0) { return $null }
+                $days = @($Board.Days)
+                if ($ActiveDay -and $days -contains $ActiveDay) { $days = @($ActiveDay) + @($days | Where-Object { $_ -ne $ActiveDay }) }
+                foreach ($d in $days) {
+                                $st = Get-BoardSheetState -Board $Board -SheetRows $SheetRows -Day $d
+                                $label = Format-BoardDayLabel $d
+                                $text = $null; $action = $null
+                                switch ($st.State) {
+                                                'Outdated' { $text = "MasterData's Schedule sheet changed for $label ($($st.SheetCount) line(s) there now)."; $action = "Update $label from the sheet" }
+                                                'Changed' { $text = "MasterData's Schedule sheet changed for $label since it was loaded, and the board's $label has been edited since ($($st.SheetCount) line(s) on the sheet now)."; $action = "Replace $label with the sheet" }
+                                                'New' { $text = "MasterData's Schedule sheet has $($st.SheetCount) line(s) for $label that are not on the board."; $action = "Load them (replaces $label)" }
+                                                'EmptyDay' { $text = "MasterData's Schedule sheet has $($st.SheetCount) line(s) for $label."; $action = "Load $label" }
+                                }
+                                if ($null -ne $text) {
+                                                return [PSCustomObject]@{ Day = $d; State = $st.State; Count = $st.SheetCount; Fingerprint = $st.Fingerprint; Text = $text; ActionText = $action }
+                                }
+                }
+                $first = if ($Board.Days.Count -gt 0) { [string]$Board.Days[0] } else { '' }
+                foreach ($g in @(Get-ScheduleSheetDays -Rows $SheetRows)) {
+                                if ($g.Day -eq '' -or $Board.Days.Contains($g.Day) -or ($first -ne '' -and $g.Day -lt $first)) { continue }
+                                $fp = Get-ScheduleDayFingerprint -Rows $SheetRows -Day $g.Day
+                                if ($Ignore -contains "$($g.Day)|$fp") { continue }
+                                $label = Format-BoardDayLabel $g.Day
+                                return [PSCustomObject]@{
+                                                Day         = $g.Day
+                                                State       = 'OtherDay'
+                                                Count       = $g.Count
+                                                Fingerprint = $fp
+                                                Text        = "MasterData's Schedule sheet also has $($g.Count) line(s) for $label."
+                                                ActionText  = "Add $label to the board"
+                                }
+                }
+                return $null
+}
+
+# Days the last exported MasterSchedule has lines for, in order
+function Get-PublishedDays {
+                param ([array]$Rows = @())
+
+                $days = foreach ($r in $Rows) { $d = Parse-ETD $r.ETD; if ($null -ne $d) { $d.ToString('yyyy-MM-dd') } }
+                return @($days | Sort-Object -Unique)
+}
+
+# Pairs each "Wingman to <lead>" line with its lead (same day, the lead's student) through
+# WingOfLineId. Works on board lines (-IdProperty Id) and engine rows (-IdProperty BoardLineId).
+function Set-WingLinksFromNotes {
+                param ([array]$Items = @(), [string]$IdProperty = 'Id')
+
+                foreach ($w in $Items) {
+                                if ([string]$w.Notes -notmatch '(?i)Wingman to (?<lead>[^|]+)') { continue }
+                                $leadName = $Matches['lead'].Trim()
+                                if (-not (Test-IsWingCapableType ([string]$w.SortieType))) { continue }
+                                $wd = Parse-ETD $w.ETD
+                                if ($null -eq $wd) { continue }
+                                foreach ($c in $Items) {
+                                                if ([string]$c.$IdProperty -eq [string]$w.$IdProperty -or (Get-NameText $c.Student) -ine $leadName) { continue }
+                                                $cd = Parse-ETD $c.ETD
+                                                if ($null -eq $cd -or $cd.Date -ne $wd.Date -or -not (Test-IsWingCapableType ([string]$c.SortieType))) { continue }
+                                                $w.WingOfLineId = [string]$c.$IdProperty
+                                                break
+                                }
+                }
+}
+
+# Text copies of exported rows for one day (they may carry student / IP / mission objects)
+function Get-PublishedDayRows {
+                param ([array]$Rows = @(), [string]$Day)
+
+                return @(foreach ($r in $Rows) {
+                                $d = Parse-ETD $r.ETD
+                                if ($null -eq $d -or ($Day -and $d.ToString('yyyy-MM-dd') -ne $Day)) { continue }
+                                [PSCustomObject]@{
+                                                ETD        = $d.ToString('yyyy-MM-dd HH:mm:ss')
+                                                Instructor = Get-NameText $r.Instructor
+                                                SortieType = [string]$r.SortieType
+                                                Student    = Get-NameText $r.Student
+                                                Mission    = Get-NameText $r.Mission
+                                                Callsign   = $r.Callsign
+                                                Num        = $r.Num
+                                                Notes      = [string]$r.Notes
+                                }
+                })
+}
+
+# One day of the last exported schedule as board lines with everyone kept where they were:
+# students and missions hardcoded, wingmen paired to their leads. For Sale and direct support
+# lines come back open. Notes and callsigns are left off; the next fill writes them again.
+# -TargetDay puts that day's lines on another day.
+function ConvertFrom-PublishedRows {
+                param ([array]$Rows = @(), [Parameter(Mandatory)] [string]$Day, [string]$TargetDay = '')
+
+                $lines = @(ConvertFrom-ScheduleRows -Rows (Get-PublishedDayRows -Rows $Rows -Day $Day) -Source 'Exported' -KeepStudents -KeepNotes -TargetDay $TargetDay)
+                Set-WingLinksFromNotes -Items $lines -IdProperty 'Id'
+                foreach ($l in $lines) { $l.Notes = ''; $l.Callsign = ''; $l.Num = '' }
+                return $lines
+}
+
+# The last exported schedule's lines for the days a fill does not touch (on/after -FromDay and
+# not in -ExcludeDays) as hardcoded engine rows. Filled together with the board's days they
+# keep every student's exported events where they are, so filling one day never double-books
+# a student or flies their events out of order. For Sale / direct support lines are left out;
+# return legs follow their O&B as usual.
+function Get-PublishedContextRows {
+                param ([array]$Rows = @(), [string]$FromDay = '', [string[]]$ExcludeDays = @())
+
+                $out = New-Object System.Collections.Generic.List[object]
+                $i = 0
+                foreach ($r in (Get-PublishedDayRows -Rows $Rows)) {
+                                $day = ([datetime]$r.ETD).ToString('yyyy-MM-dd')
+                                if (($FromDay -ne '' -and $day -lt $FromDay) -or $ExcludeDays -contains $day) { continue }
+                                $type = [string]$r.SortieType
+                                if ([string]::IsNullOrWhiteSpace($type)) { continue }
+                                $isReturn = Test-IsReturnSortieType $type
+                                if (-not $isReturn -and (Test-IsSentinelStudent $r.Student)) { continue }
+                                $i++
+                                $wingNote = $null
+                                if ($r.Notes -match '(?i)Wingman to [^|]+') { $wingNote = $Matches[0].Trim() }
+                                $out.Add([PSCustomObject]@{
+                                                ETD          = $r.ETD
+                                                Instructor   = $(if ($r.Instructor -eq '') { $null } else { $r.Instructor })
+                                                SortieType   = $type
+                                                Student      = $(if ($isReturn) { $null } else { $r.Student })
+                                                Mission      = $(if ($isReturn -or $r.Mission -eq '') { $null } else { $r.Mission })
+                                                Callsign     = $r.Callsign
+                                                Num          = $r.Num
+                                                Notes        = $wingNote
+                                                BoardLineId  = "pub$i"
+                                                LinkedLineId = $null
+                                                WingOfLineId = $null
+                                                FilledBy     = $null
+                                })
+                }
+                $context = $out.ToArray()
+                Set-WingLinksFromNotes -Items $context -IdProperty 'BoardLineId'
+                return $context
+}
+
+# A fill's lines split into the days that were filled and the exported days that only rode along
+# as context. Stats and overrides count the filled days only; overrides on context lines (an edit
+# that now breaks a day already exported) are kept as ContextOverrides.
+# Returns {Schedule; Context; Students; Overrides; ContextOverrides; Stats; Log; Days}
+function Split-FillResult {
+                param ($FillResult, [string[]]$Days = @())
+
+                $mine = New-Object System.Collections.Generic.List[object]
+                $ctx = New-Object System.Collections.Generic.List[object]
+                foreach ($r in @($FillResult.Schedule)) {
+                                $d = Parse-ETD $r.ETD
+                                $day = if ($null -ne $d) { $d.ToString('yyyy-MM-dd') } else { '' }
+                                if ($Days -contains $day) { $mine.Add($r) } else { $ctx.Add($r) }
+                }
+                $ids = @{}
+                foreach ($r in $mine) { $ids[[string]$r.BoardLineId] = $true }
+                $ov = @($FillResult.Overrides | Where-Object { $null -ne $_ -and $ids.ContainsKey([string]$_.LineId) })
+                $ctxOv = @($FillResult.Overrides | Where-Object { $null -ne $_ -and -not $ids.ContainsKey([string]$_.LineId) })
+                $stats = [ordered]@{ Lines = $mine.Count; Pinned = 0; Filled = 0; Wing = 0; Return = 0; DS = 0; ForSale = 0; Overrides = $ov.Count }
+                foreach ($r in $mine) {
+                                switch ([string]$r.FilledBy) {
+                                                'Pin' { $stats.Pinned++ }
+                                                'Engine' { $stats.Filled++ }
+                                                'Wing' { $stats.Wing++ }
+                                                'Return' { $stats.Return++ }
+                                                'DS' { $stats.DS++ }
+                                                'ForSale' { $stats.ForSale++ }
+                                }
+                }
+                return [PSCustomObject]@{
+                                Schedule         = $mine.ToArray()
+                                Context          = $ctx.ToArray()
+                                Students         = $FillResult.Students
+                                Overrides        = $ov
+                                ContextOverrides = $ctxOv
+                                Stats            = [PSCustomObject]$stats
+                                Log              = $FillResult.Log
+                                Days             = @($Days | Sort-Object)
+                }
 }
 
 
@@ -923,6 +1256,7 @@ function Save-BoardState {
                                                 SavedAt       = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ss')
                                                 Lines         = @(foreach ($l in (Get-BoardDayLines -Board $Board -Day $day)) { ConvertTo-LineDto $l })
                                 }
+                                if (@(Get-BoardSheetSyncDays $Board) -contains $day -and $null -ne $Board.SheetSync[$day]) { $dto.Sheet = $Board.SheetSync[$day] }
                                 Write-TextFileAtomic -Path (Join-Path $Dir "$day.json") -Text (ConvertTo-Json -InputObject $dto -Depth 6)
                 }
 }
@@ -930,12 +1264,24 @@ function Save-BoardState {
 function Read-BoardDayFile {
                 param ([string]$Path)
 
-                if (-not (Test-Path -LiteralPath $Path)) { return }
+                $dto = Read-BoardDayDto $Path
+                if ($null -eq $dto) { return }
+                return @(foreach ($l in @($dto.Lines)) { if ($null -ne $l) { ConvertFrom-LineDto $l } })
+}
+
+# A saved day file as read from disk ($null when missing or damaged)
+function Read-BoardDayDto {
+                param ([string]$Path)
+
+                if (-not (Test-Path -LiteralPath $Path)) { return $null }
                 try {
                                 $dto = ConvertFrom-Json ([System.IO.File]::ReadAllText($Path))
-                                return @(foreach ($l in @($dto.Lines)) { if ($null -ne $l) { ConvertFrom-LineDto $l } })
+                                # Check the lines read before handing the file back
+                                foreach ($l in @($dto.Lines)) { if ($null -ne $l) { [void](ConvertFrom-LineDto $l) } }
+                                return $dto
                 } catch {
                                 Write-Warning "Could not read saved board $Path : $($_.Exception.Message)"
+                                return $null
                 }
 }
 
@@ -957,7 +1303,10 @@ function Open-BoardState {
 
                 $board = New-Board -Days $Days -Settings $Settings
                 foreach ($day in $board.Days) {
-                                foreach ($l in @(Read-BoardDayFile (Join-Path $Dir "$day.json"))) { $board.Lines.Add($l) }
+                                $dto = Read-BoardDayDto (Join-Path $Dir "$day.json")
+                                if ($null -eq $dto) { continue }
+                                foreach ($l in @($dto.Lines)) { if ($null -ne $l) { $board.Lines.Add((ConvertFrom-LineDto $l)) } }
+                                if ($null -ne $dto.PSObject.Properties['Sheet'] -and $null -ne $dto.Sheet) { $board.SheetSync[$day] = ConvertTo-SheetSyncEntry $dto.Sheet }
                 }
                 return $board
 }

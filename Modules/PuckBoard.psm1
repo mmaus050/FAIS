@@ -13,8 +13,13 @@
 #    the current WPF event finishes, so rows are never rebuilt inside their own events.
 #  - Pinned students are re-checked in the background after every change (DispatcherTimer),
 #    which keeps the corner markers current without freezing the window.
+#  - MasterData's Schedule sheet is re-read whenever MasterData is saved (another timer watches
+#    the file). Board days nobody has edited since they were loaded update by themselves; for
+#    the rest a banner offers the change. "Load a day..." loads one day from the sheet or from
+#    the last exported schedule.
 
 $script:PB = $null
+$script:PBDlg = $null
 $script:PBKnownTags = @('IPPuck', 'StudentPuck', 'IPSlot', 'StudentSlot', 'IPPool', 'StudentPool', 'EtdBox', 'TypeBox',
                 'MissionBox', 'CallsignBox', 'NumBox', 'NotesBox', 'DeleteLine', 'Row')
 $script:PBCellTags = @('EtdBox', 'CallsignBox', 'NumBox', 'NotesBox')
@@ -53,10 +58,11 @@ function Initialize-PuckBoardAssemblies {
                 Add-Type -AssemblyName Microsoft.VisualBasic
 }
 
-# -Data:     @{ Students; Instructors; SoftWeights; Formations; PrevSchedule; ImportSchedule }
+# -Data:     @{ Students; Instructors; SoftWeights; Formations; PrevSchedule; ScheduleSheet; MasterDataPath; OutputPath }
+#            ScheduleSheet is a Read-ScheduleSheet result; PrevSchedule the last exported MasterSchedule.
 # -Days:     'yyyy-MM-dd' days to open (saved future boards are added automatically)
 # -Settings: BoardDir, TemplateDir, OBReturnOffsetMinutes, ReturnSortieType, SimInstructor, Trace
-# Returns @{ Action = 'Export'; Board; FillResult } or $null when closed without exporting.
+# Returns @{ Action = 'Export'; Board; FillResult; Days } or $null when closed without exporting.
 function Show-PuckBoard {
                 param (
                                 [Parameter(Mandatory)] $Data,
@@ -94,9 +100,6 @@ function Initialize-PuckBoardWindow {
                 $allDays = @(@($Days) + $savedDays | Sort-Object -Unique)
                 $board = Open-BoardState -Dir $set.BoardDir -Days $allDays -Settings $set
 
-                # The MasterData Schedule sheet loads by itself (days with no lines yet)
-                $sheet = Add-ScheduleSheetLines -Board $board -Rows @($Data.ImportSchedule) -FromDate $firstDate
-
                 # Events a previous run planned on these days are plans, not flown events
                 $reset = @(Reset-PlannedCompletions -Students $Data.Students -FromDate $firstDate -SoftWeights $Data.SoftWeights -PrevSchedule @($Data.PrevSchedule))
                 Clear-AssessmentCache
@@ -108,9 +111,10 @@ function Initialize-PuckBoardWindow {
 
                 $controls = @{}
                 foreach ($name in @('UndoButton', 'HelpButton', 'QuickEntryBox', 'AddLineButton', 'QuickEntryFeedback', 'TemplateCombo',
-                                'LoadTemplateButton', 'SaveTemplateButton', 'CopyPrevDayButton', 'ImportSheetButton', 'AddDayPicker', 'AddDayButton',
-                                'RemoveDayButton', 'CancelButton', 'BackToEditButton', 'RefillButton', 'ExportButton', 'FillButton', 'StatusText',
+                                'LoadTemplateButton', 'SaveTemplateButton', 'CopyPrevDayButton', 'LoadDayButton', 'AddDayPicker', 'AddDayButton',
+                                'RemoveDayButton', 'CancelButton', 'BackToEditButton', 'RefillButton', 'ExportButton', 'FillButton', 'FillDayOnlyCheck', 'StatusText',
                                 'CountsText', 'IPSearchBox', 'IPPool', 'StudentSearchBox', 'StudentPool', 'ModeBanner', 'ModeBannerText', 'DayTabs',
+                                'SheetBanner', 'SheetBannerText', 'SheetBannerLoadButton', 'SheetBannerIgnoreButton',
                                 'BusyOverlay', 'BusyText', 'BusyProgress', 'DropPopup', 'DropPopupPanel')) {
                                 $c = $window.FindName($name)
                                 if ($null -eq $c) { throw "PuckBoard.xaml is missing the element '$name'" }
@@ -142,22 +146,33 @@ function Initialize-PuckBoardWindow {
                                 HoverElement = $null
                                 TypeOptions = @('Day Local', 'O&B', [string]$set.ReturnSortieType, 'OFT', 'IFT')
                                 LastFocusDay = $firstDay
-                                ImportPending = @($sheet.Pending)
+                                FillDays    = @()
+                                SheetIgnore = (New-Object System.Collections.Generic.List[string])
+                                SheetBannerInfo = $null
+                                SheetStamp  = ''
+                                SheetPending = ''
+                                SheetAutoPending = $false
                 }
 
                 Initialize-PBTimers
                 Register-PBHandlers
-                $controls.ImportSheetButton.Visibility = if (@($sheet.Pending).Count -gt 0) { 'Visible' } else { 'Collapsed' }
                 $controls.AddDayPicker.SelectedDate = (Get-NextFlyingDay -From ([datetime]::ParseExact($board.Days[$board.Days.Count - 1], 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)))
                 Update-PBTemplateList
                 Set-PBMode 'Edit'
                 Update-PBAll
+                # A Schedule sheet problem never stops the board from opening
+                $sheetMsg = ''
+                try { $sheetMsg = Invoke-PBSheetStartup }
+                catch {
+                                Write-PBLog ("Schedule sheet at start: {0}`n{1}" -f $_.Exception.Message, $_.ScriptStackTrace)
+                                $sheetMsg = "Could not load MasterData's Schedule sheet ($($_.Exception.Message)). Use Load a day... to try again."
+                }
                 Start-PBAssessQueue
+                if (-not [string]::IsNullOrWhiteSpace([string]$Data.MasterDataPath)) { $script:PB.SheetTimer.Start() }
 
-                $msg = "Board opened for $(@($board.Days) -join ', ')."
-                if ($sheet.Lines -gt 0) { $msg += " Loaded $($sheet.Lines) line(s) from the Schedule sheet ($(@($sheet.Days) -join ', '))." }
-                if (@($sheet.Pending).Count -gt 0) { $msg += " $(@($sheet.Pending).Count) Schedule sheet row(s) were not loaded (their day already has lines, or is before $firstDay): Import Schedule sheet adds them." }
+                $msg = "Board opened for $(@($board.Days | ForEach-Object { Format-BoardDayLabel $_ }) -join ', ')."
                 if ($reset.Count -gt 0) { $msg += " Cleared planned events on/after $firstDay for $($reset.Count) student(s) so they can be rescheduled." }
+                if ($sheetMsg) { $msg += " $sheetMsg" }
                 Set-PBStatus $msg
                 return $window
 }
@@ -347,10 +362,16 @@ function Initialize-PBTimers {
                 $heat.Add_Tick({ Invoke-PBSafe { Invoke-PBHeatTick } })
                 $script:PB.HeatTimer = $heat
 
+                # Watches MasterData so a save in Excel shows up on the board
+                $sheet = New-Object System.Windows.Threading.DispatcherTimer
+                $sheet.Interval = [TimeSpan]::FromSeconds(2)
+                $sheet.Add_Tick({ Invoke-PBSafe { Invoke-PBSheetTick } })
+                $script:PB.SheetTimer = $sheet
+
                 $w.Add_Closing({
                                 param($s, $e)
                                 Invoke-PBSafe {
-                                                foreach ($t in @($script:PB.AssessTimer, $script:PB.SaveTimer, $script:PB.PopupTimer, $script:PB.HeatTimer)) { $t.Stop() }
+                                                foreach ($t in @($script:PB.AssessTimer, $script:PB.SaveTimer, $script:PB.PopupTimer, $script:PB.HeatTimer, $script:PB.SheetTimer)) { $t.Stop() }
                                                 Save-PBBoard
                                 }
                 })
@@ -388,11 +409,15 @@ function Register-PBHandlers {
                 $C.LoadTemplateButton.Add_Click({ Invoke-PBSafe { Invoke-PBLoadTemplate } })
                 $C.SaveTemplateButton.Add_Click({ Invoke-PBSafe { Invoke-PBSaveTemplate } })
                 $C.CopyPrevDayButton.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'CopyPrevDay' } } })
-                $C.ImportSheetButton.Add_Click({ Invoke-PBSafe { Invoke-PBImportSheet } })
+                $C.LoadDayButton.Add_Click({ Invoke-PBSafe { Invoke-PBLoadDayDialog } })
+                $C.SheetBannerLoadButton.Add_Click({ Invoke-PBSafe { Invoke-PBSheetBannerLoad } })
+                $C.SheetBannerIgnoreButton.Add_Click({ Invoke-PBSafe { Invoke-PBSheetBannerIgnore } })
+                $C.FillDayOnlyCheck.Add_Checked({ Invoke-PBSafe { Update-PBFillScope } })
+                $C.FillDayOnlyCheck.Add_Unchecked({ Invoke-PBSafe { Update-PBFillScope } })
                 $C.AddDayButton.Add_Click({ Invoke-PBSafe { Invoke-PBAddDay } })
                 $C.RemoveDayButton.Add_Click({ Invoke-PBSafe { Invoke-PBRemoveDay } })
                 $C.FillButton.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'Fill' } } })
-                $C.RefillButton.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'Fill' } } })
+                $C.RefillButton.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'Fill'; Refill = $true } } })
                 $C.BackToEditButton.Add_Click({ Invoke-PBSafe { Exit-PBReview; Update-PBAll; Set-PBStatus 'Back to editing. The fill was discarded.' } })
                 $C.ExportButton.Add_Click({ Invoke-PBSafe { Invoke-PBExport } })
                 $C.CancelButton.Add_Click({ Invoke-PBSafe { Invoke-PBCancel } })
@@ -480,6 +505,8 @@ function Update-PBAll {
                                 foreach ($day in $script:PB.Board.Days) { Update-PBDay $day }
                                 Update-PBPools
                                 Update-PBCounts
+                                Update-PBFillScope
+                                Update-PBSheetBanner
                 } finally { $script:PB.Busy = $false }
 }
 
@@ -791,7 +818,7 @@ function Update-PBCounts {
                 if ($script:PB.Queue.Count -gt 0) { $text += " | checking $($script:PB.Queue.Count)..." }
                 if ($script:PB.Mode -eq 'Review' -and $null -ne $script:PB.FillResult) {
                                 $st = $script:PB.FillResult.Stats
-                                $text += "   ||   Fill (all days): {0} auto, {1} wing, {2} return, {3} DS, {4} for sale, {5} override(s)" -f $st.Filled, $st.Wing, $st.Return, $st.DS, $st.ForSale, $st.Overrides
+                                $text += "   ||   Fill ({0}): {1} auto, {2} wing, {3} return, {4} DS, {5} for sale, {6} override(s)" -f (Format-PBDays @($script:PB.FillDays)), $st.Filled, $st.Wing, $st.Return, $st.DS, $st.ForSale, $st.Overrides
                 }
                 $script:PB.C.CountsText.Text = $text
 }
@@ -803,10 +830,12 @@ function Set-PBMode {
                 $script:PB.Mode = $Mode
                 $review = ($Mode -eq 'Review')
                 $C.FillButton.Visibility = if ($review) { 'Collapsed' } else { 'Visible' }
+                $C.FillDayOnlyCheck.Visibility = if ($review) { 'Collapsed' } else { 'Visible' }
                 foreach ($b in @($C.BackToEditButton, $C.RefillButton, $C.ExportButton)) { $b.Visibility = if ($review) { 'Visible' } else { 'Collapsed' } }
                 $C.ModeBanner.Visibility = if ($review) { 'Visible' } else { 'Collapsed' }
                 if ($review) {
-                                $C.ModeBannerText.Text = 'REVIEW: italic blue = filled by the scheduler, green = hardcoded, red notes = OVERRIDE (hardcoded against a rule), red = For Sale. Export writes OutputSchedule.xlsx. Any change goes back to editing.'
+                                $scope = Format-PBDays @($script:PB.FillDays)
+                                $C.ModeBannerText.Text = "REVIEW ($scope): italic blue = filled by the scheduler, green = hardcoded, red notes = OVERRIDE (hardcoded against a rule), red = For Sale. Export writes $scope to OutputSchedule.xlsx; days already exported stay as they are. Any change goes back to editing."
                 }
 }
 
@@ -1178,6 +1207,8 @@ function Invoke-PBSelectionChanged {
                                 $script:PB.LastFocusDay = Get-PBActiveDay
                                 Update-PBPools
                                 Update-PBCounts
+                                Update-PBFillScope
+                                Update-PBSheetBanner
                                 return
                 }
                 $cb = $src -as [System.Windows.Controls.ComboBox]
@@ -1503,7 +1534,7 @@ function Invoke-PBCommand {
                                                 }
                                 }
                                 'CopyPrevDay' { Invoke-PBCopyPrevDay }
-                                'Fill' { Invoke-PBFill }
+                                'Fill' { Invoke-PBFill -Refill:([bool]$Cmd.Refill) }
                 }
 }
 
@@ -1577,29 +1608,22 @@ function Invoke-PBCopyPrevDay {
                 else { Set-PBStatus "Copied $($res.Count) line(s) from $($res.Source). Students were not copied." 'Good' }
 }
 
-# The Schedule sheet rows the board didn't load by itself when it opened
-function Invoke-PBImportSheet {
-                $rows = @($script:PB.ImportPending)
-                if ($rows.Count -eq 0) { return }
-                $ans = [System.Windows.MessageBox]::Show("Add the $($rows.Count) Schedule sheet line(s) that weren't loaded when the board opened (their day already has lines, or is before the first board day)? Students on them stay hardcoded.",
-                                'Import Schedule sheet', [System.Windows.MessageBoxButton]::OKCancel, [System.Windows.MessageBoxImage]::Question)
-                if ($ans -ne [System.Windows.MessageBoxResult]::OK) { return }
-                $lines = @(ConvertFrom-ScheduleRows -Rows $rows -Source 'Imported' -KeepStudents -KeepNotes)
-                Invoke-PBChange { Add-BoardLine -Board $script:PB.Board -Line $lines } -Status "Imported $($lines.Count) line(s) from the Schedule sheet."
-                $script:PB.ImportPending = @()
-                $script:PB.C.ImportSheetButton.Visibility = 'Collapsed'
-                Reset-PBPlannedFromBoard
-}
-
 function Invoke-PBAddDay {
                 $date = $script:PB.C.AddDayPicker.SelectedDate
                 if ($null -eq $date) { Set-PBStatus 'Pick a date first.' 'Warn'; return }
                 $day = ([datetime]$date).ToString('yyyy-MM-dd')
                 Invoke-PBChange { [void](Add-BoardDay -Board $script:PB.Board -Day $day) }
                 Reset-PBPlannedFromBoard
-                foreach ($t in $script:PB.C.DayTabs.Items) { if ([string]$t.Tag -eq $day) { $script:PB.C.DayTabs.SelectedItem = $t } }
+                Select-PBDay $day
                 $script:PB.C.AddDayPicker.SelectedDate = (Get-NextFlyingDay -From ([datetime]$date))
-                Set-PBStatus "Added $day." 'Good'
+                # A new day the Schedule sheet has lines for comes with them
+                $msg = "Added $(Format-BoardDayLabel $day)."
+                $st = Get-BoardSheetState -Board $script:PB.Board -SheetRows @(Get-PBSheetRows) -Day $day
+                if ($st.State -eq 'EmptyDay') {
+                                $res = Invoke-PBLoadDay -Source 'Sheet' -SourceDay $day -TargetDay $day -Replace -KeepStudents -Quiet
+                                if ($null -ne $res) { $msg = "Added $(Format-BoardDayLabel $day) with its $($res.Added) line(s) from MasterData's Schedule sheet (Ctrl+Z takes them off)." }
+                }
+                Set-PBStatus $msg 'Good'
 }
 
 # A newly added earlier day: events planned on/after it are plans, not flown events
@@ -1642,10 +1666,21 @@ function Hide-BusyOverlay {
 
 # "Fill the rest of the lines": runs the scheduler on a copy of the students and shows
 # the result on the board for review. Nothing is written until Export.
+# With "Only this day" ticked only the day on screen is filled (and later exported). Days
+# already exported that are not being filled go in as fixed context, so nobody is
+# double-booked and their events stay in order. -Refill repeats the last fill's days.
 function Invoke-PBFill {
+                param ([switch]$Refill)
+
                 $board = $script:PB.Board
-                $warnings = @(Test-BoardReadyToFill -Board $board -Students $script:PB.Data.Students -Instructors $script:PB.Data.Instructors)
-                if ($board.Lines.Count -eq 0) { Set-PBStatus 'There are no lines to fill. Type some in the Add lines box.' 'Warn'; return }
+                if ($board.Lines.Count -eq 0) { Set-PBStatus 'There are no lines to fill. Type some in the Add lines box, or use Load a day...' 'Warn'; return }
+                $days = @(Get-PBFillScope)
+                if ($Refill -and @($script:PB.FillDays).Count -gt 0) {
+                                $again = @($script:PB.FillDays | Where-Object { $board.Days.Contains([string]$_) })
+                                if ($again.Count -gt 0) { $days = $again }
+                }
+                if (@($board.Lines | Where-Object { $days -contains $_.Day }).Count -eq 0) { Set-PBStatus "$(Format-PBDays $days) has no lines to fill." 'Warn'; return }
+                $warnings = @(Test-BoardReadyToFill -Board $board -Students $script:PB.Data.Students -Instructors $script:PB.Data.Instructors -Days $days)
                 if ($warnings.Count -gt 0) {
                                 $shown = @($warnings | Select-Object -First 15)
                                 $more = if ($warnings.Count -gt 15) { "`n...and $($warnings.Count - 15) more" } else { '' }
@@ -1658,7 +1693,9 @@ function Invoke-PBFill {
                 Show-BusyOverlay 'Filling the schedule...'
                 $script:PB.Filling = $true
                 try {
-                                $rows = @(ConvertTo-ScheduleRows -Board $board)
+                                $rows = @(ConvertTo-ScheduleRows -Board $board -Days $days)
+                                $context = @(Get-PublishedContextRows -Rows @($script:PB.Data.PrevSchedule) -FromDay ([string]$board.Days[0]) -ExcludeDays $days)
+                                $rows = @($rows) + @($context)
                                 $students = @(Copy-StudentList $script:PB.Data.Students)
                                 $progress = {
                                                 param($i, $n, $label)
@@ -1671,19 +1708,28 @@ function Invoke-PBFill {
                 }
                 finally { $script:PB.Filling = $false; Hide-BusyOverlay }
 
-                $script:PB.FillResult = $result
-                $script:PB.Overlay = Get-FillOverlay -FillResult $result
+                $split = Split-FillResult -FillResult $result -Days $days
+                $script:PB.FillDays = @($split.Days)
+                $script:PB.FillResult = $split
+                $script:PB.Overlay = Get-FillOverlay -FillResult $split
                 Set-PBMode 'Review'
                 Update-PBAll
-                $st = $result.Stats
+                $st = $split.Stats
                 $kind = if ($st.Overrides -gt 0 -or $st.ForSale -gt 0) { 'Warn' } else { 'Good' }
-                Set-PBStatus ("Filled: {0} by the scheduler, {1} hardcoded, {2} wing, {3} return legs, {4} for sale, {5} override flag(s). Check the board, then Export." -f $st.Filled, $st.Pinned, $st.Wing, $st.Return, $st.ForSale, $st.Overrides) $kind
+                $msg = "Filled {0}: {1} by the scheduler, {2} hardcoded, {3} wing, {4} return legs, {5} for sale, {6} override flag(s). Check the board, then Export." -f (Format-PBDays $days), $st.Filled, $st.Pinned, $st.Wing, $st.Return, $st.ForSale, $st.Overrides
+                $ctxOv = @($split.ContextOverrides)
+                if ($ctxOv.Count -gt 0) {
+                                $kind = 'Warn'
+                                $what = @($ctxOv | Select-Object -First 2 | ForEach-Object { "{0} {1}: {2}" -f (Format-EventLabel -Start $_.ETD -WithDay), $_.Student, (@($_.Violations) -join '; ') })
+                                $msg += " HEADS UP: $($ctxOv.Count) line(s) already exported on another day now break a rule ($($what -join ' | ')). Load and fill that day too."
+                }
+                Set-PBStatus $msg $kind
 }
 
 function Invoke-PBExport {
                 if ($script:PB.Mode -ne 'Review' -or $null -eq $script:PB.FillResult) { Set-PBStatus 'Fill the lines first.' 'Warn'; return }
                 Save-PBBoard
-                $script:PB.Result = [PSCustomObject]@{ Action = 'Export'; Board = $script:PB.Board; FillResult = $script:PB.FillResult }
+                $script:PB.Result = [PSCustomObject]@{ Action = 'Export'; Board = $script:PB.Board; FillResult = $script:PB.FillResult; Days = @($script:PB.FillDays) }
                 try { $script:PB.Window.DialogResult = $true } catch { $script:PB.Window.Close() }
 }
 
@@ -1708,6 +1754,16 @@ ADDING LINES (box at the top, press Enter)
   Several at once:        0730 DL, 0745 DL, 0800 DL
 Templates save a day's times; "Copy previous day's lines" copies the last flying day.
 
+ONE DAY AT A TIME
+  Load a day...           Loads one day from MasterData's Schedule sheet, or from the schedule
+                          you last exported (to change a day already sent out: everyone stays
+                          where they were, so a fill only changes the lines you open up).
+  MasterData is watched:  save the Schedule sheet in Excel and the board follows: a day you have
+                          not edited since it was loaded (or that is still empty) updates by
+                          itself; for a day you have edited, the blue banner offers the change.
+  Only this day           Tick it to fill and export just the day on screen. Days already
+                          exported stay exactly as they were.
+
 PUCKS
   Drag an IP puck onto a line's IP slot, a student puck onto a line's student slot.
   Drag between lines to move (hold Ctrl to copy). Drop back on a pool to take it off.
@@ -1728,8 +1784,390 @@ KEYS
 FILL
   "Fill the rest of the lines" schedules every open line like before. Review the result,
   then Export (writes OutputSchedule.xlsx), Re-fill, or go Back to edit.
+  Excel files FAIS writes are saved and closed for you first, and opened again afterwards.
 "@
                 [void][System.Windows.MessageBox]::Show($text, 'FAIS Puck Board help', [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+}
+
+
+# =================================================================================
+#  ONE DAY AT A TIME
+#  "Load a day..." puts one day on the board from MasterData's Schedule sheet or from the
+#  last exported schedule. The sheet is re-read whenever MasterData is saved, and the
+#  banner offers any day the board is behind on. "Only this day" fills and exports one day.
+# =================================================================================
+
+function Select-PBDay {
+                param ([string]$Day)
+
+                foreach ($t in $script:PB.C.DayTabs.Items) { if ([string]$t.Tag -eq $Day) { $script:PB.C.DayTabs.SelectedItem = $t } }
+}
+
+# "Tue 20 Oct" for one day, "Tue 20 Oct - Thu 22 Oct (3 days)" for several
+function Format-PBDays {
+                param ([string[]]$Days = @())
+
+                $list = @($Days | Where-Object { $_ } | Sort-Object -Unique)
+                if ($list.Count -eq 0) { return 'no days' }
+                if ($list.Count -eq 1) { return (Format-BoardDayLabel $list[0]) }
+                return ("{0} - {1} ({2} days)" -f (Format-BoardDayLabel $list[0]), (Format-BoardDayLabel $list[-1]), $list.Count)
+}
+
+# The days a fill covers: the day on screen with "Only this day" ticked, else every board day
+function Get-PBFillScope {
+                $active = Get-PBActiveDay
+                if ([bool]$script:PB.C.FillDayOnlyCheck.IsChecked -and $active) { return @([string]$active) }
+                return @($script:PB.Board.Days)
+}
+
+function Update-PBFillScope {
+                $C = $script:PB.C
+                $active = Get-PBActiveDay
+                $C.FillDayOnlyCheck.Content = if ($active) { "Only $(Format-BoardDayLabel $active)" } else { 'Only this day' }
+                $C.FillButton.Content = if ([bool]$C.FillDayOnlyCheck.IsChecked) { 'Fill this day' } else { 'Fill the rest of the lines' }
+}
+
+function Get-PBFileStamp {
+                param ([string]$Path)
+
+                try {
+                                $f = Get-Item -LiteralPath $Path -ErrorAction Stop
+                                return ('{0}|{1}' -f $f.LastWriteTimeUtc.Ticks, $f.Length)
+                } catch { return '' }
+}
+
+# MasterData's Schedule sheet rows as last read, with the rows that have a time but no
+# date put on the day being built (the board's first day)
+function Get-PBSheetRows {
+                $sheet = $script:PB.Data.ScheduleSheet
+                if ($null -eq $sheet) { return @() }
+                $first = if ($script:PB.Board.Days.Count -gt 0) { [string]$script:PB.Board.Days[0] } else { '' }
+                return @(Resolve-SheetRowDays -Rows @($sheet.Rows) -DefaultDay $first)
+}
+
+# Reads MasterData's Schedule sheet again. -SaveFirst saves MasterData in Excel first, so
+# edits not saved yet are read too. Returns the read; a good one replaces Data.ScheduleSheet.
+function Update-PBSheetRead {
+                param ([switch]$SaveFirst)
+
+                $path = [string]$script:PB.Data.MasterDataPath
+                if ([string]::IsNullOrWhiteSpace($path)) { return $script:PB.Data.ScheduleSheet }
+                if ($SaveFirst) {
+                                $saved = Save-FaisWorkbook -Path $path
+                                if ($saved.Message) { Write-PBLog $saved.Message }
+                }
+                $read = Read-ScheduleSheet -Path $path -ReturnType ([string]$script:PB.Settings.ReturnSortieType) -SimInstructor ([string]$script:PB.Settings.SimInstructor)
+                if (-not $read.Error) { $script:PB.Data.ScheduleSheet = $read }
+                $script:PB.SheetStamp = Get-PBFileStamp $path
+                return $read
+}
+
+# Reads the last exported MasterSchedule again (saving OutputSchedule in Excel first)
+function Update-PBPublishedRead {
+                $path = [string]$script:PB.Data.OutputPath
+                if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path)) { return }
+                $saved = Save-FaisWorkbook -Path $path
+                if ($saved.Message) { Write-PBLog $saved.Message }
+                $script:PB.Data.PrevSchedule = @(DownloadPrevSchedule -Students $script:PB.Data.Students -Instructors $script:PB.Data.Instructors -excelOutputPath $path)
+}
+
+# Loads the sheet onto the board days that can take it without losing anything: days still
+# empty, and days nobody has edited since they were loaded. Returns 'Tue 20 Oct (14 line(s))'
+# for each day loaded.
+function Invoke-PBSheetAutoUpdate {
+                $done = New-Object System.Collections.Generic.List[string]
+                $rows = @(Get-PBSheetRows)
+                if ($rows.Count -eq 0) { return @() }
+                foreach ($day in @($script:PB.Board.Days)) {
+                                $st = Get-BoardSheetState -Board $script:PB.Board -SheetRows $rows -Day $day
+                                if ($st.State -ne 'EmptyDay' -and $st.State -ne 'Outdated') { continue }
+                                $res = Invoke-PBLoadDay -Source 'Sheet' -SourceDay $day -TargetDay $day -Replace -KeepStudents -Quiet -StayOnDay
+                                if ($null -ne $res) { $done.Add("$(Format-BoardDayLabel $day) ($($res.Added) line(s))") }
+                }
+                return $done.ToArray()
+}
+
+# When the board opens: re-read the sheet if MasterData was saved after it was read, bring the
+# days the board can safely take up to date, and let the banner show anything else.
+# Returns a short message for the status line ('' when nothing was loaded).
+function Invoke-PBSheetStartup {
+                $path = [string]$script:PB.Data.MasterDataPath
+                if ($path -and (Test-Path -LiteralPath $path)) {
+                                $sheet = $script:PB.Data.ScheduleSheet
+                                $readAt = if ($null -ne $sheet -and $null -ne $sheet.ReadAt) { [datetime]$sheet.ReadAt } else { [datetime]::MinValue }
+                                if ((Get-Item -LiteralPath $path).LastWriteTime -gt $readAt) { [void](Update-PBSheetRead) }
+                                else { $script:PB.SheetStamp = Get-PBFileStamp $path }
+                }
+                $loaded = @(Invoke-PBSheetAutoUpdate)
+                Update-PBSheetBanner
+                if ($loaded.Count -eq 0) { return '' }
+                return "Loaded $($loaded -join ', ') from MasterData's Schedule sheet (Ctrl+Z takes them off)."
+}
+
+# Every couple of seconds: once MasterData has been saved since it was last read (and the file
+# has stopped changing), read the Schedule sheet again, update the days that can safely take
+# it (in edit mode, and not while a row is being typed in), and refresh the banner
+function Invoke-PBSheetTick {
+                if ($script:PB.Busy -or $script:PB.Draining -or $script:PB.Filling) { return }
+                if ($null -ne $script:PB.Drag -and $script:PB.Drag.Active) { return }
+                $path = [string]$script:PB.Data.MasterDataPath
+                if ([string]::IsNullOrWhiteSpace($path)) { $script:PB.SheetTimer.Stop(); return }
+                $stamp = Get-PBFileStamp $path
+                if ($stamp -eq '' -or $stamp -eq $script:PB.SheetStamp) { $script:PB.SheetPending = '' }
+                elseif ($stamp -ne $script:PB.SheetPending) { $script:PB.SheetPending = $stamp; return }
+                else {
+                                $script:PB.SheetPending = ''
+                                $read = Update-PBSheetRead
+                                if ($read.Error) { Write-PBLog "Schedule sheet re-read failed: $($read.Error)"; return }
+                                $script:PB.SheetAutoPending = $true
+                                Update-PBSheetBanner
+                }
+                if (-not $script:PB.SheetAutoPending -or $script:PB.Mode -ne 'Edit' -or $null -ne (Get-PBFocusState)) { return }
+                $script:PB.SheetAutoPending = $false
+                $updated = @(Invoke-PBSheetAutoUpdate)
+                if ($updated.Count -gt 0) { Set-PBStatus "MasterData was saved: updated $($updated -join ', ') from the Schedule sheet. Ctrl+Z undoes." 'Good' }
+                elseif ($null -ne $script:PB.SheetBannerInfo) { Set-PBStatus "MasterData was saved. $($script:PB.SheetBannerInfo.Text)" 'Warn' }
+}
+
+# Shows or hides the banner about MasterData's Schedule sheet
+function Update-PBSheetBanner {
+                $C = $script:PB.C
+                $info = $null
+                try {
+                                $rows = @(Get-PBSheetRows)
+                                if ($rows.Count -gt 0) {
+                                                $info = Get-SheetBannerInfo -Board $script:PB.Board -SheetRows $rows -ActiveDay ([string](Get-PBActiveDay)) -Ignore $script:PB.SheetIgnore.ToArray()
+                                }
+                } catch { Write-PBLog "Sheet banner: $($_.Exception.Message)" }
+                $script:PB.SheetBannerInfo = $info
+                if ($null -eq $info) { $C.SheetBanner.Visibility = 'Collapsed'; return }
+                $C.SheetBannerText.Text = $info.Text
+                $C.SheetBannerLoadButton.Content = $info.ActionText
+                $C.SheetBannerIgnoreButton.Content = if ($info.State -eq 'OtherDay') { 'Not now' } else { "Keep the board's lines" }
+                $C.SheetBanner.Visibility = 'Visible'
+}
+
+function Invoke-PBSheetBannerLoad {
+                $info = $script:PB.SheetBannerInfo
+                if ($null -eq $info) { return }
+                [void](Invoke-PBLoadDay -Source 'Sheet' -SourceDay $info.Day -TargetDay $info.Day -Replace -KeepStudents)
+}
+
+function Invoke-PBSheetBannerIgnore {
+                $info = $script:PB.SheetBannerInfo
+                if ($null -eq $info) { return }
+                if ($info.State -eq 'OtherDay') { $script:PB.SheetIgnore.Add("$($info.Day)|$($info.Fingerprint)") }
+                else {
+                                Set-BoardSheetSync -Board $script:PB.Board -Day $info.Day -Entry (New-SheetSyncEntry -Fingerprint $info.Fingerprint -Action 'Ignored')
+                                Request-PBAutosave
+                }
+                Update-PBSheetBanner
+                Set-PBStatus "Kept the board's lines for $(Format-BoardDayLabel $info.Day). You will be asked again if the Schedule sheet changes."
+}
+
+# Puts one day's lines on the board (one undo step) from MasterData's Schedule sheet
+# (-Source Sheet) or from the last exported schedule (-Source Exported).
+# -SourceDay is the day taken ('' = sheet rows with no date), -TargetDay where they go.
+# Returns {Added; Removed; Students; Day}, or $null when there was nothing to load.
+function Invoke-PBLoadDay {
+                param (
+                                [ValidateSet('Sheet', 'Exported')] [string]$Source = 'Sheet',
+                                [AllowEmptyString()] [string]$SourceDay = '',
+                                [Parameter(Mandatory)] [string]$TargetDay,
+                                [switch]$Replace,
+                                [switch]$KeepStudents,
+                                [switch]$Quiet,
+                                [switch]$StayOnDay
+                )
+
+                $board = $script:PB.Board
+                $sync = $null
+                if ($Source -eq 'Sheet') {
+                                $rows = @(Get-PBSheetRows)
+                                $lines = @(ConvertFrom-SheetRows -Rows $rows -Day $TargetDay -FromDay $SourceDay -KeepStudents:$KeepStudents -KeepNotes)
+                                if ($SourceDay -eq $TargetDay) { $sync = New-SheetSyncEntry -Fingerprint (Get-ScheduleDayFingerprint -Rows $rows -Day $TargetDay) }
+                                $from = "MasterData's Schedule sheet"
+                }
+                else {
+                                $moveTo = if ($TargetDay -ne $SourceDay) { $TargetDay } else { '' }
+                                $lines = @(ConvertFrom-PublishedRows -Rows @($script:PB.Data.PrevSchedule) -Day $SourceDay -TargetDay $moveTo)
+                                if (-not $KeepStudents) { foreach ($l in $lines) { $l.Student = ''; $l.Mission = ''; $l.WingOfLineId = '' } }
+                                $from = 'the last exported schedule'
+                }
+                if ($lines.Count -eq 0) {
+                                if (-not $Quiet) { Set-PBStatus "$from has no lines for $(Format-BoardDayLabel $SourceDay)." 'Warn' }
+                                return $null
+                }
+
+                $newDay = -not $board.Days.Contains($TargetDay)
+                $holder = @{ Res = $null }
+                Invoke-PBChange { $holder.Res = Import-BoardDayLines -Board $board -Day $TargetDay -Lines $lines -Replace:$Replace -Sync $sync }
+                if ($newDay) { Reset-PBPlannedFromBoard }
+                if (-not $StayOnDay) { Select-PBDay $TargetDay }
+                $res = $holder.Res
+                $pinned = @($lines | Where-Object { $_.Student }).Count
+                if (-not $Quiet) {
+                                $msg = "Loaded $($res.Added) line(s) onto $(Format-BoardDayLabel $TargetDay) from $from"
+                                if ($pinned -gt 0) { $msg += ", $pinned with students hardcoded" }
+                                if ($res.Removed -gt 0) { $msg += ", replacing $($res.Removed) line(s)" }
+                                $msg += '. Ctrl+Z undoes.'
+                                $kind = 'Good'
+                                if ($Source -eq 'Sheet' -and $null -ne $script:PB.Data.ScheduleSheet -and @($script:PB.Data.ScheduleSheet.Skipped).Count -gt 0) {
+                                                $msg += " $(@($script:PB.Data.ScheduleSheet.Skipped).Count) sheet row(s) could not be read (Load a day... lists them)."
+                                                $kind = 'Warn'
+                                }
+                                Set-PBStatus $msg $kind
+                }
+                return [PSCustomObject]@{ Added = $res.Added; Removed = $res.Removed; Students = $pinned; Day = $TargetDay }
+}
+
+# "Load a day...": pick where from and which day, then load it
+function Invoke-PBLoadDayDialog {
+                $choice = Show-PBLoadDayDialog
+                if ($null -eq $choice) { return }
+                [void](Invoke-PBLoadDay -Source $choice.Source -SourceDay $choice.SourceDay -TargetDay $choice.TargetDay -Replace:$choice.Replace -KeepStudents:$choice.KeepStudents)
+}
+
+function Show-PBLoadDayDialog {
+                $win = Initialize-PBLoadDayDialog
+                try { [void]$win.ShowDialog() } catch { Write-PBLog "Load a day dialog: $($_.Exception.Message)" }
+                $result = $script:PBDlg.Result
+                $script:PBDlg = $null
+                return $result
+}
+
+# Builds the Load a day window without showing it. Its state lives in $script:PBDlg.
+function Initialize-PBLoadDayDialog {
+                [xml]$xaml = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'LoadDayDialog.xaml') -Raw -Encoding UTF8
+                $win = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
+                $dlg = @{ Window = $win; Result = $null }
+                foreach ($n in @('SourceSheetRadio', 'SourceExportRadio', 'SourceInfoText', 'DayList', 'TargetDayPicker', 'TargetInfoText',
+                                'ReplaceRadio', 'AddRadio', 'KeepStudentsCheck', 'SkippedText', 'RefreshButton', 'LoadButton', 'CancelButton')) {
+                                $c = $win.FindName($n)
+                                if ($null -eq $c) { throw "LoadDayDialog.xaml is missing the element '$n'" }
+                                $dlg[$n] = $c
+                }
+                $script:PBDlg = $dlg
+                try { if ($script:PB.Window.IsVisible) { $win.Owner = $script:PB.Window } } catch { }
+                $dlg.SourceSheetRadio.Add_Checked({ Invoke-PBSafe { Update-PBDialogList } })
+                $dlg.SourceExportRadio.Add_Checked({ Invoke-PBSafe { Update-PBDialogList } })
+                $dlg.DayList.Add_SelectionChanged({ Invoke-PBSafe { Update-PBDialogTarget } })
+                $dlg.TargetDayPicker.Add_SelectedDateChanged({ Invoke-PBSafe { Update-PBDialogTargetInfo } })
+                $dlg.RefreshButton.Add_Click({ Invoke-PBSafe { Update-PBDialogList -Reread } })
+                $dlg.LoadButton.Add_Click({ Invoke-PBSafe { Submit-PBDialog } })
+                # The file may have changed since the board opened: read it fresh (saving it in Excel first)
+                Update-PBDialogList -Reread
+                return $win
+}
+
+function New-PBDialogItem {
+                param ([string]$Day, [int]$Count, [int]$Students)
+
+                $label = if ($Day -eq '') { 'No date' } else { ([datetime]::ParseExact($Day, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)).ToString('ddd dd MMM yyyy') }
+                $n = if ($Day -ne '') { @($script:PB.Board.Lines | Where-Object { $_.Day -eq $Day }).Count } else { 0 }
+                $where = if ($Day -ne '' -and $script:PB.Board.Days.Contains($Day)) { "on the board now: $n" } else { 'not on the board' }
+                return [PSCustomObject]@{ Day = $Day; Text = ('{0,-16} {1,3} line(s), {2,3} with students   ({3})' -f $label, $Count, $Students, $where) }
+}
+
+function Get-PBSheetInfoText {
+                param ($Sheet)
+
+                $path = [string]$script:PB.Data.MasterDataPath
+                if ($null -eq $Sheet) { return "MasterData's Schedule sheet has not been read ($path)." }
+                if ($Sheet.Error) { return [string]$Sheet.Error }
+                if (-not $Sheet.Found) { return "MasterData has no 'Schedule' sheet ($path). Add one with the columns ETD, Instructor, SortieType, Student, Mission, Callsign, Num, Notes (headings in any order)." }
+                $all = @($Sheet.Rows)
+                if ($all.Count -eq 0) { return "MasterData's Schedule sheet has no lines ($path)." }
+                $text = "Read at $($Sheet.ReadAt.ToString('HHmm')) from $path ($($Sheet.Layout))."
+                $noDate = @($all | Where-Object { $_.TimeOnly }).Count
+                if ($noDate -gt 0 -and $script:PB.Board.Days.Count -gt 0) { $text += " $noDate line(s) have a time but no date: they count as $(Format-BoardDayLabel $script:PB.Board.Days[0]) (the first day on the board)." }
+                return $text
+}
+
+# Fills the day list for the chosen source. -Reread reads the file again first.
+function Update-PBDialogList {
+                param ([switch]$Reread)
+
+                $dlg = $script:PBDlg
+                if ($null -eq $dlg) { return }
+                $items = New-Object System.Collections.Generic.List[object]
+                if ([bool]$dlg.SourceExportRadio.IsChecked) {
+                                if ($Reread) { Update-PBPublishedRead }
+                                $pub = @($script:PB.Data.PrevSchedule)
+                                foreach ($day in @(Get-PublishedDays -Rows $pub)) {
+                                                $dayRows = @(Get-PublishedDayRows -Rows $pub -Day $day)
+                                                $withSp = @($dayRows | Where-Object { -not (Test-IsSentinelStudent $_.Student) -and -not (Test-IsReturnSortieType ([string]$_.SortieType)) }).Count
+                                                $items.Add((New-PBDialogItem -Day $day -Count $dayRows.Count -Students $withSp))
+                                }
+                                $path = [string]$script:PB.Data.OutputPath
+                                $dlg.SourceInfoText.Text = if ($items.Count -gt 0) { "From $path. Use this to change a day already sent out: everyone stays where they were (hardcoded), so a fill only changes the lines you open up." } else { "No exported schedule was found ($path)." }
+                                $dlg.KeepStudentsCheck.Content = 'Keep the students and missions as exported (recommended)'
+                                $dlg.SkippedText.Text = ''
+                }
+                else {
+                                if ($Reread) { [void](Update-PBSheetRead -SaveFirst) }
+                                $sheet = $script:PB.Data.ScheduleSheet
+                                foreach ($g in @(Get-ScheduleSheetDays -Rows @(Get-PBSheetRows))) { $items.Add((New-PBDialogItem -Day $g.Day -Count $g.Count -Students $g.Students)) }
+                                $dlg.SourceInfoText.Text = Get-PBSheetInfoText $sheet
+                                $dlg.KeepStudentsCheck.Content = 'Keep the students and missions on the sheet (they go on as hardcoded)'
+                                $skipped = @()
+                                if ($null -ne $sheet) { $skipped = @($sheet.Skipped) }
+                                $dlg.SkippedText.Text = ''
+                                if ($skipped.Count -gt 0) {
+                                                $more = if ($skipped.Count -gt 6) { "; and $($skipped.Count - 6) more" } else { '' }
+                                                $dlg.SkippedText.Text = "Rows that could not be read: " + (@($skipped | Select-Object -First 6) -join '; ') + $more
+                                }
+                }
+                $dlg.DayList.ItemsSource = $items.ToArray()
+                # Start on the day on screen when the list has it, else the first day listed
+                $active = [string](Get-PBActiveDay)
+                $pick = $null
+                foreach ($it in $items) { if ($it.Day -eq $active) { $pick = $it } }
+                if ($null -eq $pick -and $items.Count -gt 0) { $pick = $items[0] }
+                $dlg.DayList.SelectedItem = $pick
+                Update-PBDialogTarget
+}
+
+function Update-PBDialogTarget {
+                $dlg = $script:PBDlg
+                if ($null -eq $dlg) { return }
+                $item = $dlg.DayList.SelectedItem
+                $day = if ($null -ne $item -and $item.Day) { [string]$item.Day } else { [string](Get-PBActiveDay) }
+                if ($day) { $dlg.TargetDayPicker.SelectedDate = [datetime]::ParseExact($day, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture) }
+                Update-PBDialogTargetInfo
+}
+
+function Update-PBDialogTargetInfo {
+                $dlg = $script:PBDlg
+                if ($null -eq $dlg) { return }
+                $date = $dlg.TargetDayPicker.SelectedDate
+                if ($null -eq $date) { $dlg.TargetInfoText.Text = ''; return }
+                $day = ([datetime]$date).ToString('yyyy-MM-dd')
+                $n = @($script:PB.Board.Lines | Where-Object { $_.Day -eq $day }).Count
+                $dlg.TargetInfoText.Text = if ($n -gt 0) { "has $n line(s) on the board now" } elseif ($script:PB.Board.Days.Contains($day)) { 'on the board, no lines yet' } else { 'adds this day to the board' }
+}
+
+function Submit-PBDialog {
+                $dlg = $script:PBDlg
+                if ($null -eq $dlg) { return }
+                $item = $dlg.DayList.SelectedItem
+                if ($null -eq $item) {
+                                [void][System.Windows.MessageBox]::Show('Pick a day in the list first.', 'Load a day', [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+                                return
+                }
+                $date = $dlg.TargetDayPicker.SelectedDate
+                if ($null -eq $date) {
+                                [void][System.Windows.MessageBox]::Show('Pick the day to put the lines on.', 'Load a day', [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+                                return
+                }
+                $dlg.Result = [PSCustomObject]@{
+                                Source       = $(if ([bool]$dlg.SourceExportRadio.IsChecked) { 'Exported' } else { 'Sheet' })
+                                SourceDay    = [string]$item.Day
+                                TargetDay    = ([datetime]$date).ToString('yyyy-MM-dd')
+                                Replace      = [bool]$dlg.ReplaceRadio.IsChecked
+                                KeepStudents = [bool]$dlg.KeepStudentsCheck.IsChecked
+                }
+                try { $dlg.Window.DialogResult = $true } catch { $dlg.Window.Close() }
 }
 
 
@@ -1858,10 +2296,70 @@ function Test-PuckBoardWindow {
                                 Save-PBBoard
                                 & $check (Test-Path -LiteralPath (Join-Path $script:PB.Settings.BoardDir "$Day.json")) 'board autosaved'
 
+                                $step = 'load a day from the Schedule sheet'
+                                $inv = [System.Globalization.CultureInfo]::InvariantCulture
+                                $day2 = (Get-NextFlyingDay -From ([datetime]::ParseExact($Day, 'yyyy-MM-dd', $inv))).ToString('yyyy-MM-dd')
+                                $ipName = [string]$Data.Instructors[0].Name
+                                $newSheetRow = {
+                                                param([string]$At, [string]$Type, [string]$IP, [string]$Student, [int]$Row)
+                                                [PSCustomObject]@{ ETD = "$day2 $($At):00"; Day = $day2; Time = $At; TimeOnly = $false; Instructor = $IP; SortieType = $Type
+                                                                Student = $(if ($Student) { $Student } else { $null }); Mission = $null; Callsign = $null; Num = $null; Notes = $null; SheetRow = $Row }
+                                }
+                                $sheetRows = @((& $newSheetRow '07:30' 'Day Local' $ipName ([string]$Data.Students[0].Name) 2), (& $newSheetRow '13:00' 'OFT' 'SIM IP' '' 3))
+                                $script:PB.Data.ScheduleSheet = [PSCustomObject]@{ Path = ''; Worksheet = 'Schedule'; Found = $true; Error = ''; Layout = 'test'; HeaderRow = 1; Rows = $sheetRows; Skipped = @(); ReadAt = (Get-Date) }
+                                Update-PBSheetBanner
+                                & $check ($script:PB.C.SheetBanner.Visibility -eq 'Visible' -and $script:PB.SheetBannerInfo.State -eq 'OtherDay') 'banner offers the sheet''s other day'
+                                Invoke-PBSheetBannerLoad
+                                Invoke-PBDoEvents
+                                & $check (@(Get-BoardDayLines -Board $script:PB.Board -Day $day2).Count -eq 2) 'sheet day loaded onto the board'
+                                & $check ((Get-PBActiveDay) -eq $day2) 'the loaded day is on screen'
+                                & $check ($script:PB.DayColls[$day2].Count -eq 2) 'rows on screen match the loaded lines'
+                                & $check ($script:PB.C.SheetBanner.Visibility -ne 'Visible') 'banner gone once the day is loaded'
+                                $edited = @($sheetRows | ForEach-Object { $_.PSObject.Copy() })
+                                $edited[1].Time = '13:30'; $edited[1].ETD = "$day2 13:30:00"
+                                $script:PB.Data.ScheduleSheet.Rows = $edited
+                                Update-PBSheetBanner
+                                & $check ($script:PB.SheetBannerInfo.State -eq 'Outdated') 'a sheet change on an untouched day is safe to apply'
+                                $updated = @(Invoke-PBSheetAutoUpdate)
+                                & $check ($updated.Count -eq 1 -and @(Get-BoardDayLines -Board $script:PB.Board -Day $day2 | Where-Object { $_.ETD.ToString('HHmm') -eq '1330' }).Count -eq 1) 'untouched day updated from the sheet by itself'
+                                $first2 = @(Get-BoardDayLines -Board $script:PB.Board -Day $day2)[0]
+                                Invoke-PBCommand @{ Cmd = 'SetField'; LineId = $first2.Id; Field = 'Notes'; Value = 'edited on the board' }
+                                $edited[0].Instructor = [string]$Data.Instructors[1].Name
+                                Update-PBSheetBanner
+                                & $check ($script:PB.SheetBannerInfo.State -eq 'Changed') 'banner asks before replacing an edited day'
+                                & $check (@(Invoke-PBSheetAutoUpdate).Count -eq 0) 'an edited day is never replaced by itself'
+                                Invoke-PBSheetBannerIgnore
+                                & $check ($script:PB.C.SheetBanner.Visibility -ne 'Visible') 'keeping the board''s lines hides the banner'
+
+                                $step = 'load a day dialog'
+                                [void](Initialize-PBLoadDayDialog)
+                                & $check (@($script:PBDlg.DayList.ItemsSource).Count -ge 1) 'dialog lists the sheet''s days'
+                                $script:PBDlg.SourceExportRadio.IsChecked = $true
+                                & $check ([string]$script:PBDlg.SourceInfoText.Text -ne '') 'dialog explains the exported source'
+                                $script:PBDlg.SourceSheetRadio.IsChecked = $true
+                                foreach ($it in @($script:PBDlg.DayList.ItemsSource)) { if ($it.Day -eq $day2) { $script:PBDlg.DayList.SelectedItem = $it } }
+                                Submit-PBDialog
+                                & $check ($null -ne $script:PBDlg.Result -and $script:PBDlg.Result.SourceDay -eq $day2 -and $script:PBDlg.Result.TargetDay -eq $day2) 'dialog returns the picked day'
+                                $script:PBDlg = $null
+
+                                $step = 'fill only this day'
+                                Select-PBDay $day2
+                                $script:PB.C.FillDayOnlyCheck.IsChecked = $true
+                                Invoke-PBDoEvents
+                                & $check ([string]$script:PB.C.FillButton.Content -eq 'Fill this day') 'fill button says it fills this day'
+                                Invoke-PBFill
+                                Invoke-PBDoEvents
+                                & $check ($script:PB.Mode -eq 'Review' -and (@($script:PB.FillDays) -join ',') -eq $day2) 'fill covered only the day on screen'
+                                & $check (@($script:PB.FillResult.Schedule | Where-Object { (Parse-ETD $_.ETD).ToString('yyyy-MM-dd') -ne $day2 }).Count -eq 0) 'fill result holds only that day'
+                                Exit-PBReview
+                                $script:PB.C.FillDayOnlyCheck.IsChecked = $false
+                                Update-PBAll
+
                                 $step = 'export'
                                 Invoke-PBFill
                                 Invoke-PBExport
                                 & $check ($null -ne $script:PB.Result -and $script:PB.Result.Action -eq 'Export') 'export returned the fill'
+                                & $check ((@($script:PB.Result.Days) -join ',') -eq (@($script:PB.Board.Days) -join ',')) 'export covers every day after a full fill'
                 }
                 catch {
                                 $problems.Add("[$step] Exception: $($_.Exception.Message) $($_.ScriptStackTrace)")

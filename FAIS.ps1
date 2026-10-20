@@ -2,12 +2,14 @@
 # cd C:\Users\1595161645A\Desktop\FAIS7.1
 #
 # Run order:
-#   1. Pre-run pop-ups: log hooked (unsat) / incomplete events from the last schedule (saved right away)
-#   2. Puck board: build the day's lines (the MasterData Schedule sheet loads by itself), hardcode IPs
-#      and students, see the + / - and rule flags
-#   3. "Fill the rest of the lines": the scheduler fills every open line, you review it
-#   4. Export, all or nothing: OutputSchedule.xlsx (MasterSchedule + each student's syllabus tab),
-#      SimDebt + cleaned-up unsats to MasterData, and ATIS.xlsx (one tab per day: flights, then sims)
+#   1. Open MasterData / OutputSchedule workbooks are saved in Excel so the latest edits are read
+#   2. Pre-run pop-ups: log hooked (unsat) / incomplete events from the last schedule (saved right away)
+#   3. Puck board: lines come from MasterData's Schedule sheet one day at a time (re-read whenever
+#      MasterData is saved), or are typed; hardcode IPs and students, see the + / - and rule flags
+#   4. "Fill the rest of the lines" (or only this day): the scheduler fills the open lines, you review it
+#   5. Export, all or nothing, for the filled days: OutputSchedule.xlsx (MasterSchedule, other exported
+#      days kept, + each student's syllabus tab), SimDebt + cleaned-up unsats to MasterData, and
+#      ATIS.xlsx (one tab per day: flights, then sims). Excel files are saved and closed first.
 #
 # -Trace prints every scheduling decision to the console.
 param (
@@ -65,10 +67,14 @@ $BoardSettings = @{
 
 # Output (the student tabs and MasterData are always written on Export)
 $OutputSettings = @{
-    WriteAtis        = $true                            # ATIS.xlsx on the Desktop: one tab per day, flights then sims
-    PublishToTeams   = $false                           # also write the daily sheets to the Teams / OneDrive workbook
-    TeamsFolder      = ''                               # e.g. C:\Users\...\OneDrive - United States Air Force\ATIS - E Flight - E Flight
-    TeamsFileName    = 'TESTING ATIS NOT OFFICIAL.xlsx'
+    WriteAtis              = $true                      # ATIS.xlsx on the Desktop: one tab per day, flights then sims
+    KeepPastDays           = 0                          # MasterSchedule keeps exported days from today on (plus this many days back)
+    SaveAndCloseExcel      = $true                      # save and close a workbook in Excel before FAIS writes it (no "file is open" errors)
+    ReopenExcel            = $true                      # open those workbooks again once FAIS has written them
+    CloseAllExcelWorkbooks = $false                     # $true = save and close EVERY open workbook before writing, not just FAIS's
+    PublishToTeams         = $false                     # also write the daily sheets to the Teams / OneDrive workbook
+    TeamsFolder            = ''                         # e.g. C:\Users\...\OneDrive - United States Air Force\ATIS - E Flight - E Flight
+    TeamsFileName          = 'TESTING ATIS NOT OFFICIAL.xlsx'
 }
 
 
@@ -85,7 +91,7 @@ catch {
 }
 
 # Order matters: later modules call earlier ones
-$ModuleOrder = @('DataManipulation', 'Syllabus', 'DataDownload', 'SchedulingEngine', 'DataUpload', 'PreRunMenu', 'BoardModel', 'Assessment', 'PuckBoard')
+$ModuleOrder = @('DataManipulation', 'ExcelFiles', 'Syllabus', 'DataDownload', 'SchedulingEngine', 'DataUpload', 'PreRunMenu', 'BoardModel', 'Assessment', 'PuckBoard')
 foreach ($moduleName in $ModuleOrder) {
     $modulePath = Join-Path $PSScriptRoot "Modules\$moduleName.psm1"
     try {
@@ -105,8 +111,16 @@ if (-not (Test-Path -LiteralPath $excelInputPath)) {
     Write-Host "MasterData.xlsx was not found at $excelInputPath" -ForegroundColor Red
     return
 }
+# Workbooks open in Excel are saved first, so edits not saved yet are read too
+[void](Close-FaisExcelFiles -Path @($excelInputPath, $excelOutputPath) -SaveOnly)
 $Ingested = IngestData -excelInputPath $excelInputPath -desktopPath $desktopPath -excelOutputPath $excelOutputPath
-$Schedule = $Ingested.Schedule
+if ($Ingested.OutputError) {
+    # Carrying on would start every student from the blank syllabus and overwrite their tabs on export
+    Write-Host "OutputSchedule.xlsx could not be opened, so the students' progress can't be read: $($Ingested.OutputError)" -ForegroundColor Red
+    Write-Host "Nothing was changed. Fix or close $excelOutputPath, then run FAIS again." -ForegroundColor Red
+    return
+}
+$ScheduleSheet = $Ingested.ScheduleSheet
 $Instructors = $Ingested.Instructors
 $Students = $Ingested.Students
 $Formations = $Ingested.Formations
@@ -141,7 +155,9 @@ $BoardData = @{
     SoftWeights    = $SoftWeights
     Formations     = $Formations
     PrevSchedule   = $PrevSchedule
-    ImportSchedule = $Schedule
+    ScheduleSheet  = $ScheduleSheet
+    MasterDataPath = $excelInputPath
+    OutputPath     = $excelOutputPath
 }
 $FirstDay = (Get-NextFlyingDay).ToString('yyyy-MM-dd')
 $BoardResult = Show-PuckBoard -Data $BoardData -Days @($FirstDay) -Settings $BoardSettings
@@ -163,14 +179,16 @@ if ($Trace) {
 # | |___| |___| |___ / ___ \| |\  |  / ___ \| |\  | |_| | | |_| | |_| | | | |  __/| |_| | | |
 #  \____|_____|_____/_/   \_\_| \_| /_/   \_\_| \_|____/   \___/ \___/  |_| |_|    \___/  |_|
 # ====================================================================================
+# Only shown when FAIS could not save and close the file itself (a cell still being edited,
+# a dialog open in Excel, or someone else has it open)
 $LockedPrompt = {
     param($path)
-    $answer = [System.Windows.MessageBox]::Show("$path is open (probably in Excel).`n`nClose it, then press OK to try again.", 'File is open',
+    $answer = [System.Windows.MessageBox]::Show("$path is still open and FAIS could not close it (a cell may be in edit mode, a dialog may be open in Excel, or someone else has it open).`n`nClose it, then press OK to try again.", 'File is open',
         [System.Windows.MessageBoxButton]::OKCancel, [System.Windows.MessageBoxImage]::Warning)
     return ($answer -eq [System.Windows.MessageBoxResult]::OK)
 }
 
-$Exported = Export-FaisOutput -FillResult $FillResult -OutputPath $excelOutputPath -MasterDataPath $excelInputPath -AtisPath $atisOutputPath -Settings $OutputSettings -LockedPrompt $LockedPrompt
+$Exported = Export-FaisOutput -FillResult $FillResult -OutputPath $excelOutputPath -MasterDataPath $excelInputPath -AtisPath $atisOutputPath -Settings $OutputSettings -LockedPrompt $LockedPrompt -Days @($BoardResult.Days)
 if (-not $Exported) {
     Write-Host "Nothing was written (OutputSchedule, MasterData and ATIS are as they were). Your board is saved; run FAIS again and Export once the files are closed." -ForegroundColor Red
     return
@@ -178,7 +196,7 @@ if (-not $Exported) {
 
 $Stats = $FillResult.Stats
 Write-Host ""
-Write-Host ("Schedule written to {0}" -f $excelOutputPath) -ForegroundColor Green
+Write-Host ("Schedule written to {0} ({1})" -f $excelOutputPath, (@($BoardResult.Days | ForEach-Object { Format-BoardDayLabel $_ }) -join ', ')) -ForegroundColor Green
 Write-Host ("  {0} lines: {1} hardcoded, {2} filled by the scheduler, {3} wingmen, {4} return legs, {5} direct support, {6} for sale" -f `
         $Stats.Lines, $Stats.Pinned, $Stats.Filled, $Stats.Wing, $Stats.Return, $Stats.DS, $Stats.ForSale) -ForegroundColor Green
 foreach ($o in $FillResult.Overrides) {

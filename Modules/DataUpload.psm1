@@ -1,12 +1,14 @@
 # DATAUPLOAD.PSM1 DIRECTORY:
 # Contains all functions that move data from the Program to an output destination
 # ConvertTo-ExportRows
+# Read-MasterScheduleRows / Merge-MasterScheduleRows (one day at a time: other days are kept)
 # Export-FormattedMasterSchedule / Apply-GroupBorders / Set-MasterScheduleFirst
 # Export-StudentSyllabusTabs / ConvertTo-SyllabusTabRow / Update-SyllabusTabCells / Format-TabEtd
 # Update-MasterDataStudents / Get-UnsatFlagUpdates
 # Export-AtisWorkbook (ATIS.xlsx, one tab per day)
-# Export-DailyScheduleSheets (Teams) / Get-DaySheetName / Get-SortieRowKey / Merge-DayRows
-# Test-FileWritable / Wait-FileWritable / Invoke-WithFileBackup / Export-FaisOutput
+# Export-DailyScheduleSheets (Teams) / Get-DaySheetName
+# Invoke-WithFileBackup / Export-FaisOutput
+# (Test-FileWritable / Wait-FileWritable and saving / closing workbooks in Excel live in ExcelFiles)
 
 
 # =================================================================================
@@ -31,6 +33,67 @@ function ConvertTo-ExportRows {
                                                 Notes      = [string]$s.Notes
                                 }
                 })
+}
+
+
+# ==========================================
+#      ONE DAY AT A TIME
+#      MasterSchedule holds every exported day from today on. Exporting replaces only
+#      the days that were filled, so a day can be updated without touching the others.
+# ==========================================
+
+# The rows already in OutputSchedule's MasterSchedule, as text (empty when there is none)
+function Read-MasterScheduleRows {
+                param ([string]$Path, [string]$WorksheetName = 'MasterSchedule')
+
+                $book = Open-FaisWorkbookForRead -Path $Path
+                try {
+                                if ($null -eq $book.Package) { return @() }
+                                $ws = $book.Package.Workbook.Worksheets[$WorksheetName]
+                                if ($null -eq $ws -or $null -eq $ws.Dimension -or $ws.Dimension.End.Row -lt 2) { return @() }
+                                $raw = @(Import-Excel -ExcelPackage $book.Package -WorksheetName $WorksheetName -ErrorAction Stop)
+                                return @(ConvertTo-ExportRows -Schedule @($raw | Where-Object { $null -ne (Parse-ETD $_.ETD) }))
+                } catch {
+                                Write-Warning "Could not read the existing $WorksheetName in $Path : $($_.Exception.Message)"
+                                return @()
+                } finally {
+                                Close-FaisWorkbookForRead $book
+                }
+}
+
+# Existing MasterSchedule rows with -Days replaced by -New. Rows from days before -KeepFromDay
+# ('yyyy-MM-dd') are dropped so the sheet does not grow for ever.
+function Merge-MasterScheduleRows {
+                param (
+                                [array]$Existing = @(),
+                                [array]$New = @(),
+                                [string[]]$Days = @(),
+                                [string]$KeepFromDay = ''
+                )
+
+                $kept = @(foreach ($r in $Existing) {
+                                $d = Parse-ETD $r.ETD
+                                if ($null -eq $d) { continue }
+                                $day = $d.ToString('yyyy-MM-dd')
+                                if ($Days -contains $day) { continue }
+                                if ($KeepFromDay -ne '' -and $day -lt $KeepFromDay) { continue }
+                                $r
+                })
+                return @(@($kept) + @($New) | Where-Object { $null -ne $_ })
+}
+
+# 'yyyy-MM-dd' of an export row ('' when its ETD is not a date)
+function Get-ExportRowDay {
+                param ($Row)
+
+                $d = Parse-ETD $Row.ETD
+                if ($null -eq $d) { return '' }
+                return $d.ToString('yyyy-MM-dd')
+}
+
+function Format-ExportDay {
+                param ([string]$Day)
+                return ([datetime]::ParseExact($Day, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)).ToString('ddd dd MMM')
 }
 
 
@@ -331,8 +394,9 @@ function Format-TabEtd {
 
 
 # ==========================================
-# Writes student values into the MasterData Students sheet, matched by SPName in column B:
-# SimDebt into column P, UnsatSim / UnsatFlight into the columns with those headings.
+# Writes student values into the MasterData Students sheet, matched by SPName (the column
+# headed SPName, else B): SimDebt into the column headed SimDebt (else P), UnsatSim /
+# UnsatFlight into the columns with those headings.
 # Only the cells passed in change. Throws when MasterData can't be written.
 #   -FlagsByName: name -> @{ UnsatSim = $true/$false; UnsatFlight = $true/$false } (either key)
 # ==========================================
@@ -352,16 +416,18 @@ function Update-MasterDataStudents {
                                 $ws = $package.Workbook.Worksheets["Students"]
                                 if ($null -eq $ws) { throw "Worksheet 'Students' not found in MasterData.xlsx" }
 
-                                # Column B = SPName, Column P = SimDebt
+                                # Columns by their headings (the ones IngestData reads); B = SPName and P = SimDebt
+                                # when those headings are missing
                                 $nameCol = 2
                                 $debtCol = 16
-
-                                # UnsatSim / UnsatFlight: the columns IngestData reads them from
                                 $flagCol = @{}
                                 $lastCol = if ($null -ne $ws.Dimension) { $ws.Dimension.End.Column } else { 0 }
+                                $seenName = $false; $seenDebt = $false
                                 for ($c = 1; $c -le $lastCol; $c++) {
                                                 $heading = ([string]$ws.Cells[1, $c].Value).Trim()
                                                 if ($heading -in @('UnsatSim', 'UnsatFlight') -and -not $flagCol.ContainsKey($heading)) { $flagCol[$heading] = $c }
+                                                elseif ($heading -ieq 'SPName' -and -not $seenName) { $nameCol = $c; $seenName = $true }
+                                                elseif ($heading -ieq 'SimDebt' -and -not $seenDebt) { $debtCol = $c; $seenDebt = $true }
                                 }
                                 foreach ($flags in $FlagsByName.Values) {
                                                 foreach ($key in $flags.Keys) {
@@ -392,9 +458,9 @@ function Update-MasterDataStudents {
 
                                 $missing = @(@($SimDebtByName.Keys) + @($FlagsByName.Keys) | Sort-Object -Unique | Where-Object { -not $found.ContainsKey($_) })
                                 if ($missing.Count -gt 0) {
-                                                Write-Warning "Not found in column B of the MasterData Students sheet (above the first blank name), so nothing was written for: $($missing -join '; ')"
+                                                Write-Warning "Not found in the SPName column of the MasterData Students sheet (above the first blank name), so nothing was written for: $($missing -join '; ')"
                                 }
-                                Write-Host ("MasterData updated: SimDebt (column P) for {0} student(s), unsat flags for {1}." -f @($SimDebtByName.Keys | Where-Object { $found.ContainsKey($_) }).Count, @($FlagsByName.Keys | Where-Object { $found.ContainsKey($_) }).Count) -ForegroundColor Green
+                                Write-Host ("MasterData updated: SimDebt for {0} student(s), unsat flags for {1}." -f @($SimDebtByName.Keys | Where-Object { $found.ContainsKey($_) }).Count, @($FlagsByName.Keys | Where-Object { $found.ContainsKey($_) }).Count) -ForegroundColor Green
                 }
                 catch {
                                 if ($null -ne $package) { Close-ExcelPackage -ExcelPackage $package -NoSave }
@@ -523,39 +589,6 @@ function Get-DaySheetName {
                 return $Date.ToString("dddd. MMMM d, yyyy")
 }
 
-function Get-SortieRowKey {
-                param(
-                                [Parameter(Mandatory = $true)]
-                                $Row
-                )
-                # Composite key from the identifying fields so duplicate rows can be detected across runs
-                $etd = if ($Row.ETD) { $Row.ETD.ToString() } else { "" }
-                $inst = if ($Row.Instructor) { $Row.Instructor.ToString() } else { "" }
-                $stype = if ($Row.SortieType) { $Row.SortieType.ToString() } else { "" }
-                $stud = if ($Row.Student) { $Row.Student.ToString() } else { "" }
-                $miss = if ($Row.Mission) { $Row.Mission.ToString() } else { "" }
-                return "$etd|$inst|$stype|$stud|$miss"
-}
-
-function Merge-DayRows {
-                param(
-                                [array]$ExistingRows,
-                                [array]$NewRows
-                )
-                # Combines existing sheet rows with new rows, removes duplicates by key, sorts by ETD
-                $seen = @{}
-                $unique = New-Object System.Collections.Generic.List[object]
-                foreach ($row in (@($ExistingRows) + @($NewRows))) {
-                                if ($null -eq $row) { continue }
-                                $key = Get-SortieRowKey -Row $row
-                                if (-not $seen.ContainsKey($key)) {
-                                                $seen[$key] = $true
-                                                $unique.Add($row)
-                                }
-                }
-                return @($unique | Sort-Object { $d = Parse-ETD $_.ETD; if ($null -eq $d) { [datetime]::MinValue } else { $d } })
-}
-
 function Export-DailyScheduleSheets {
                 [CmdletBinding()]
                 param(
@@ -576,7 +609,8 @@ function Export-DailyScheduleSheets {
                 Write-Host ("[DailyExport] Writing day sheets to {0}" -f $fullPath) -ForegroundColor Cyan
 
                 # Temporary local workbook so OneDrive cannot interrupt the write
-                $tempPath = Join-Path -Path $env:TEMP -ChildPath ("ATIS_DailySchedule_" + [guid]::NewGuid().ToString() + ".xlsx")
+                $tempDir = if ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
+                $tempPath = Join-Path -Path $tempDir -ChildPath ("ATIS_DailySchedule_" + [guid]::NewGuid().ToString() + ".xlsx")
                 try {
                                 if (Test-Path -Path $fullPath -PathType Leaf) {
                                                 Copy-Item -Path $fullPath -Destination $tempPath -Force -ErrorAction Stop
@@ -600,16 +634,13 @@ function Export-DailyScheduleSheets {
                                                 })
                                 }
 
+                                # Each exported day replaces its own sheet (a re-exported day never shows its old lines too)
                                 foreach ($dayKey in ($byDay.Keys | Sort-Object)) {
                                                 $dayDate = [datetime]::ParseExact($dayKey, "yyyy-MM-dd", $null)
                                                 $sheetName = Get-DaySheetName -Date $dayDate
-                                                $existingRows = @()
-                                                if (Test-Path -Path $tempPath -PathType Leaf) {
-                                                                try { $existingRows = @(Import-Excel -Path $tempPath -WorksheetName $sheetName -ErrorAction Stop) } catch { $existingRows = @() }
-                                                }
-                                                $merged = Merge-DayRows -ExistingRows $existingRows -NewRows $byDay[$dayKey].ToArray()
-                                                $merged | Export-Excel -Path $tempPath -WorksheetName $sheetName -AutoSize -ClearSheet
-                                                Write-Host ("[DailyExport] Updated sheet '{0}' with {1} rows" -f $sheetName, $merged.Count) -ForegroundColor Green
+                                                $dayRows = @($byDay[$dayKey].ToArray() | Sort-Object { Parse-ETD $_.ETD })
+                                                $dayRows | Export-Excel -Path $tempPath -WorksheetName $sheetName -AutoSize -ClearSheet
+                                                Write-Host ("[DailyExport] Wrote sheet '{0}' with {1} rows" -f $sheetName, $dayRows.Count) -ForegroundColor Green
                                 }
 
                                 Copy-Item -Path $tempPath -Destination $fullPath -Force -ErrorAction Stop
@@ -627,40 +658,6 @@ function Export-DailyScheduleSheets {
 # ==========================================
 # FINAL OUTPUT
 # ==========================================
-
-# True when the file does not exist yet or can be opened for writing (not open in Excel)
-function Test-FileWritable {
-                param ([string]$Path)
-
-                if (-not (Test-Path -LiteralPath $Path)) { return $true }
-                try {
-                                $fs = [System.IO.File]::Open($Path, 'Open', 'ReadWrite', 'None')
-                                $fs.Close()
-                                return $true
-                } catch {
-                                return $false
-                }
-}
-
-# Waits for a file to be closed in Excel. -Prompt is a scriptblock that gets the path
-# and returns $true to retry. Returns $false if the user gave up.
-function Wait-FileWritable {
-                param (
-                                [string]$Path,
-                                [scriptblock]$Prompt
-                )
-
-                while (-not (Test-FileWritable $Path)) {
-                                $retry = $false
-                                if ($null -ne $Prompt) { $retry = [bool](& $Prompt $Path) }
-                                else {
-                                                $answer = Read-Host "$Path is open (probably in Excel). Close it and press Enter to retry, or type N to skip"
-                                                $retry = ($answer -notmatch '^(?i)n')
-                                }
-                                if (-not $retry) { return $false }
-                }
-                return $true
-}
 
 # Runs -Action. If it throws, every file in -Files goes back to how it was before (a file
 # that didn't exist is removed), so a write that fails part-way leaves nothing half-done.
@@ -705,9 +702,20 @@ function Invoke-WithFileBackup {
                 }
 }
 
+function Get-OutputSetting {
+                param ($Settings, [string]$Name, $Default)
+
+                if ($null -ne $Settings -and $Settings -is [System.Collections.IDictionary] -and $Settings.Contains($Name)) { return $Settings[$Name] }
+                return $Default
+}
+
 # Writes everything a run produces, or nothing: MasterSchedule, each student's syllabus
 # tab, SimDebt and the unsat flags that changed to MasterData, ATIS, then the optional Teams
-# copy. Every file must be closed first; if any write fails, all of them are put back as they were.
+# copy. If any write fails, all of them are put back as they were.
+# Only the days that were filled (-Days; default: every day in the fill) are written:
+# MasterSchedule keeps the other days already exported (from today on, plus KeepPastDays),
+# and ATIS keeps their tabs. Each file open in Excel is saved and closed first
+# (SaveAndCloseExcel) and opened again afterwards (ReopenExcel).
 # Returns $true when everything was written.
 function Export-FaisOutput {
                 param (
@@ -716,10 +724,16 @@ function Export-FaisOutput {
                                 [Parameter(Mandatory)] [string]$MasterDataPath,
                                 [string]$AtisPath,
                                 $Settings = @{},
-                                [scriptblock]$LockedPrompt
+                                [scriptblock]$LockedPrompt,
+                                [string[]]$Days = @(),
+                                [datetime]$Today = (Get-Date)
                 )
 
-                $rows = ConvertTo-ExportRows -Schedule $FillResult.Schedule
+                $allRows = @(ConvertTo-ExportRows -Schedule $FillResult.Schedule)
+                if ($Days.Count -eq 0 -and $null -ne $FillResult.PSObject.Properties['Days']) { $Days = @($FillResult.Days) }
+                if ($Days.Count -eq 0) { $Days = @($allRows | ForEach-Object { Get-ExportRowDay $_ } | Where-Object { $_ } | Sort-Object -Unique) }
+                $rows = @($allRows | Where-Object { $Days -contains (Get-ExportRowDay $_) })
+
                 $debts = @{}
                 foreach ($s in $FillResult.Students) {
                                 if (-not [string]::IsNullOrWhiteSpace([string]$s.Name)) { $debts[([string]$s.Name).Trim()] = [double]$s.SimDebt }
@@ -727,7 +741,10 @@ function Export-FaisOutput {
                 $flags = Get-UnsatFlagUpdates -Students $FillResult.Students
 
                 $writeAtis = -not [string]::IsNullOrWhiteSpace($AtisPath)
-                if ($writeAtis -and $null -ne $Settings -and $Settings.ContainsKey('WriteAtis')) { $writeAtis = [bool]$Settings.WriteAtis }
+                if ($writeAtis) { $writeAtis = [bool](Get-OutputSetting $Settings 'WriteAtis' $true) }
+                $useExcel = [bool](Get-OutputSetting $Settings 'SaveAndCloseExcel' $true)
+                $reopen = [bool](Get-OutputSetting $Settings 'ReopenExcel' $true)
+                $keepPast = [int](Get-OutputSetting $Settings 'KeepPastDays' 0)
                 $outFiles = @($OutputPath, $MasterDataPath)
                 if ($writeAtis) { $outFiles += $AtisPath }
 
@@ -735,36 +752,63 @@ function Export-FaisOutput {
                                 Write-Warning "MasterData.xlsx was not found at $MasterDataPath, so nothing was written."
                                 return $false
                 }
-                foreach ($file in $outFiles) {
-                                if (-not (Wait-FileWritable -Path $file -Prompt $LockedPrompt)) {
-                                                Write-Warning "$file is still open, so nothing was written."
+
+                $closed = New-Object System.Collections.Generic.List[string]
+                try {
+                                if ($useExcel -and [bool](Get-OutputSetting $Settings 'CloseAllExcelWorkbooks' $false)) {
+                                                Write-Host "Saving and closing every open Excel workbook before writing..." -ForegroundColor Cyan
+                                                foreach ($r in @(Close-FaisExcelFiles -All)) {
+                                                                if ($r.Closed -and $r.Path -and (Test-Path -LiteralPath $r.Path -ErrorAction SilentlyContinue)) { $closed.Add($r.Path) }
+                                                }
+                                }
+                                foreach ($file in $outFiles) {
+                                                if (-not (Request-FaisFileWritable -Path $file -Prompt $LockedPrompt -Closed $closed -NoExcel:(-not $useExcel))) {
+                                                                Write-Warning "$file is still open, so nothing was written."
+                                                                return $false
+                                                }
+                                }
+
+                                # The other days already in MasterSchedule stay; past days drop off
+                                $existing = @(Read-MasterScheduleRows -Path $OutputPath)
+                                $keepFrom = $Today.Date.AddDays(-[math]::Max(0, $keepPast)).ToString('yyyy-MM-dd')
+                                $merged = @(Merge-MasterScheduleRows -Existing $existing -New $rows -Days $Days -KeepFromDay $keepFrom)
+
+                                try {
+                                                Invoke-WithFileBackup -Files $outFiles -Action {
+                                                                Export-FormattedMasterSchedule -ScheduleData $merged -FilePath $OutputPath -WorksheetName 'MasterSchedule'
+                                                                Export-StudentSyllabusTabs -Students $FillResult.Students -FilePath $OutputPath
+                                                                Set-MasterScheduleFirst -FilePath $OutputPath
+                                                                Update-MasterDataStudents -MasterDataPath $MasterDataPath -SimDebtByName $debts -FlagsByName $flags
+                                                                if ($writeAtis) { Export-AtisWorkbook -ScheduleData $rows -FilePath $AtisPath }
+                                                }
+                                }
+                                catch {
+                                                Write-Warning "Export failed, so OutputSchedule, MasterData and ATIS were left as they were: $($_.Exception.Message)"
                                                 return $false
                                 }
-                }
 
-                try {
-                                Invoke-WithFileBackup -Files $outFiles -Action {
-                                                Export-FormattedMasterSchedule -ScheduleData $rows -FilePath $OutputPath -WorksheetName 'MasterSchedule'
-                                                Export-StudentSyllabusTabs -Students $FillResult.Students -FilePath $OutputPath
-                                                Set-MasterScheduleFirst -FilePath $OutputPath
-                                                Update-MasterDataStudents -MasterDataPath $MasterDataPath -SimDebtByName $debts -FlagsByName $flags
-                                                if ($writeAtis) { Export-AtisWorkbook -ScheduleData $rows -FilePath $AtisPath }
+                                $wrote = @($Days | ForEach-Object { $d = $_; "{0} ({1} lines)" -f (Format-ExportDay $d), @($rows | Where-Object { (Get-ExportRowDay $_) -eq $d }).Count })
+                                Write-Host ("MasterSchedule: wrote {0}." -f ($wrote -join ', ')) -ForegroundColor Green
+                                $otherDays = @($merged | ForEach-Object { Get-ExportRowDay $_ } | Where-Object { $_ -and $Days -notcontains $_ } | Sort-Object -Unique)
+                                if ($otherDays.Count -gt 0) { Write-Host ("MasterSchedule: kept {0} as exported before." -f (@($otherDays | ForEach-Object { Format-ExportDay $_ }) -join ', ')) -ForegroundColor Green }
+                                foreach ($name in @($flags.Keys | Sort-Object)) {
+                                                foreach ($key in @($flags[$name].Keys | Sort-Object)) {
+                                                                $what = if ($flags[$name][$key]) { 'set' } else { 'cleared (cleaned up on this schedule)' }
+                                                                Write-Host "  $key $what for $name" -ForegroundColor Cyan
+                                                }
                                 }
-                }
-                catch {
-                                Write-Warning "Export failed, so OutputSchedule, MasterData and ATIS were left as they were: $($_.Exception.Message)"
-                                return $false
-                }
-                foreach ($name in @($flags.Keys | Sort-Object)) {
-                                foreach ($key in @($flags[$name].Keys | Sort-Object)) {
-                                                $what = if ($flags[$name][$key]) { 'set' } else { 'cleared (cleaned up on this schedule)' }
-                                                Write-Host "  $key $what for $name" -ForegroundColor Cyan
-                                }
-                }
 
-                if ($null -ne $Settings -and $Settings.ContainsKey('PublishToTeams') -and $Settings.PublishToTeams -and -not [string]::IsNullOrWhiteSpace([string]$Settings.TeamsFolder)) {
-                                $teamsFile = if ($Settings.ContainsKey('TeamsFileName') -and $Settings.TeamsFileName) { $Settings.TeamsFileName } else { 'TESTING ATIS NOT OFFICIAL.xlsx' }
-                                Export-DailyScheduleSheets -ScheduleData $rows -TargetFolder $Settings.TeamsFolder -FileName $teamsFile
+                                $teamsFolder = [string](Get-OutputSetting $Settings 'TeamsFolder' '')
+                                if ([bool](Get-OutputSetting $Settings 'PublishToTeams' $false) -and -not [string]::IsNullOrWhiteSpace($teamsFolder)) {
+                                                $teamsFile = [string](Get-OutputSetting $Settings 'TeamsFileName' 'TESTING ATIS NOT OFFICIAL.xlsx')
+                                                if ([string]::IsNullOrWhiteSpace($teamsFile)) { $teamsFile = 'TESTING ATIS NOT OFFICIAL.xlsx' }
+                                                if (-not $teamsFile.EndsWith('.xlsx', [System.StringComparison]::OrdinalIgnoreCase)) { $teamsFile = "$teamsFile.xlsx" }
+                                                [void](Request-FaisFileWritable -Path (Join-Path $teamsFolder $teamsFile) -Prompt $LockedPrompt -Closed $closed -NoExcel:(-not $useExcel))
+                                                Export-DailyScheduleSheets -ScheduleData $rows -TargetFolder $teamsFolder -FileName $teamsFile
+                                }
+                                return $true
                 }
-                return $true
+                finally {
+                                if ($reopen -and $closed.Count -gt 0) { Open-FaisWorkbooks -Path $closed.ToArray() }
+                }
 }

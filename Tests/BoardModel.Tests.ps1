@@ -1549,66 +1549,14 @@ Describe 'ConvertFrom-ScheduleRows' {
 }
 
 
-Describe 'Add-ScheduleSheetLines' {
-    BeforeAll {
-        function New-SR {
-            param ([string]$At, [string]$Type = 'Day Local', [string]$IP = 'Jones, Bob', $Student = $null, $Mission = $null)
-            return (New-TestRow -ETD $At -SortieType $Type -Instructor $IP -Student $Student -Mission $Mission)
-        }
-    }
-
-    It 'loads the rows for days with no lines yet, keeping hardcoded students, with no undo step' {
-        $b = New-TB -Days @('2026-10-20')
-        $rows = @(
-            (New-SR '2026-10-20 07:30' -Student 'Adams, Amy' -Mission 'FT5001'),
-            (New-SR '2026-10-21 08:00'),
-            (New-SR '2026-10-21 10:15' 'O&B'),
-            (New-SR '2026-10-21 13:15' 'O&B Return')
-        )
-        $res = Add-ScheduleSheetLines -Board $b -Rows $rows -FromDate ([datetime]'2026-10-20')
-        $res.Lines | Should -Be 4
-        $res.Days | Should -Be @('2026-10-20', '2026-10-21')
-        @($res.Pending).Count | Should -Be 0
-        @($b.Days) | Should -Be @('2026-10-20', '2026-10-21')
-        $pin = @(Get-BoardDayLines -Board $b -Day '2026-10-20')[0]
-        $pin.Student | Should -BeExactly 'Adams, Amy'
-        $pin.Mission | Should -BeExactly 'FT5001'
-        $ob = $b.Lines | Where-Object { $_.SortieType -eq 'O&B' }
-        $ob.LinkedLineId | Should -Not -BeNullOrEmpty
-        (Undo-Board $b) | Should -BeFalse
-    }
-
-    It 'leaves rows for a day that already has lines, or a day before -FromDate, as pending' {
-        $b = New-TB -Days @('2026-10-20')
-        Add-TL $b @(New-TL -At '2026-10-20 07:30' -IP 'Lee, Ann')
-        $rows = @(
-            (New-SR '2026-10-19 07:30'),
-            (New-SR '2026-10-20 07:30'),
-            (New-SR '2026-10-21 07:30')
-        )
-        $res = Add-ScheduleSheetLines -Board $b -Rows $rows -FromDate ([datetime]'2026-10-20')
-        $res.Lines | Should -Be 1
-        $res.Days | Should -Be @('2026-10-21')
-        @($res.Pending | ForEach-Object { ([datetime]$_.ETD).ToString('yyyy-MM-dd') }) | Should -Be @('2026-10-19', '2026-10-20')
-        @(Get-BoardDayLines -Board $b -Day '2026-10-20').Count | Should -Be 1
-        @($b.Days) | Should -Not -Contain '2026-10-19'
-    }
-
+Describe 'Schedule sheet notes' {
+    # The sheet loads through ConvertFrom-SheetRows (Tests\OneDay.Tests.ps1 covers the per-day load)
     It 'drops the fill''s "Clears Unsat" notes from the sheet rows but keeps the others' {
-        $b = New-TB
-        $row = New-SR '2026-10-20 07:30' 'OFT' '' -Student 'Adams, Amy'
-        $row.Notes = 'Bring a jet | Clears Unsat Sim (OFT) | OVERRIDE: x'
-        [void](Add-ScheduleSheetLines -Board $b -Rows @($row) -FromDate ([datetime]'2026-10-20'))
-        $b.Lines[0].Notes | Should -BeExactly 'Bring a jet | OVERRIDE: x'
-    }
-
-    It 'does nothing with no rows' {
-        $b = New-TB
-        $res = Add-ScheduleSheetLines -Board $b -Rows @() -FromDate ([datetime]'2026-10-20')
-        $res.Lines | Should -Be 0
-        @($res.Pending).Count | Should -Be 0
-        $b.Lines.Count | Should -Be 0
-        $b.Version | Should -Be 0
+        $row = [PSCustomObject]@{ ETD = '2026-10-20 07:30:00'; Day = '2026-10-20'; Time = '07:30'; TimeOnly = $false; Instructor = $null; SortieType = 'OFT'
+            Student = 'Adams, Amy'; Mission = $null; Callsign = $null; Num = $null; Notes = 'Bring a jet | Clears Unsat Sim (OFT) | OVERRIDE: x'; SheetRow = 2 }
+        $l = @(ConvertFrom-SheetRows -Rows @($row) -Day '2026-10-20' -KeepStudents -KeepNotes)
+        $l[0].Notes | Should -BeExactly 'Bring a jet | OVERRIDE: x'
+        $l[0].Student | Should -BeExactly 'Adams, Amy'
     }
 }
 
