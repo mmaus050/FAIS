@@ -79,7 +79,7 @@ function Get-BoardStudentContext {
                                                                 -FormLookAhead (Get-Weight $Data.SoftWeights 'FormLookAhead' 22)
                                                 $m = $pick.Mission
                                                 if ($null -ne $m -and -not (Test-MissionComplete $m)) {
-                                                                [void](Complete-StudentMission -Student $clone -Mission $m -InstructorName $ipName -ETD $pin.ETD -SoftWeights $Data.SoftWeights)
+                                                                [void](Complete-StudentMission -Student $clone -Mission $m -InstructorName $ipName -ETD $pin.ETD -SoftWeights $Data.SoftWeights -SortieType ([string]$pin.SortieType))
                                                 }
                                                 else {
                                                                 # No event could be flown: the student still occupies that time
@@ -87,7 +87,7 @@ function Get-BoardStudentContext {
                                                 }
                                                 if ($null -ne $ret) {
                                                                 $rm = @(Get-ValidOptedEvents -Student $clone -Sortie $ret -NoLookahead) | Select-Object -First 1
-                                                                if ($null -ne $m -and $null -ne $rm) { [void](Complete-StudentMission -Student $clone -Mission $rm -InstructorName $ipName -ETD $ret.ETD -SoftWeights $Data.SoftWeights) }
+                                                                if ($null -ne $m -and $null -ne $rm) { [void](Complete-StudentMission -Student $clone -Mission $rm -InstructorName $ipName -ETD $ret.ETD -SoftWeights $Data.SoftWeights -SortieType ([string]$ret.SortieType)) }
                                                                 else { Add-StudentReservation -Student $clone -LineId ([string]$ret.BoardLineId) -ETD $ret.ETD -SortieType ([string]$ret.SortieType) -Instructor $ipName }
                                                 }
                                 }

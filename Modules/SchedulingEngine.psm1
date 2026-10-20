@@ -375,8 +375,10 @@ function Test-HardRules {
                 }
 
                 # ---------------- TRAINING FOLLOWING UNSAT EVENT ----------------
+                # Cleared on the student once a line that cleans it up is filled (Clear-CleanedUnsat)
                 if ((ConvertTo-FaisBool $Student.UnsatSim) -and ($isDayLocal -or $sortieType -like '*O&B*')) {
-                                $violations.Add((New-RuleViolation 'UNSAT_SIM' 'Unsat sim on record - no Day Local/O&B until re-sim'))
+                                $need = if ((Get-UnsatSimKind $Student) -eq 'IFT') { 'an OFT or IFT' } else { 'an OFT' }
+                                $violations.Add((New-RuleViolation 'UNSAT_SIM' "Unsat sim on record - no Day Local/O&B until a re-sim in $need"))
                 }
                 if ((ConvertTo-FaisBool $Student.UnsatFlight) -and $isSimLine) {
                                 $violations.Add((New-RuleViolation 'UNSAT_FLIGHT' 'Unsat flight on record - no OFT/IFT until re-fly'))
@@ -900,7 +902,7 @@ function Process-HardcodedSortie {
                 $Sortie.FilledBy = 'Pin'
 
                 if ($null -ne $Mission) {
-                                [void](Complete-StudentMission -Student $Student -Mission $Mission -InstructorName (Get-NameText $ip) -ETD $Sortie.ETD -SoftWeights $SoftWeights)
+                                [void](Complete-StudentMission -Student $Student -Mission $Mission -InstructorName (Get-NameText $ip) -ETD $Sortie.ETD -SoftWeights $SoftWeights -Sortie $Sortie)
                                 Write-Host " [PINNED] '$($Student.Name)' on '$($Mission.Mission)' (ETD: $($Sortie.ETD))" -ForegroundColor Cyan
                 }
                 else {
@@ -1031,7 +1033,7 @@ function Pair-FormationWingman {
                                                                                 $w.Callsign = $WingEntry.Callsign
                                                                                 $w.Num = $WingEntry.Num
                                                                 }
-                                                                [void](Complete-StudentMission -Student $best.Student -Mission $best.Event -InstructorName (Get-NameText $w.Instructor) -ETD $w.ETD -SoftWeights $SoftWeights)
+                                                                [void](Complete-StudentMission -Student $best.Student -Mission $best.Event -InstructorName (Get-NameText $w.Instructor) -ETD $w.ETD -SoftWeights $SoftWeights -Sortie $w)
                                                                 Add-SortieNote -Sortie $w -Note "Wingman to $leadName"
                                                                 foreach ($n in (Get-ChosenEventNotes -Hard $best.Hard -Evt $best.Event -Soft $best.Soft)) { Add-SortieNote -Sortie $w -Note $n }
                                                                 Add-SortieNote -Sortie $PrimarySortie -Note "Wingman: $($best.Student.Name)"
@@ -1124,7 +1126,7 @@ function Schedule-ReturnLeg {
                 $ValidEvents = @(Get-ValidOptedEvents -Student $Student -Sortie $OBReturn -NoLookahead)
                 if ($ValidEvents.Count -gt 0) {
                                 $OBReturn.Mission = $ValidEvents[0]
-                                [void](Complete-StudentMission -Student $Student -Mission $ValidEvents[0] -InstructorName (Get-NameText $OBReturn.Instructor) -ETD $OBReturn.ETD -SoftWeights $SoftWeights)
+                                [void](Complete-StudentMission -Student $Student -Mission $ValidEvents[0] -InstructorName (Get-NameText $OBReturn.Instructor) -ETD $OBReturn.ETD -SoftWeights $SoftWeights -Sortie $OBReturn)
                 }
                 else {
                                 $OBReturn.Mission = $null
@@ -1411,7 +1413,7 @@ function Invoke-OpenLine {
                 $Sortie.Student = $best.Student
                 $Sortie.Mission = $best.Event
                 $Sortie.FilledBy = 'Engine'
-                [void](Complete-StudentMission -Student $best.Student -Mission $best.Event -InstructorName (Get-NameText $Sortie.Instructor) -ETD $Sortie.ETD -SoftWeights $SoftWeights)
+                [void](Complete-StudentMission -Student $best.Student -Mission $best.Event -InstructorName (Get-NameText $Sortie.Instructor) -ETD $Sortie.ETD -SoftWeights $SoftWeights -Sortie $Sortie)
                 foreach ($note in (Get-ChosenEventNotes -Hard $best.Hard -Evt $best.Event -Soft $best.Soft)) { Add-SortieNote -Sortie $Sortie -Note $note }
 
                 if ([string]$best.Event.Type -like '*Form*') {

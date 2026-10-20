@@ -12,17 +12,32 @@ Add `-Trace` to print every scheduling decision to the console. FAIS restarts it
 **Needs:** Windows PowerShell 5.1 and the ImportExcel module. `MasterData.xlsx` lives in the folder *above* the FAIS folder. `OutputSchedule.xlsx` and `ATIS.xlsx` are written to the Desktop.
 
 **What happens:**
-1. **Pre-run pop-ups.** Log any hooked (unsat) or incomplete events from the last schedule, then click **Open Puck Board**.
-2. **Puck board.** Build the day's lines and hardcode whoever you want. *(details below)*
+1. **Pre-run pop-ups.** Log any hooked (unsat) or incomplete events from the last schedule, then click **Open Puck Board**. These are saved right away (see *Data in and out*).
+2. **Puck board.** Build the day's lines and hardcode whoever you want. The MasterData **Schedule** sheet loads onto the board by itself. *(details below)*
 3. **Fill the rest of the lines.** The scheduler fills every open line: formation wingmen, direct support, O&B return legs and For Sale lines included. You review the result on the board.
-4. **Export.** This writes OutputSchedule.xlsx:
-   - **MasterSchedule** sheet (first tab),
-   - **each student's syllabus tab** (tomorrow's run starts from it),
-   - **SimDebt** to MasterData.
+4. **Export.** All or nothing: OutputSchedule, MasterData and ATIS must be closed, and if any part fails, none of them change. It writes:
+   - OutputSchedule: the **MasterSchedule** sheet (first tab),
+   - OutputSchedule: **each student's syllabus tab** (tomorrow's run starts from it),
+   - MasterData: **SimDebt**, and **UnsatSim / UnsatFlight** reset to FALSE for students whose schedule cleans up the unsat.
 
    It also writes **ATIS.xlsx**: one tab per day (named like `Wednesday. October 21, 2026`). Each tab lists that day's flights in ETD order, then a thick border, then that day's sims (OFT / IFT) in ETD order, in the same columns as MasterSchedule. Each export rebuilds the tabs for the days it covers and keeps every other day's tab, so ATIS builds up a day-by-day history. The file opens on the first day you just exported. Set `WriteAtis = $false` in `$OutputSettings` to turn it off.
 
-Closing the board without exporting writes nothing. Your lines are autosaved either way.
+Closing the board without exporting writes nothing (only the pre-run pop-ups have already saved). Your lines are autosaved either way.
+
+## Data in and out
+
+| When | Reads | Writes |
+|---|---|---|
+| Start | MasterData: Schedule (first 8 columns, stops at the first blank ETD), Instructors, Students (first 100), SoftWeights, FormCallsigns, StudentAbsences. OutputSchedule: each student's tab (a student with no tab starts from the MasterData Syllabus sheet). | Nothing |
+| **Log Hooked Event** | | MasterData: UnsatSim or UnsatFlight = TRUE |
+| **Log Incomplete Event** | | MasterData: SimDebt (only that event's debt comes off). OutputSchedule: that event's cells on the student's tab |
+| Puck board and fill | | Nothing (the board's own autosave in `Boards\` aside) |
+| **Export** | | OutputSchedule: MasterSchedule, student tabs. MasterData: SimDebt, unsat resets. ATIS: the exported days' tabs |
+
+- **MasterSchedule is the only sheet of OutputSchedule that is cleared** (ATIS rebuilds the tabs of the days it exports). A student's tab is updated in place: only the Instructor, ETD and IsComplete cells of events that changed are written, so your own columns, notes and formatting stay. A student with no tab gets a new one.
+- **MasterData Students sheet:** SPName is read from column B and SimDebt is written to column P. UnsatSim and UnsatFlight are written to the columns with those headings.
+- **Absences** are attached only when the name matches a student's name exactly (capital letters aside). A name that matches no one is reported in the console.
+- **Unsat clean-up:** after a hooked OFT, the student can't fly until an OFT. After a hooked IFT, an OFT or IFT will do. After a hooked flight, the student can't sim until they fly. The scheduler and the board treat the unsat as cleaned up for every line after that sim or flight, and the line's Notes say `Clears Unsat Sim (OFT)` (or IFT, or `Clears Unsat Flight`). MasterData only says TRUE or FALSE, so for an unsat typed into MasterData the hooked sim is taken to be the student's last sim flown (an OFT if unknown). If you re-plan a day whose schedule cleaned up an unsat, the unsat comes back until the new schedule cleans it up again.
 
 ## The puck board
 
@@ -76,14 +91,14 @@ Closing the board without exporting writes nothing. Your lines are autosaved eit
 | `OldFunctions.psm1` | Legacy code, kept for reference only; not loaded |
 | `Tests\` | Self-test and Pester suites |
 
-The MasterData **Schedule** sheet is no longer needed. If it has rows, the board offers **Import Schedule sheet**.
+The MasterData **Schedule** sheet loads onto the board when it opens, for days on or after the first board day that have no lines yet. That way a saved board is never doubled up and a past day is never re-planned. If some rows were left off, the board offers **Import Schedule sheet** to add them.
 
 ## Checking an install
 
 ```
 powershell.exe -STA -ExecutionPolicy Bypass -File .\Tests\Invoke-SelfTest.ps1
 ```
-This checks the engine, an Excel round trip (temp files only) and the puck board window (it may flash briefly). It prints PASS/FAIL and exits 0 when everything passes. The developer suites (`Tests\*.Tests.ps1`) need Pester 5.
+This checks the engine, an Excel round trip (temp files only) and the puck board window (it may flash briefly). It prints PASS/FAIL and exits 0 when everything passes. The developer suites (`Tests\*.Tests.ps1`) need Pester 5. `DataIO.Tests.ps1` also needs ImportExcel and is skipped without it.
 
 ## Scoring changes from the old version
 These are deliberate fixes, so expect some different picks:
@@ -92,4 +107,6 @@ These are deliberate fixes, so expect some different picks:
 - **Picks count toward turns:** students the scheduler picks are marked complete, so turn time and triple turns see them.
 - **Hardcoded lines later in the day hold the student's time,** so earlier fills respect them.
 - **SimDebt moves for every scheduled event:** hardcoded lines, wingmen and return legs included.
+- **Taking an event back only takes back its own SimDebt:** for an event logged incomplete, or a planned event on a day being re-planned. A SimDebt you set by hand in MasterData is no longer recalculated from scratch.
+- **Unsats clear themselves** once the schedule has the right re-sim or flight (see *Data in and out*).
 - **Formation callsigns** restart at the first FormCallsigns pair each day.

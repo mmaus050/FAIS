@@ -301,6 +301,137 @@ Describe 'Sim debt and Complete-StudentMission' {
                 }
 }
 
+Describe 'Undo-StudentMission and Reset-PlannedCompletions' {
+                It 'Undo-StudentMission backs out only that event''s sim debt (a hand-set SimDebt is kept)' {
+                                $s = New-TestStudent -Name 'A' -Done 'FI3101|2026-02-20 08:00', 'FT5001|2026-02-23 08:00|Jones, Bob' -SimDebt 7
+                                Undo-StudentMission -Student $s -Mission 'FT5001' -SoftWeights $script:W | Should -BeTrue
+                                $m = Find-SyllabusMission -Student $s -Mission 'FT5001'
+                                $m.IsComplete | Should -BeFalse
+                                $m.Instructor | Should -Be ''
+                                $m.ETD | Should -Be ''
+                                $s.SimDebt | Should -Be 6
+                                $s.SyllabusRevision | Should -Be 1
+
+                                # A sim pays debt down, so undoing one puts it back
+                                Undo-StudentMission -Student $s -Mission 'FI3101' -SoftWeights $script:W | Should -BeTrue
+                                $s.SimDebt | Should -Be 6.5
+                }
+
+                It 'Undo-StudentMission changes nothing for an event that is not complete' {
+                                $s = New-TestStudent -Name 'A' -Done 'FI3101|2026-02-20 08:00' -SimDebt 7
+                                $before = $s | ConvertTo-Json -Depth 6
+                                Undo-StudentMission -Student $s -Mission 'FT5001' -SoftWeights $script:W | Should -BeFalse
+                                Undo-StudentMission -Student $s -Mission 'ZZ9999' -SoftWeights $script:W | Should -BeFalse
+                                ($s | ConvertTo-Json -Depth 6) | Should -Be $before
+                }
+
+                It 'Undo-StudentMission leaves SimDebt alone without SoftWeights' {
+                                $s = New-TestStudent -Name 'A' -Done 'FI3101|2026-02-20 08:00', 'FT5001|2026-02-23 08:00|Jones, Bob' -SimDebt 7
+                                Undo-StudentMission -Student $s -Mission 'FT5001' | Should -BeTrue
+                                $s.SimDebt | Should -Be 7
+                }
+
+                It 'Reset-PlannedCompletions clears events on/after the day and backs out their debt only' {
+                                $s = New-TestStudent -Name 'A' -Done 'FI3101|2026-02-20 08:00', 'FT5001|2026-03-03 07:30|Jones, Bob', 'FT5102|2026-03-04 07:30|Jones, Bob' -SimDebt 10
+                                $other = New-TestStudent -Name 'B' -Done 'FI3101|2026-02-20 08:00' -SimDebt 3
+                                $changed = @(Reset-PlannedCompletions -Students @($s, $other) -FromDate ([datetime]'2026-03-03') -SoftWeights $script:W)
+                                @($changed | ForEach-Object { $_.Name }) | Should -Be @('A')
+                                (Find-SyllabusMission -Student $s -Mission 'FI3101').IsComplete | Should -BeTrue
+                                (Find-SyllabusMission -Student $s -Mission 'FT5001').IsComplete | Should -BeFalse
+                                (Find-SyllabusMission -Student $s -Mission 'FT5102').IsComplete | Should -BeFalse
+                                $s.SimDebt | Should -Be 8
+                                $other.SimDebt | Should -Be 3
+                }
+
+                It 'Reset-PlannedCompletions puts back an unsat that a re-planned line cleaned up' {
+                                $s = New-TestStudent -Name 'A' -Done 'FI3101|2026-02-20 08:00'
+                                $f = New-TestStudent -Name 'B' -Done 'FI3101|2026-02-20 08:00'
+                                $old = New-TestStudent -Name 'C' -Done 'FI3101|2026-02-20 08:00'
+                                $prev = @(
+                                                (New-TestRow -ETD '2026-03-03 07:30' -SortieType 'IFT' -Student 'A' -Mission 'FE3102' -Notes 'Clears Unsat Sim (IFT)')
+                                                (New-TestRow -ETD '2026-03-03 07:30' -Instructor 'Jones, Bob' -Student $f -Mission 'FT5001' -Notes 'Solo Flight | Clears Unsat Flight')
+                                                (New-TestRow -ETD '2026-03-02 07:30' -SortieType 'OFT' -Student 'C' -Mission 'FE3102' -Notes 'Clears Unsat Sim (OFT)')
+                                )
+                                $changed = @(Reset-PlannedCompletions -Students @($s, $f, $old) -FromDate ([datetime]'2026-03-03') -SoftWeights $script:W -PrevSchedule $prev)
+                                @($changed | ForEach-Object { $_.Name } | Sort-Object) | Should -Be @('A', 'B')
+                                $s.UnsatSim | Should -BeTrue
+                                $s.UnsatSimType | Should -Be 'IFT'
+                                $f.UnsatFlight | Should -BeTrue
+                                $f.UnsatSim | Should -BeFalse
+                                # Cleaned up on a day that is not being re-planned: stays cleaned up
+                                $old.UnsatSim | Should -BeFalse
+                }
+}
+
+Describe 'Unsat clean-up' {
+                It 'an OFT hook is cleaned up by an OFT but not an IFT' {
+                                $s = New-TestStudent -Name 'A' -UnsatSim -UnsatSimType 'OFT'
+                                Clear-CleanedUnsat -Student $s -SortieType 'IFT' | Should -BeNullOrEmpty
+                                $s.UnsatSim | Should -BeTrue
+                                Clear-CleanedUnsat -Student $s -SortieType 'Day Local' | Should -BeNullOrEmpty
+                                $s.UnsatSim | Should -BeTrue
+                                Clear-CleanedUnsat -Student $s -SortieType 'OFT' | Should -Be 'Clears Unsat Sim (OFT)'
+                                $s.UnsatSim | Should -BeFalse
+                }
+
+                It 'an IFT hook is cleaned up by an <SortieType>' -TestCases @(
+                                @{ SortieType = 'IFT' }
+                                @{ SortieType = 'OFT' }
+                ) {
+                                $s = New-TestStudent -Name 'A' -UnsatSim -UnsatSimType 'IFT'
+                                Clear-CleanedUnsat -Student $s -SortieType $SortieType | Should -Be 'Clears Unsat Sim (IFT)'
+                                $s.UnsatSim | Should -BeFalse
+                }
+
+                It 'a hook of unknown type needs an OFT' {
+                                $s = New-TestStudent -Name 'A' -UnsatSim
+                                Get-UnsatSimKind $s | Should -Be 'OFT'
+                                Clear-CleanedUnsat -Student $s -SortieType 'IFT' | Should -BeNullOrEmpty
+                                Clear-CleanedUnsat -Student $s -SortieType 'OFT' | Should -Be 'Clears Unsat Sim (OFT)'
+                }
+
+                It 'an unsat flight is cleaned up by a <SortieType> but not a sim' -TestCases @(
+                                @{ SortieType = 'Day Local' }
+                                @{ SortieType = 'O&B' }
+                                @{ SortieType = 'O&B Return' }
+                ) {
+                                $s = New-TestStudent -Name 'A' -UnsatFlight
+                                Clear-CleanedUnsat -Student $s -SortieType 'OFT' | Should -BeNullOrEmpty
+                                $s.UnsatFlight | Should -BeTrue
+                                Clear-CleanedUnsat -Student $s -SortieType $SortieType | Should -Be 'Clears Unsat Flight'
+                                $s.UnsatFlight | Should -BeFalse
+                }
+
+                It 'does nothing for a student with no unsat' {
+                                $s = New-TestStudent -Name 'A'
+                                Clear-CleanedUnsat -Student $s -SortieType 'OFT' | Should -BeNullOrEmpty
+                                Clear-CleanedUnsat -Student $s -SortieType 'Day Local' | Should -BeNullOrEmpty
+                                $s.UnsatSim | Should -BeFalse
+                                $s.UnsatFlight | Should -BeFalse
+                }
+
+                It 'Complete-StudentMission clears the unsat the line cleans up and notes the line' {
+                                $s = New-TestStudent -Name 'A' -UnsatSim -UnsatSimType 'OFT' -Done 'FI3101|2026-02-20 08:00'
+                                $row = New-TestRow -ETD '2026-03-03 07:30' -SortieType 'OFT'
+                                $null = Complete-StudentMission -Student $s -Mission 'FE3102' -InstructorName 'SIM IP' -ETD $row.ETD -SoftWeights $script:W -Sortie $row
+                                $s.UnsatSim | Should -BeFalse
+                                $row.Notes | Should -Be 'Clears Unsat Sim (OFT)'
+                }
+
+                It 'Complete-StudentMission without a sortie type leaves the unsat alone' {
+                                $s = New-TestStudent -Name 'A' -UnsatSim -Done 'FI3101|2026-02-20 08:00'
+                                $null = Complete-StudentMission -Student $s -Mission 'FE3102' -InstructorName 'SIM IP' -ETD '2026-03-03 07:30' -SoftWeights $script:W
+                                $s.UnsatSim | Should -BeTrue
+                }
+
+                It 'Get-LastSimType is the latest sim flown up to the cutoff' {
+                                $s = New-TestStudent -Name 'A' -Done 'FI3101|2026-02-20 08:00', 'FE3102|2026-02-21 08:00', 'FT5001|2026-02-23 08:00|Jones, Bob', 'FT5102|2026-02-24 08:00|Jones, Bob', 'FN3201|2026-03-05 08:00'
+                                Get-LastSimType -Student $s -Before ([datetime]'2026-03-01') | Should -Be 'OFT'
+                                Get-LastSimType -Student $s -Before ([datetime]'2026-03-06') | Should -Be 'IFT'
+                                Get-LastSimType -Student (New-TestStudent -Name 'B') -Before ([datetime]'2026-03-06') | Should -Be ''
+                }
+}
+
 Describe 'Student reservations' {
                 It 'adds a reservation with a parsed start and IsSim from the sortie type' {
                                 $s = New-TestStudent -Name 'A'
@@ -760,8 +891,18 @@ Describe 'Test-HardRules' {
                                                 $s = New-TestStudent -Name 'A' -UnsatSim -Done 'FI3101|2026-02-20 08:00'
                                                 $r = Invoke-HR -Student $s -Sortie (New-TestRow -ETD '2026-03-03 08:00' -SortieType $SortieType -Instructor 'Jones, Bob')
                                                 Get-RuleCodes $r | Should -Be @('UNSAT_SIM')
-                                                (Get-Viol $r 'UNSAT_SIM').Message | Should -Be 'Unsat sim on record - no Day Local/O&B until re-sim'
+                                                (Get-Viol $r 'UNSAT_SIM').Message | Should -Be 'Unsat sim on record - no Day Local/O&B until a re-sim in an OFT'
                                                 (Invoke-HR -Student $s -Sortie (New-TestRow -ETD '2026-03-03 08:00' -SortieType 'OFT')).Passed | Should -BeTrue
+                                }
+
+                                It 'UNSAT_SIM names the sim that cleans it up (<Kind>)' -TestCases @(
+                                                @{ Kind = 'OFT'; Expected = 'Unsat sim on record - no Day Local/O&B until a re-sim in an OFT' }
+                                                @{ Kind = 'IFT'; Expected = 'Unsat sim on record - no Day Local/O&B until a re-sim in an OFT or IFT' }
+                                                @{ Kind = ''; Expected = 'Unsat sim on record - no Day Local/O&B until a re-sim in an OFT' }
+                                ) {
+                                                $s = New-TestStudent -Name 'A' -UnsatSim -UnsatSimType $Kind -Done 'FI3101|2026-02-20 08:00'
+                                                $r = Invoke-HR -Student $s -Sortie (New-TestRow -ETD '2026-03-03 08:00' -Instructor 'Jones, Bob')
+                                                (Get-Viol $r 'UNSAT_SIM').Message | Should -Be $Expected
                                 }
 
                                 It 'UNSAT_FLIGHT blocks <SortieType> but not flights' -TestCases @(

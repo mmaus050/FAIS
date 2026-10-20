@@ -4,7 +4,8 @@
 # Test-MissionComplete / Get-SyllabusSortKey / Find-SyllabusMission / Get-MissionKind
 # Get-OptedEvents / Get-AllowedEventTypes / Get-ValidOptedEvents
 # Get-SimDebtDelta / Get-MissionSimDebtDelta / Update-StudentSimDebtFromSyllabus
-# Complete-StudentMission / Reset-PlannedCompletions
+# Complete-StudentMission / Undo-StudentMission / Reset-PlannedCompletions
+# Get-UnsatSimKind / Get-LastSimType / Clear-CleanedUnsat / Restore-PlannedUnsat
 # Add-StudentReservation / Remove-StudentReservation / Get-ReservedMissionNames
 # Get-StudentTimeline
 
@@ -229,6 +230,8 @@ function Update-StudentSimDebtFromSyllabus {
 
 # The one place a scheduled event is written onto a student's syllabus.
 # Marks it complete with the IP name and ETD, and applies its sim debt once.
+# -SortieType (or -Sortie) is the line it is flown on: an unsat that line cleans up is
+# cleared, and -Sortie gets a note saying so.
 function Complete-StudentMission {
                 param (
                                 [Parameter(Mandatory)] $Student,
@@ -236,6 +239,8 @@ function Complete-StudentMission {
                                 [string]$InstructorName,
                                 $ETD,
                                 $SoftWeights,
+                                [string]$SortieType = '',
+                                $Sortie,
                                 [switch]$NoSimDebt
                 )
 
@@ -254,19 +259,58 @@ function Complete-StudentMission {
                                 $Student.SimDebt = [math]::Round($current + (Get-MissionSimDebtDelta -MissionName ([string]$entry.Mission) -SoftWeights $SoftWeights), 2)
                 }
 
+                if ($SortieType -eq '' -and $null -ne $Sortie) { $SortieType = [string]$Sortie.SortieType }
+                if ($SortieType -ne '') {
+                                $cleared = Clear-CleanedUnsat -Student $Student -SortieType $SortieType
+                                if ($null -ne $cleared -and $null -ne $Sortie) { Add-SortieNote -Sortie $Sortie -Note $cleared }
+                }
+
                 $rev = [int](Get-OptionalProperty $Student 'SyllabusRevision' 0)
                 $Student | Add-Member -MemberType NoteProperty -Name 'SyllabusRevision' -Value ($rev + 1) -Force
                 return $entry
 }
 
+# Takes a completed event back off a student's syllabus (logged incomplete, or a planned
+# event being re-planned) and backs out only that event's sim debt, so the SimDebt read
+# from MasterData keeps any hand adjustment. Returns $true when the event was complete.
+function Undo-StudentMission {
+                param (
+                                [Parameter(Mandatory)] $Student,
+                                [Parameter(Mandatory)] $Mission,
+                                $SoftWeights
+                )
+
+                # The exact syllabus entry when one is passed, else the first with that name
+                $entry = $null
+                foreach ($m in @($Student.Syllabus)) { if ([object]::ReferenceEquals($m, $Mission)) { $entry = $m; break } }
+                if ($null -eq $entry) { $entry = Find-SyllabusMission -Student $Student -Mission $Mission }
+                if ($null -eq $entry -or -not (Test-MissionComplete $entry)) { return $false }
+
+                $entry.IsComplete = $false
+                $entry.Instructor = ''
+                $entry.ETD = ''
+                if ($null -ne $SoftWeights) {
+                                $current = 0.0
+                                if ($null -ne $Student.SimDebt -and [string]$Student.SimDebt -ne '') { $current = [double]$Student.SimDebt }
+                                $Student.SimDebt = [math]::Round($current - (Get-MissionSimDebtDelta -MissionName ([string]$entry.Mission) -SoftWeights $SoftWeights), 2)
+                }
+
+                $rev = [int](Get-OptionalProperty $Student 'SyllabusRevision' 0)
+                $Student | Add-Member -MemberType NoteProperty -Name 'SyllabusRevision' -Value ($rev + 1) -Force
+                return $true
+}
+
 # Clears completions dated on/after a day. A previous run that scheduled these days
 # wrote them as complete; they are plans, not flown events, when the days are re-built.
-# Returns the students that changed (SimDebt recomputed for them).
+# Their sim debt is backed out, and an unsat that one of those planned lines cleaned up
+# (its "Clears Unsat" note in -PrevSchedule) goes back on the student.
+# Returns the students that changed.
 function Reset-PlannedCompletions {
                 param (
                                 [array]$Students,
                                 [datetime]$FromDate,
-                                $SoftWeights
+                                $SoftWeights,
+                                [array]$PrevSchedule = @()
                 )
 
                 $changed = New-Object System.Collections.Generic.List[object]
@@ -276,20 +320,101 @@ function Reset-PlannedCompletions {
                                                 if (-not (Test-MissionComplete $m)) { continue }
                                                 $dt = Parse-ETD $m.ETD
                                                 if ($null -ne $dt -and $dt.Date -ge $FromDate.Date) {
-                                                                $m.IsComplete = $false
-                                                                $m.Instructor = ''
-                                                                $m.ETD = ''
-                                                                $hit = $true
+                                                                if (Undo-StudentMission -Student $s -Mission $m -SoftWeights $SoftWeights) { $hit = $true }
                                                 }
                                 }
-                                if ($hit) {
-                                                if ($null -ne $SoftWeights) { [void](Update-StudentSimDebtFromSyllabus -Student $s -SoftWeights $SoftWeights) }
-                                                $rev = [int](Get-OptionalProperty $s 'SyllabusRevision' 0)
-                                                $s | Add-Member -MemberType NoteProperty -Name 'SyllabusRevision' -Value ($rev + 1) -Force
-                                                $changed.Add($s)
-                                }
+                                if ($hit) { $changed.Add($s) }
+                }
+
+                foreach ($row in @($PrevSchedule)) {
+                                if ($null -eq $row) { continue }
+                                $dt = Parse-ETD $row.ETD
+                                if ($null -eq $dt -or $dt.Date -lt $FromDate.Date) { continue }
+                                $name = Get-NameText $row.Student
+                                if (Test-IsSentinelStudent $name) { continue }
+                                $s = Resolve-StudentByName -Students $Students -Name $name
+                                if ($null -ne $s -and (Restore-PlannedUnsat -Student $s -Notes ([string]$row.Notes)) -and -not $changed.Contains($s)) { $changed.Add($s) }
                 }
                 return $changed.ToArray()
+}
+
+
+# =================================================================================
+#  UNSAT EVENTS
+#  Unsat sim: no flying until a re-sim. An OFT hook needs an OFT; an IFT hook can be
+#  cleaned up in an OFT or an IFT. Unsat flight: no sims until a flight.
+#  UnsatSimType ('OFT' / 'IFT') says which sim was hooked; unknown is treated as OFT.
+# =================================================================================
+
+function Get-UnsatSimKind {
+                param ($Student)
+
+                $type = [string](Get-OptionalProperty $Student 'UnsatSimType' '')
+                if ($type -match '(?i)^\s*IFT\s*$') { return 'IFT' }
+                return 'OFT'
+}
+
+# 'OFT' / 'IFT' for the student's latest completed sim event up to -Before ('' if none).
+# MasterData only holds UnsatSim TRUE/FALSE, so this stands in for the hooked sim.
+function Get-LastSimType {
+                param (
+                                $Student,
+                                [datetime]$Before = (Get-Date)
+                )
+
+                $last = $null
+                $lastStart = $null
+                foreach ($m in @($Student.Syllabus)) {
+                                if (-not (Test-MissionComplete $m)) { continue }
+                                $start = Parse-ETD $m.ETD
+                                if ($null -eq $start -or $start -gt $Before) { continue }
+                                if ((Get-MissionKind -Mission $m -InstructorName (Get-NameText $m.Instructor)) -ne 'Sim') { continue }
+                                if ($null -eq $lastStart -or $start -gt $lastStart) { $last = $m; $lastStart = $start }
+                }
+                if ($null -eq $last) { return '' }
+                $type = ([string]$last.Type).Trim().ToUpperInvariant()
+                if ($type -in @('OFT', 'IFT')) { return $type }
+                return ''
+}
+
+# Clears the unsat a line of -SortieType cleans up. Returns the note for that line, or $null.
+function Clear-CleanedUnsat {
+                param (
+                                [Parameter(Mandatory)] $Student,
+                                [string]$SortieType
+                )
+
+                if (Test-IsSimSortieType $SortieType) {
+                                if (-not (ConvertTo-FaisBool $Student.UnsatSim)) { return $null }
+                                $kind = Get-UnsatSimKind $Student
+                                if ($kind -eq 'OFT' -and $SortieType -notlike '*OFT*') { return $null }
+                                $Student.UnsatSim = $false
+                                return "Clears Unsat Sim ($kind)"
+                }
+                if (-not (ConvertTo-FaisBool $Student.UnsatFlight)) { return $null }
+                $Student.UnsatFlight = $false
+                return 'Clears Unsat Flight'
+}
+
+# Puts an unsat back on the student when the planned line that cleared it is re-planned.
+# Returns $true when a flag was set.
+function Restore-PlannedUnsat {
+                param (
+                                [Parameter(Mandatory)] $Student,
+                                [string]$Notes
+                )
+
+                $hit = $false
+                if ($Notes -match 'Clears Unsat Sim \((OFT|IFT)\)' -and -not (ConvertTo-FaisBool $Student.UnsatSim)) {
+                                $Student | Add-Member -NotePropertyName 'UnsatSim' -NotePropertyValue $true -Force
+                                $Student | Add-Member -NotePropertyName 'UnsatSimType' -NotePropertyValue $Matches[1].ToUpperInvariant() -Force
+                                $hit = $true
+                }
+                if ($Notes -match 'Clears Unsat Flight' -and -not (ConvertTo-FaisBool $Student.UnsatFlight)) {
+                                $Student | Add-Member -NotePropertyName 'UnsatFlight' -NotePropertyValue $true -Force
+                                $hit = $true
+                }
+                return $hit
 }
 
 

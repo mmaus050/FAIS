@@ -21,7 +21,7 @@ function IngestData {
                                 [string]$excelInputPath,
                                 [string]$desktopPath,
                                 [string]$excelOutputPath,
-                                [int]$MaxStudents = 20
+                                [int]$MaxStudents = 100
                 )
 
                 # Build the output path from the Desktop folder when it was not passed in
@@ -105,20 +105,29 @@ function IngestData {
                                                 $priority = 0.0
                                                 if ($null -ne $Student.Priority -and [string]$Student.Priority -ne '') { [void][double]::TryParse([string]$Student.Priority, [ref]$priority) }
 
+                                                # MasterData only says TRUE/FALSE, so the hooked sim is taken to be the latest one flown
+                                                $unsatSim = ConvertTo-FaisBool $Student.UnsatSim
+                                                $unsatFlight = ConvertTo-FaisBool $Student.UnsatFlight
+                                                $unsatSimType = if ($unsatSim) { Get-LastSimType -Student ([PSCustomObject]@{ Syllabus = $cleanSyllabus }) } else { '' }
+
                                                 [PSCustomObject]@{
-                                                                ID               = $Student.SPKey
-                                                                Name             = ([string]$Student.SPName).Trim()
-                                                                IsCap            = (ConvertTo-FaisBool $Student.IsCap)
-                                                                IsInternational  = (ConvertTo-FaisBool $Student.IsInternational)
-                                                                Priority         = $priority
-                                                                UnsatSim         = (ConvertTo-FaisBool $Student.UnsatSim)
-                                                                UnsatFlight      = (ConvertTo-FaisBool $Student.UnsatFlight)
-                                                                OnHold           = (ConvertTo-FaisBool $Student.OnHold)
-                                                                SimDebt          = $debt
-                                                                Syllabus         = $cleanSyllabus
-                                                                Absences         = @()
-                                                                Reservations     = @()
-                                                                SyllabusRevision = 0
+                                                                ID                      = $Student.SPKey
+                                                                Name                    = ([string]$Student.SPName).Trim()
+                                                                IsCap                   = (ConvertTo-FaisBool $Student.IsCap)
+                                                                IsInternational         = (ConvertTo-FaisBool $Student.IsInternational)
+                                                                Priority                = $priority
+                                                                UnsatSim                = $unsatSim
+                                                                UnsatSimType            = $unsatSimType
+                                                                UnsatFlight             = $unsatFlight
+                                                                # What MasterData holds now: Export writes UnsatSim / UnsatFlight back only when they differ
+                                                                UnsatSimInMasterData    = $unsatSim
+                                                                UnsatFlightInMasterData = $unsatFlight
+                                                                OnHold                  = (ConvertTo-FaisBool $Student.OnHold)
+                                                                SimDebt                 = $debt
+                                                                Syllabus                = $cleanSyllabus
+                                                                Absences                = @()
+                                                                Reservations            = @()
+                                                                SyllabusRevision        = 0
                                                 }
                                 }
                 )
@@ -259,17 +268,23 @@ function IngestData {
                                 $StudentAbsences = @()
                 }
 
-                # Attach each absence to the student it belongs to so the hard rules can read it off the student object
+                # Attach each absence to the student it belongs to so the hard rules can read it off the student object.
+                # Names must match exactly (case and outer spaces aside).
                 foreach ($s in $Students) {
-                                $studentName = if ($s.Name) { $s.Name.Trim().ToLower() } else { "" }
+                                $studentName = if ($s.Name) { $s.Name.Trim() } else { "" }
                                 if ([string]::IsNullOrWhiteSpace($studentName)) { continue }
 
                                 $s.Absences = @(
                                                 foreach ($absence in $StudentAbsences) {
-                                                                $absenceName = $absence.Student.Trim().ToLower()
-                                                                if ($absenceName -eq $studentName -or $studentName -like "*$absenceName*" -or $absenceName -like "*$studentName*") { $absence }
+                                                                if ($absence.Student.Trim() -ieq $studentName) { $absence }
                                                 }
                                 )
+                }
+                $knownNames = @($Students | ForEach-Object { ([string]$_.Name).Trim() })
+                foreach ($name in @($StudentAbsences | ForEach-Object { $_.Student.Trim() } | Sort-Object -Unique)) {
+                                if ($knownNames -notcontains $name) {
+                                                Write-Host "WARNING: The absence for '$name' doesn't match a student name on the Students sheet exactly, so it was not applied." -ForegroundColor Yellow
+                                }
                 }
 
                 return [PSCustomObject]@{

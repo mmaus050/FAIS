@@ -975,6 +975,75 @@ Describe 'Invoke-FillSchedule' {
                                 }
                 }
 
+                Context 'unsat clean-up' {
+
+                                It 'an OFT re-sim earlier in the day lets an UnsatSim student fly a later line' {
+                                                $students = @(New-TestStudent -Name 'Able, Amy' -UnsatSim -UnsatSimType 'OFT' -Done @('FI3101|2026-10-15 08:00'))
+                                                $rows = @(
+                                                                New-TestRow -ETD '2026-10-20 07:30' -SortieType 'OFT' -Id 'S1'
+                                                                New-TestRow -ETD '2026-10-20 12:00' -Instructor 'Jones, Bob' -Id 'F1'
+                                                )
+                                                $r = Invoke-TFill -Schedule $rows -Students $students
+
+                                                Get-NameText (Get-TRow $r 'S1').Mission | Should -Be 'FE3102'
+                                                Get-TNotes (Get-TRow $r 'S1') | Should -Contain 'Clears Unsat Sim (OFT)'
+                                                Get-NameText (Get-TRow $r 'F1').Student | Should -Be 'Able, Amy'
+                                                (Get-TStudent $r 'Able, Amy').UnsatSim | Should -BeFalse
+                                }
+
+                                It 'an IFT re-sim cleans up an IFT hook but not an OFT hook' -TestCases @(
+                                                @{ Kind = 'IFT'; Flies = 'Able, Amy'; Unsat = $false }
+                                                @{ Kind = 'OFT'; Flies = 'For Sale'; Unsat = $true }
+                                ) {
+                                                $done = @('FI3101|2026-10-10 08:00', 'FE3102|2026-10-11 08:00', 'FT5001|2026-10-12 08:00|Ortiz, Sam', 'FT5102|2026-10-13 08:00|Ortiz, Sam')
+                                                $students = @(New-TestStudent -Name 'Able, Amy' -UnsatSim -UnsatSimType $Kind -Done $done)
+                                                $rows = @(
+                                                                New-TestRow -ETD '2026-10-20 07:30' -SortieType 'IFT' -Id 'S1'
+                                                                New-TestRow -ETD '2026-10-20 12:00' -Instructor 'Jones, Bob' -Id 'F1'
+                                                )
+                                                $r = Invoke-TFill -Schedule $rows -Students $students
+
+                                                Get-NameText (Get-TRow $r 'S1').Student | Should -Be 'Able, Amy'
+                                                Get-NameText (Get-TRow $r 'F1').Student | Should -Be $Flies
+                                                (Get-TStudent $r 'Able, Amy').UnsatSim | Should -Be $Unsat
+                                }
+
+                                It 'a flight cleans up an unsat flight so a later sim can be filled' {
+                                                $students = @(New-TestStudent -Name 'Able, Amy' -UnsatFlight -Done @('FI3101|2026-10-15 08:00'))
+                                                $rows = @(
+                                                                New-TestRow -ETD '2026-10-20 07:30' -Instructor 'Jones, Bob' -Id 'F1'
+                                                                New-TestRow -ETD '2026-10-20 12:00' -SortieType 'OFT' -Id 'S1'
+                                                )
+                                                $r = Invoke-TFill -Schedule $rows -Students $students
+
+                                                Get-NameText (Get-TRow $r 'F1').Mission | Should -Be 'FT5001'
+                                                Get-TNotes (Get-TRow $r 'F1') | Should -Contain 'Clears Unsat Flight'
+                                                Get-NameText (Get-TRow $r 'S1').Student | Should -Be 'Able, Amy'
+                                                (Get-TStudent $r 'Able, Amy').UnsatFlight | Should -BeFalse
+                                }
+
+                                It 'a re-sim later in the day does not clear an earlier hardcoded flight' {
+                                                $students = @(New-TestStudent -Name 'Able, Amy' -UnsatSim -UnsatSimType 'OFT' -Done @('FI3101|2026-10-15 08:00'))
+                                                $rows = @(
+                                                                New-TestRow -ETD '2026-10-20 07:30' -Instructor 'Jones, Bob' -Id 'P1' -Student 'Able, Amy' -Mission 'FT5001'
+                                                                New-TestRow -ETD '2026-10-20 12:00' -SortieType 'OFT' -Id 'P2' -Student 'Able, Amy' -Mission 'FE3102'
+                                                )
+                                                $r = Invoke-TFill -Schedule $rows -Students $students
+
+                                                @(Get-TNotes (Get-TRow $r 'P1') | Where-Object { $_ -like 'OVERRIDE:*Unsat sim*' }).Count | Should -Be 1
+                                                Get-TNotes (Get-TRow $r 'P2') | Should -Contain 'Clears Unsat Sim (OFT)'
+                                                (Get-TStudent $r 'Able, Amy').UnsatSim | Should -BeFalse
+                                }
+
+                                It 'never clears the flag on the students passed in when they are copies' {
+                                                $base = New-TestStudent -Name 'Able, Amy' -UnsatSim -UnsatSimType 'OFT' -Done @('FI3101|2026-10-15 08:00')
+                                                $rows = @(New-TestRow -ETD '2026-10-20 07:30' -SortieType 'OFT' -Id 'S1')
+                                                $r = Invoke-TFill -Schedule $rows -Students @(Copy-StudentList @($base))
+                                                (Get-TStudent $r 'Able, Amy').UnsatSim | Should -BeFalse
+                                                $base.UnsatSim | Should -BeTrue
+                                }
+                }
+
                 Context 'determinism, stats and results' {
 
                                 It 'gives identical results for two runs on identical student copies' {

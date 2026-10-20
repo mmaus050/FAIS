@@ -2,11 +2,12 @@
 # cd C:\Users\1595161645A\Desktop\FAIS7.1
 #
 # Run order:
-#   1. Pre-run pop-ups: log hooked (unsat) / incomplete events from the last schedule
-#   2. Puck board: build the day's lines, hardcode IPs and students, see the + / - and rule flags
+#   1. Pre-run pop-ups: log hooked (unsat) / incomplete events from the last schedule (saved right away)
+#   2. Puck board: build the day's lines (the MasterData Schedule sheet loads by itself), hardcode IPs
+#      and students, see the + / - and rule flags
 #   3. "Fill the rest of the lines": the scheduler fills every open line, you review it
-#   4. Export: OutputSchedule.xlsx (MasterSchedule + each student's syllabus tab), SimDebt to MasterData,
-#      and ATIS.xlsx (one tab per day: flights, then sims)
+#   4. Export, all or nothing: OutputSchedule.xlsx (MasterSchedule + each student's syllabus tab),
+#      SimDebt + cleaned-up unsats to MasterData, and ATIS.xlsx (one tab per day: flights, then sims)
 #
 # -Trace prints every scheduling decision to the console.
 param (
@@ -62,9 +63,8 @@ $BoardSettings = @{
     Trace                 = [bool]$Trace                        # print every scheduling decision while filling
 }
 
-# Output
+# Output (the student tabs and MasterData are always written on Export)
 $OutputSettings = @{
-    WriteStudentTabs = $true                            # each student's syllabus tab in OutputSchedule + SimDebt in MasterData
     WriteAtis        = $true                            # ATIS.xlsx on the Desktop: one tab per day, flights then sims
     PublishToTeams   = $false                           # also write the daily sheets to the Teams / OneDrive workbook
     TeamsFolder      = ''                               # e.g. C:\Users\...\OneDrive - United States Air Force\ATIS - E Flight - E Flight
@@ -125,7 +125,7 @@ Write-Host ("Loaded {0} students, {1} IPs, {2} formation callsigns." -f @($Stude
 # Brings in the previous schedule (with the complex objects attached) so lines can be
 # marked hooked (unsat) or incomplete before anything is scheduled
 $PrevSchedule = @(DownloadPrevSchedule -Students $Students -Instructors $Instructors -desktopPath $desktopPath -excelOutputPath $excelOutputPath)
-if (-not (Invoke-PreRunMenu -Schedule $PrevSchedule -Students $Students -SoftWeights $SoftWeights -MasterDataPath $excelInputPath)) {
+if (-not (Invoke-PreRunMenu -Schedule $PrevSchedule -Students $Students -SoftWeights $SoftWeights -MasterDataPath $excelInputPath -OutputPath $excelOutputPath)) {
     return
 }
 
@@ -172,7 +172,7 @@ $LockedPrompt = {
 
 $Exported = Export-FaisOutput -FillResult $FillResult -OutputPath $excelOutputPath -MasterDataPath $excelInputPath -AtisPath $atisOutputPath -Settings $OutputSettings -LockedPrompt $LockedPrompt
 if (-not $Exported) {
-    Write-Host "The schedule was NOT written. Your board is saved; run FAIS again and Export when the file is closed." -ForegroundColor Red
+    Write-Host "Nothing was written (OutputSchedule, MasterData and ATIS are as they were). Your board is saved; run FAIS again and Export once the files are closed." -ForegroundColor Red
     return
 }
 

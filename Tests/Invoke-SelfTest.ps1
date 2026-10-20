@@ -195,6 +195,19 @@ if (Get-Module -ListAvailable -Name ImportExcel) {
         $want = @($copyA[0].Syllabus | Where-Object { Test-MissionComplete $_ } | ForEach-Object { $_.Mission })
         ($done -join ',') -eq ($want -join ',') -and $null -ne $tab[0].PSObject.Properties['OptingEvents']
     }
+    Assert-That "a second export updates the tab in place (a hand-added column stays)" {
+        $pkg = Open-ExcelPackage -Path $xlsx
+        $ws = $pkg.Workbook.Worksheets['Adams, Al']
+        $ws.Cells[1, 20].Value = 'MyNotes'
+        $ws.Cells[2, 20].Value = 'keep me'
+        Close-ExcelPackage -ExcelPackage $pkg
+        $next = @($copyA[0].Syllabus | Where-Object { -not (Test-MissionComplete $_) })[0]
+        [void](Complete-StudentMission -Student $copyA[0] -Mission $next -InstructorName 'Jones, Bob' -ETD '2026-12-01 07:30')
+        Export-StudentSyllabusTabs -Students $copyA -FilePath $xlsx 6>$null
+        $tab = @(Import-Excel -Path $xlsx -WorksheetName 'Adams, Al')
+        $row = $tab | Where-Object { $_.Mission -eq $next.Mission }
+        $tab[0].MyNotes -eq 'keep me' -and (ConvertTo-FaisBool $row.IsComplete) -and $tab.Count -eq @($copyA[0].Syllabus).Count
+    }
     Assert-That 'MasterSchedule reads back for the hook / incomplete menu' {
         $prev = @(DownloadPrevSchedule -Students $copyA -Instructors $ips -excelOutputPath $xlsx)
         $prev.Count -eq @($fill.Schedule).Count -and @($prev | Where-Object { $_.Student -isnot [string] -and $null -ne $_.Student }).Count -gt 0
