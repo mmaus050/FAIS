@@ -278,7 +278,7 @@
         </Grid>
 
         <!-- +/- pop-up shown after a student is dropped -->
-        <Popup x:Name="DropPopup" StaysOpen="False" AllowsTransparency="True" Placement="Bottom" PopupAnimation="Fade">
+        <Popup x:Name="DropPopup" StaysOpen="True" AllowsTransparency="True" Placement="Bottom" PopupAnimation="Fade">
             <Border Background="White" BorderBrush="#334155" BorderThickness="1" CornerRadius="6" Padding="10" MaxWidth="480">
                 <StackPanel x:Name="DropPopupPanel"/>
             </Border>

@@ -134,6 +134,9 @@ function Initialize-PuckBoardWindow {
                                 Result      = $null
                                 Busy        = $false
                                 Draining    = $false
+                                Filling     = $false
+                                HoverKey    = $null
+                                HoverElement = $null
                                 TypeOptions = @('Day Local', 'O&B', [string]$set.ReturnSortieType, 'OFT', 'IFT')
                                 LastFocusDay = $firstDay
                 }
@@ -330,7 +333,7 @@ function Initialize-PBTimers {
 
                 $popup = New-Object System.Windows.Threading.DispatcherTimer
                 $popup.Interval = [TimeSpan]::FromSeconds(7)
-                $popup.Add_Tick({ Invoke-PBSafe { $script:PB.PopupTimer.Stop(); $script:PB.C.DropPopup.IsOpen = $false } })
+                $popup.Add_Tick({ Invoke-PBSafe { Close-PBPopup } })
                 $script:PB.PopupTimer = $popup
 
                 $heat = New-Object System.Windows.Threading.DispatcherTimer
@@ -367,8 +370,7 @@ function Register-PBHandlers {
                                 [System.Windows.Input.KeyboardFocusChangedEventHandler]{ param($s, $e) Invoke-PBSafe { Invoke-PBLostFocus $e } }, $true)
                 $w.AddHandler([System.Windows.Controls.Primitives.Selector]::SelectionChangedEvent,
                                 [System.Windows.Controls.SelectionChangedEventHandler]{ param($s, $e) Invoke-PBSafe { Invoke-PBSelectionChanged $e } }, $true)
-                $w.AddHandler([System.Windows.FrameworkElement]::ToolTipOpeningEvent,
-                                [System.Windows.Controls.ToolTipEventHandler]{ param($s, $e) Invoke-PBSafe { Invoke-PBToolTipOpening $e } }, $true)
+                $w.Add_Deactivated({ Invoke-PBSafe { Close-PBPopup } })
                 $w.AddHandler([System.Windows.FrameworkElement]::ContextMenuOpeningEvent,
                                 [System.Windows.Controls.ContextMenuEventHandler]{ param($s, $e) Invoke-PBSafe { Invoke-PBContextMenuOpening $e } }, $true)
                 $w.AddHandler([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent,
@@ -396,6 +398,8 @@ function Register-PBHandlers {
 function Request-PBCommand {
                 param ([hashtable]$Command)
 
+                if ($script:PB.Filling) { return }
+
                 $script:PB.Commands.Add($Command)
                 [void]$script:PB.Window.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::Background, [System.Action]$script:PBDrainAction)
 }
@@ -422,12 +426,45 @@ function Invoke-PBChange {
                 param ([scriptblock]$Action, [string]$Status, [switch]$KeepReview)
 
                 if ($script:PB.Mode -eq 'Review' -and -not $KeepReview) { Exit-PBReview }
+                $focus = Get-PBFocusState
                 $script:PB.Busy = $true
                 try { & $Action } finally { $script:PB.Busy = $false }
                 Update-PBAll
+                Restore-PBFocus $focus
                 Request-PBAutosave
                 Start-PBAssessQueue
                 if ($Status) { Set-PBStatus $Status }
+}
+
+# Which row cell has the keyboard, so it can be given back after the rows are rebuilt
+function Get-PBFocusState {
+                $fe = [System.Windows.Input.Keyboard]::FocusedElement -as [System.Windows.FrameworkElement]
+                if ($null -eq $fe -or $fe.Tag -isnot [string]) { return $null }
+                if (@('EtdBox', 'CallsignBox', 'NumBox', 'NotesBox', 'TypeBox', 'MissionBox') -notcontains $fe.Tag) { return $null }
+                $vm = $fe.DataContext
+                if ($null -eq $vm -or $null -eq $vm.PSObject.Properties['LineId']) { return $null }
+                $state = @{ LineId = [string]$vm.LineId; Tag = [string]$fe.Tag; Start = 0; Length = 0 }
+                if ($fe -is [System.Windows.Controls.TextBox]) { $state.Start = $fe.SelectionStart; $state.Length = $fe.SelectionLength }
+                return $state
+}
+
+function Restore-PBFocus {
+                param ($State)
+
+                if ($null -eq $State) { return }
+                $tab = $script:PB.C.DayTabs.SelectedItem
+                if ($null -eq $tab) { return }
+                $script:PB.Window.UpdateLayout()
+                foreach ($el in @(Get-PBTaggedDescendants -Root $tab.Content -Tag $State.Tag)) {
+                                if ($null -ne $el.DataContext -and [string]$el.DataContext.LineId -eq $State.LineId) {
+                                                [void]$el.Focus()
+                                                if ($el -is [System.Windows.Controls.TextBox]) {
+                                                                $len = ([string]$el.Text).Length
+                                                                $el.Select([math]::Min($State.Start, $len), [math]::Min($State.Length, [math]::Max(0, $len - $State.Start)))
+                                                }
+                                                return
+                                }
+                }
 }
 
 function Update-PBAll {
@@ -497,6 +534,8 @@ function Update-PBLineRow {
                 $coll = $script:PB.DayColls[$line.Day]
                 if ($null -eq $coll) { return $true }
                 $focused = [System.Windows.Input.Keyboard]::FocusedElement
+                # An open drop-down list has focus on one of its items; the owner is the combo box
+                if ($focused -is [System.Windows.Controls.ComboBoxItem]) { $focused = [System.Windows.Controls.ItemsControl]::ItemsControlFromItemContainer($focused) }
                 if ($focused -is [System.Windows.Controls.Primitives.TextBoxBase] -or $focused -is [System.Windows.Controls.ComboBox]) {
                                 if ($null -ne $focused.DataContext -and $null -ne $focused.DataContext.PSObject.Properties['LineId'] -and $focused.DataContext.LineId -eq $LineId) { return $false }
                 }
@@ -622,7 +661,7 @@ function New-PBLineVM {
                 $missionSelected = ''
                 $missionEnabled = $false
                 if ($pinned) {
-                                $missionOptions = Get-PBMissionChoices $Line
+                                $missionOptions = @(Get-PBMissionChoices $Line)
                                 $missionSelected = if ($Line.Mission) { [string]$Line.Mission } else { $script:PBAutoText }
                                 $missionEnabled = $true
                 }
@@ -803,7 +842,8 @@ function Start-PBAssessQueue {
 }
 
 function Invoke-PBAssessTick {
-                if ($script:PB.Busy -or $script:PB.Draining) { return }
+                if ($script:PB.Busy -or $script:PB.Draining -or $script:PB.Filling) { return }
+                if ($null -ne $script:PB.Heat -or ($null -ne $script:PB.Drag -and $script:PB.Drag.Active)) { return }
                 $q = $script:PB.Queue
                 $sw = [System.Diagnostics.Stopwatch]::StartNew()
                 $deferred = New-Object System.Collections.Generic.List[string]
@@ -837,6 +877,9 @@ function Invoke-PBMouseDown {
                 param ($e)
 
                 $script:PB.Drag = $null
+                if ($script:PB.Filling) { $e.Handled = $true; return }
+                # The pop-up never blocks the click that dismisses it
+                if ($script:PB.C.DropPopup.IsOpen) { Close-PBPopup }
                 $src = $e.OriginalSource
                 if (Test-PBInsideInput $src) { return }
                 $el = Find-PBTagged $src
@@ -863,7 +906,8 @@ function Invoke-PBMouseMove {
                 param ($e)
 
                 $d = $script:PB.Drag
-                if ($null -eq $d -or $d.Active) { return }
+                if ($null -eq $d) { Update-PBHoverToolTip $e; return }
+                if ($d.Active) { return }
                 if ($e.LeftButton -ne [System.Windows.Input.MouseButtonState]::Pressed) { $script:PB.Drag = $null; return }
                 $p = $e.GetPosition($script:PB.Window)
                 if ([math]::Abs($p.X - $d.Start.X) -lt [System.Windows.SystemParameters]::MinimumHorizontalDragDistance -and
@@ -1011,6 +1055,8 @@ function Invoke-PBKeyDown {
                 $C = $script:PB.C
                 $src = $e.OriginalSource
                 $key = $e.Key
+                if ($script:PB.Filling) { $e.Handled = $true; return }
+                if ($key -eq [System.Windows.Input.Key]::Escape -and $C.DropPopup.IsOpen) { Close-PBPopup }
                 $mods = [System.Windows.Input.Keyboard]::Modifiers
                 $ctrl = ($mods -band [System.Windows.Input.ModifierKeys]::Control) -eq [System.Windows.Input.ModifierKeys]::Control
                 $shift = ($mods -band [System.Windows.Input.ModifierKeys]::Shift) -eq [System.Windows.Input.ModifierKeys]::Shift
@@ -1076,7 +1122,10 @@ function Submit-PBCell {
                 param ($TextBox)
 
                 $vm = $TextBox.DataContext
-                if ($null -eq $vm -or $null -eq $vm.PSObject.Properties['LineId'] -or $vm.ReadOnlyFields) { return }
+                if ($null -eq $vm -or $null -eq $vm.PSObject.Properties['LineId']) { return }
+                # In Review mode callsign / num / notes show the fill's result and are read-only; an ETD edit
+                # is allowed and sends the board back to editing
+                if ($vm.ReadOnlyFields -and [string]$TextBox.Tag -ne 'EtdBox') { return }
                 $line = Get-BoardLine $script:PB.Board $vm.LineId
                 if ($null -eq $line) { return }
                 $text = ([string]$TextBox.Text).Trim()
@@ -1119,6 +1168,7 @@ function Invoke-PBSelectionChanged {
                 if ($script:PB.Busy) { return }
                 $src = $e.OriginalSource
                 if ([object]::ReferenceEquals($src, $script:PB.C.DayTabs)) {
+                                Close-PBPopup
                                 $script:PB.LastFocusDay = Get-PBActiveDay
                                 Update-PBPools
                                 Update-PBCounts
@@ -1134,6 +1184,7 @@ function Invoke-PBSelectionChanged {
                                                 if ($value -and $value -ne $vm.SortieType) { Request-PBCommand @{ Cmd = 'SetType'; LineId = $vm.LineId; Value = $value } }
                                 }
                                 'MissionBox' {
+                                                if (@($vm.MissionOptions) -notcontains $value) { return }
                                                 $mission = if ($value -eq $script:PBAutoText) { '' } else { $value }
                                                 if ($vm.MissionEnabled -and $mission -ne $vm.MissionRaw) { Request-PBCommand @{ Cmd = 'SetMission'; LineId = $vm.LineId; Value = $mission } }
                                 }
@@ -1230,14 +1281,29 @@ function Get-PBLineAssessment {
                 return $script:PB.Assess[$Line.Id]
 }
 
-function Invoke-PBToolTipOpening {
+# ToolTipOpening is a Direct routed event (it never bubbles to the window), so the tooltip is
+# built while the pointer moves over a slot, before WPF decides to show it
+function Update-PBHoverToolTip {
                 param ($e)
 
                 $el = Find-PBTagged $e.OriginalSource @('StudentSlot')
-                if ($null -eq $el -or -not [object]::ReferenceEquals($el, $e.OriginalSource)) { return }
+                if ($null -eq $el) { $script:PB.HoverKey = $null; return }
                 $vm = $el.DataContext
+                if ($null -eq $vm -or $null -eq $vm.PSObject.Properties['LineId']) { return }
+                $key = "{0}|{1}|{2}" -f $vm.LineId, $script:PB.Board.Version, $script:PB.Mode
+                if ($script:PB.HoverKey -eq $key -and [object]::ReferenceEquals($script:PB.HoverElement, $el)) { return }
+                $script:PB.HoverKey = $key
+                $script:PB.HoverElement = $el
+                Set-PBSlotToolTip $el
+}
+
+# Sets (or clears) a student slot's tooltip from the line it shows
+function Set-PBSlotToolTip {
+                param ($Element)
+
+                $vm = $Element.DataContext
                 $line = if ($null -ne $vm) { Get-BoardLine $script:PB.Board $vm.LineId } else { $null }
-                if ($null -eq $line) { $e.Handled = $true; return }
+                if ($null -eq $line) { $Element.ToolTip = $null; return }
 
                 $content = $null
                 if ($line.Student) {
@@ -1251,8 +1317,12 @@ function Invoke-PBToolTipOpening {
                 elseif (Test-IsReturnSortieType ([string]$line.SortieType)) {
                                 $content = New-PBTextPanel -Lines @('O&B Return lines are filled with the O&B''s student when the schedule is filled.')
                 }
-                if ($null -eq $content) { $e.Handled = $true; return }
-                $el.ToolTip = $content
+                $Element.ToolTip = $content
+}
+
+function Close-PBPopup {
+                $script:PB.PopupTimer.Stop()
+                $script:PB.C.DropPopup.IsOpen = $false
 }
 
 function Show-PBPopupFor {
@@ -1301,10 +1371,9 @@ function New-PBMenuItem {
 function Invoke-PBContextMenuOpening {
                 param ($e)
 
-                $el = Find-PBTagged $e.OriginalSource
+                $el = Find-PBTagged $e.OriginalSource @('StudentSlot', 'IPSlot', 'Row')
                 if ($null -eq $el) { return }
                 $tag = [string]$el.Tag
-                if (@('StudentSlot', 'IPSlot', 'Row') -notcontains $tag) { return }
                 $menu = $el.ContextMenu
                 if ($null -eq $menu) { return }
                 $vm = $el.DataContext
@@ -1416,12 +1485,16 @@ function Invoke-PBCommand {
                                                 Invoke-PBChange { Add-BoardLine -Board $board -Line $lines -Link $links } -Status $Cmd.Status
                                 }
                                 'Undo' {
-                                                if ($script:PB.Mode -eq 'Review') { Exit-PBReview }
+                                                $wasReview = ($script:PB.Mode -eq 'Review')
+                                                if ($wasReview) { Exit-PBReview }
                                                 if (Undo-Board $board) {
                                                                 Update-PBAll; Request-PBAutosave; Start-PBAssessQueue
                                                                 Set-PBStatus 'Undone.'
                                                 }
-                                                else { Set-PBStatus 'Nothing to undo.' 'Warn' }
+                                                else {
+                                                                if ($wasReview) { Update-PBAll }
+                                                                Set-PBStatus 'Nothing to undo.' 'Warn'
+                                                }
                                 }
                                 'CopyPrevDay' { Invoke-PBCopyPrevDay }
                                 'Fill' { Invoke-PBFill }
@@ -1574,6 +1647,7 @@ function Invoke-PBFill {
 
                 Exit-PBReview
                 Show-BusyOverlay 'Filling the schedule...'
+                $script:PB.Filling = $true
                 try {
                                 $rows = @(ConvertTo-ScheduleRows -Board $board)
                                 $students = @(Copy-StudentList $script:PB.Data.Students)
@@ -1586,7 +1660,7 @@ function Invoke-PBFill {
                                 $result = Invoke-FillSchedule -Schedule $rows -Students $students -Instructors $script:PB.Data.Instructors `
                                                 -SoftWeights $script:PB.Data.SoftWeights -Formations @($script:PB.Data.Formations) -OnProgress $progress -Trace:([bool]$script:PB.Settings.Trace)
                 }
-                finally { Hide-BusyOverlay }
+                finally { $script:PB.Filling = $false; Hide-BusyOverlay }
 
                 $script:PB.FillResult = $result
                 $script:PB.Overlay = Get-FillOverlay -FillResult $result
@@ -1730,6 +1804,16 @@ function Test-PuckBoardWindow {
                                 if ($choices.Count -ge 2) { Invoke-PBCommand @{ Cmd = 'SetMission'; LineId = $lines[0].Id; Value = $choices[1] } }
                                 Invoke-PBCommand @{ Cmd = 'SetField'; LineId = $lines[0].Id; Field = 'Notes'; Value = 'self-test note' }
                                 Invoke-PBDoEvents
+
+                                $step = 'tooltip and mission list'
+                                $slot = Get-PBSlotElement -LineId $lines[0].Id
+                                & $check ($null -ne $slot) 'student slot found for the tooltip check'
+                                if ($null -ne $slot) {
+                                                Set-PBSlotToolTip $slot
+                                                & $check ($slot.ToolTip -is [System.Windows.Controls.StackPanel]) 'student slot tooltip has the +/- reasons'
+                                }
+                                $vm0 = New-PBLineVM (Get-BoardLine $script:PB.Board $lines[0].Id)
+                                & $check ($vm0.MissionOptions -is [System.Array] -and $vm0.MissionOptions.Count -ge 1 -and $vm0.MissionOptions[0] -eq '(auto)') 'mission list is a real list starting with (auto)'
 
                                 $step = 'background checks'
                                 $n = 0
