@@ -398,17 +398,19 @@ function Format-TabEtd {
 # headed SPName, else B): SimDebt into the column headed SimDebt (else P), UnsatSim /
 # UnsatFlight into the columns with those headings.
 # Only the cells passed in change. Throws when MasterData can't be written.
+#   -SimDebtDeltaByName: name -> amount added to the SimDebt already there (Update Syllabi)
 #   -FlagsByName: name -> @{ UnsatSim = $true/$false; UnsatFlight = $true/$false } (either key)
 # ==========================================
 function Update-MasterDataStudents {
                 param (
                                 [Parameter(Mandatory)] [string]$MasterDataPath,
                                 [hashtable]$SimDebtByName = @{},
+                                [hashtable]$SimDebtDeltaByName = @{},
                                 [hashtable]$FlagsByName = @{}
                 )
 
                 if (-not (Test-Path -LiteralPath $MasterDataPath)) { throw "MasterData.xlsx not found at: $MasterDataPath" }
-                if ($SimDebtByName.Count -eq 0 -and $FlagsByName.Count -eq 0) { return }
+                if ($SimDebtByName.Count -eq 0 -and $SimDebtDeltaByName.Count -eq 0 -and $FlagsByName.Count -eq 0) { return }
 
                 $package = $null
                 try {
@@ -445,6 +447,15 @@ function Update-MasterDataStudents {
                                                                 $ws.Cells[$row, $debtCol].Value = [double]$SimDebtByName[$studentName]
                                                                 $found[$studentName] = $true
                                                 }
+                                                elseif ($SimDebtDeltaByName.ContainsKey($studentName)) {
+                                                                $current = 0.0
+                                                                $old = $ws.Cells[$row, $debtCol].Value
+                                                                if ($null -ne $old -and ([string]$old).Trim() -ne '') {
+                                                                                try { $current = [double]$old } catch { [void][double]::TryParse([string]$old, [ref]$current) }
+                                                                }
+                                                                $ws.Cells[$row, $debtCol].Value = [math]::Round($current + [double]$SimDebtDeltaByName[$studentName], 2)
+                                                                $found[$studentName] = $true
+                                                }
                                                 if ($FlagsByName.ContainsKey($studentName)) {
                                                                 $flags = $FlagsByName[$studentName]
                                                                 foreach ($key in $flags.Keys) { $ws.Cells[$row, $flagCol[$key]].Value = [bool]$flags[$key] }
@@ -456,11 +467,12 @@ function Update-MasterDataStudents {
                                 Close-ExcelPackage -ExcelPackage $package
                                 $package = $null
 
-                                $missing = @(@($SimDebtByName.Keys) + @($FlagsByName.Keys) | Sort-Object -Unique | Where-Object { -not $found.ContainsKey($_) })
+                                $missing = @(@($SimDebtByName.Keys) + @($SimDebtDeltaByName.Keys) + @($FlagsByName.Keys) | Sort-Object -Unique | Where-Object { -not $found.ContainsKey($_) })
                                 if ($missing.Count -gt 0) {
                                                 Write-Warning "Not found in the SPName column of the MasterData Students sheet (above the first blank name), so nothing was written for: $($missing -join '; ')"
                                 }
-                                Write-Host ("MasterData updated: SimDebt for {0} student(s), unsat flags for {1}." -f @($SimDebtByName.Keys | Where-Object { $found.ContainsKey($_) }).Count, @($FlagsByName.Keys | Where-Object { $found.ContainsKey($_) }).Count) -ForegroundColor Green
+                                $debtNames = @(@($SimDebtByName.Keys) + @($SimDebtDeltaByName.Keys) | Sort-Object -Unique | Where-Object { $found.ContainsKey($_) })
+                                Write-Host ("MasterData updated: SimDebt for {0} student(s), unsat flags for {1}." -f $debtNames.Count, @($FlagsByName.Keys | Where-Object { $found.ContainsKey($_) }).Count) -ForegroundColor Green
                 }
                 catch {
                                 if ($null -ne $package) { Close-ExcelPackage -ExcelPackage $package -NoSave }
