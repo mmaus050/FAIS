@@ -369,15 +369,15 @@ Describe 'Get-PlacementAssessment: auto mission and explicit -MissionName' {
                                 $a.Status | Should -Be 'Hard'
                 }
 
-                It 'evaluates an explicit -MissionName even when it is not eligible (MISSION_NOT_ELIGIBLE)' {
+                It 'evaluates an explicit -MissionName even when the student is not opted for it (NOT_OPTED)' {
                                 $a = Get-Assess $board 'C1' 'Able, Amy' $data -Mission 'FT5102'
                                 $a.Status | Should -Be 'Hard'
                                 $a.Mission | Should -Be 'FT5102'
-                                Get-RuleList $a | Should -Be 'MISSION_NOT_ELIGIBLE'
-                                $v = Get-Viol $a 'MISSION_NOT_ELIGIBLE'
+                                Get-RuleList $a | Should -Be 'NOT_OPTED'
+                                $v = Get-Viol $a 'NOT_OPTED'
                                 $v.Severity | Should -Be 'Hard'
                                 $v.Mission | Should -Be 'FT5102'
-                                $v.Message | Should -Be "FT5102 isn't eligible here (prereq FT5001 not complete)"
+                                $v.Message | Should -Be "Not opted for FT5102: FT5001 isn't complete yet"
                                 $d = Get-Detail $a 'FT5102'
                                 $d | Should -Not -BeNullOrEmpty
                                 $d.Passed | Should -BeFalse
@@ -392,13 +392,13 @@ Describe 'Get-PlacementAssessment: auto mission and explicit -MissionName' {
                 }
 
                 It 'explains why an explicit mission is ineligible: <Mission> on <LineId>' -TestCases @(
-                                @{ LineId = 'C1'; Mission = 'FE3102'; Expected = "FE3102 isn't eligible here (already complete)" }
-                                @{ LineId = 'C3'; Mission = 'FT5001'; Expected = "FT5001 isn't eligible here (Type Single not allowed on OFT)" }
+                                @{ LineId = 'C1'; Mission = 'FE3102'; Rule = 'NOT_OPTED'; Expected = 'Not opted for FE3102: already complete' }
+                                @{ LineId = 'C3'; Mission = 'FT5001'; Rule = 'MISSION_NOT_ELIGIBLE'; Expected = "FT5001 isn't eligible here (Type Single not allowed on OFT)" }
                 ) {
-                                param ($LineId, $Mission, $Expected)
+                                param ($LineId, $Mission, $Rule, $Expected)
                                 $a = Get-Assess $board $LineId 'Able, Amy' $data -Mission $Mission
                                 $a.Status | Should -Be 'Hard'
-                                (Get-Viol $a 'MISSION_NOT_ELIGIBLE').Message | Should -Be $Expected
+                                (Get-Viol $a $Rule).Message | Should -Be $Expected
                                 $a.Mission | Should -Be $Mission
                                 $a.RequestedMission | Should -Be $Mission
                 }
@@ -1296,5 +1296,103 @@ Describe 'Get-InstructorPuckInfo' {
                                 $p = Get-InstructorPuckInfo -Instructor $script:IPs[0] -Board $null -Day '2026-03-03'
                                 $p.Lines | Should -Be 0
                                 @($p.Times).Count | Should -Be 0
+                }
+}
+
+
+Describe 'Choosing a mission by hand: Get-MissionChoiceTexts / ConvertFrom-MissionChoiceText / Get-MissionAdvice' {
+                BeforeEach {
+                                Clear-AssessmentCache
+                                $able = New-TestStudent -Name 'Able, Amy' -Done $script:AbleDone
+                                $data = New-AsData @($able)
+                                $board = New-AsBoard @(
+                                                @{ Id = 'C1'; ETD = '2026-03-03 07:30'; Type = 'Day Local'; IP = 'Jones, Bob' },
+                                                @{ Id = 'C3'; ETD = '2026-03-03 13:00'; Type = 'OFT' }
+                                )
+                }
+
+                It 'offers (auto), the eligible events, the next ones the student is not opted for, then Type a mission' {
+                                $auto = Get-Assess $board 'C1' 'Able, Amy' $data
+                                $texts = @(Get-MissionChoiceTexts -Student $able -SortieType 'Day Local' -Eligible $auto.EligibleEvents)
+                                ($texts -join '|') | Should -BeExactly '(auto)|FT5001|FT5102 (not opted)|FT5103 (not opted)|FF5201 (not opted)|FF5202 (not opted)|FT5104 (not opted)|FT5190 (not opted)|Type a mission...'
+                }
+
+                It "keeps the line's own mission in the list and never lists a mission twice" {
+                                $texts = @(Get-MissionChoiceTexts -Student $able -SortieType 'IFT' -Eligible @('ft5001', 'FT5001') -Current 'zz9')
+                                ($texts -join '|') | Should -BeExactly '(auto)|ft5001|zz9|FN3201 (not opted)|Type a mission...'
+                                $texts = @(Get-MissionChoiceTexts -Student $able -SortieType 'Day Local' -Current 'FT5102' -MaxNotOpted 2)
+                                ($texts -join '|') | Should -BeExactly '(auto)|FT5102|FT5103 (not opted)|FF5201 (not opted)|Type a mission...'
+                }
+
+                It 'works with no student (just auto and typing)' {
+                                (@(Get-MissionChoiceTexts -Student $null -SortieType 'Day Local') -join '|') | Should -BeExactly '(auto)|Type a mission...'
+                }
+
+                It 'reads a dropdown entry: <Text> -> <Kind> <Mission>' -TestCases @(
+                                @{ Text = '(auto)'; Kind = 'Auto'; Mission = '' }
+                                @{ Text = ''; Kind = 'Auto'; Mission = '' }
+                                @{ Text = 'Type a mission...'; Kind = 'Type'; Mission = '' }
+                                @{ Text = 'FT5001'; Kind = 'Mission'; Mission = 'FT5001' }
+                                @{ Text = 'FT5102 (not opted)'; Kind = 'Mission'; Mission = 'FT5102' }
+                ) {
+                                $c = ConvertFrom-MissionChoiceText $Text
+                                $c.Kind | Should -BeExactly $Kind
+                                $c.Mission | Should -BeExactly $Mission
+                }
+
+                It 'a mission the student is not opted for: says why and recommends the right one' {
+                                $auto = Get-Assess $board 'C1' 'Able, Amy' $data
+                                $req = Get-Assess $board 'C1' 'Able, Amy' $data -Mission 'FT5102'
+                                $a = Get-MissionAdvice -Requested $req -Auto $auto -Mission 'FT5102'
+                                $a.NeedsConfirm | Should -BeTrue
+                                @($a.Problems) | Should -Be @("Not opted for FT5102: FT5001 isn't complete yet")
+                                $a.Suggested | Should -BeExactly 'FT5001'
+                                $a.Buttons | Should -BeExactly 'YesNoCancel'
+                                $a.Title | Should -BeExactly 'Check the mission for Able, Amy'
+                                $lines = @($a.Text -split "`n")
+                                $lines[0] | Should -BeExactly "Able, Amy isn't opted for FT5102."
+                                $lines | Should -Contain "  X  Not opted for FT5102: FT5001 isn't complete yet"
+                                $lines | Should -Contain 'Recommended: FT5001, the mission the scheduler would put here (score +20.0).'
+                                $lines | Should -Contain 'Yes = put FT5001 on the line (recommended)'
+                                $lines | Should -Contain 'No = keep FT5102 anyway (it is flagged OVERRIDE on the output)'
+                                $lines | Should -Contain 'Cancel = leave the mission as it was'
+                }
+
+                It 'a mission that is not in the syllabus' {
+                                $auto = Get-Assess $board 'C1' 'Able, Amy' $data
+                                $req = Get-Assess $board 'C1' 'Able, Amy' $data -Mission 'XX1234'
+                                $a = Get-MissionAdvice -Requested $req -Auto $auto -Mission 'XX1234'
+                                $a.NeedsConfirm | Should -BeTrue
+                                @($a.Text -split "`n")[0] | Should -BeExactly "XX1234 isn't in Able, Amy's syllabus."
+                                $a.Suggested | Should -BeExactly 'FT5001'
+                }
+
+                It 'the right mission needs no second look' {
+                                $auto = Get-Assess $board 'C1' 'Able, Amy' $data
+                                $req = Get-Assess $board 'C1' 'Able, Amy' $data -Mission 'FT5001'
+                                $a = Get-MissionAdvice -Requested $req -Auto $auto -Mission 'FT5001'
+                                $a.NeedsConfirm | Should -BeFalse
+                                @($a.Problems).Count | Should -Be 0
+                                $a.Suggested | Should -BeExactly ''
+                }
+
+                It 'nothing fits the line: OK keeps the mission, there is nothing to recommend' {
+                                $auto = Get-Assess $board 'C3' 'Able, Amy' $data
+                                $req = Get-Assess $board 'C3' 'Able, Amy' $data -Mission 'FT5001'
+                                $a = Get-MissionAdvice -Requested $req -Auto $auto -Mission 'FT5001'
+                                $a.NeedsConfirm | Should -BeTrue
+                                $a.Buttons | Should -BeExactly 'OKCancel'
+                                $lines = @($a.Text -split "`n")
+                                $lines[0] | Should -BeExactly "Able, Amy can't fly FT5001 on this line."
+                                $lines | Should -Contain '  X  FT5001 isn''t eligible here (Type Single not allowed on OFT)'
+                                $lines | Should -Contain 'There is no mission Able can fly on this line right now.'
+                                $lines | Should -Contain 'OK = keep FT5001 anyway (it is flagged OVERRIDE on the output)'
+                }
+
+                It 'an event already flown is flagged as not opted' {
+                                $auto = Get-Assess $board 'C3' 'Able, Amy' $data
+                                $req = Get-Assess $board 'C3' 'Able, Amy' $data -Mission 'FE3102'
+                                $a = Get-MissionAdvice -Requested $req -Auto $auto -Mission 'FE3102'
+                                @($a.Problems) | Should -Be @('Not opted for FE3102: already complete')
                 }
 }

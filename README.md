@@ -66,8 +66,10 @@ The board reads the **Schedule** sheet one day at a time and keeps watching it:
 | Area | What it does |
 |---|---|
 | **Add lines** box (top) | Type lines and press Enter. See *Typing lines* below. |
+| **Add Bulk Lines** (top) | Asks for a start time, how many lines and the minutes between them (3 by default), then adds them to the day on screen: `0730`, `10` lines, `3` min gives 0730, 0733 ... 0757. Pick the line type too (an O&B gets its return leg). One **Ctrl+Z** takes the whole run off. |
 | **Template / Copy previous day's lines** | Reuse a saved wave, or copy the last flying day's times, types and IPs. |
 | **Load a day...** | Load one day from MasterData's Schedule sheet or from the last exported schedule. |
+| **Update Syllabi** | Not built yet: it says so and changes nothing. It will update each student's syllabus tab from the training files. |
 | **Blue banner** | MasterData's Schedule sheet has lines the board doesn't: load them or keep the board's lines. |
 | **Only this day** (bottom) | Fill and export just the day on screen. |
 | **Day tabs** | One tab per day. **Add day** builds several days at once; crew rest is checked across them. |
@@ -77,12 +79,13 @@ The board reads the **Schedule** sheet one day at a time and keeps watching it:
 - **Moving pucks:** drag between lines to move a puck (hold **Ctrl** to copy). Drop it back on its pool to take it off the line.
 - **While you drag a student,** slots turn **green** (fine), **amber** (needs a look) or **red** (breaks a hard rule).
 - **When you drop a student,** a pop-up lists:
-  - hard-rule flags (red ✖), for example `Turn time 2.8 hr < 3.25 hr minimum (vs 0730 FT5103)`;
+  - hard-rule flags (red ✖), for example `Turn time 2.8 hr < 3.25 hr minimum (vs 0730 FT5103)` or `Not opted for FE3102: FT5001 isn't complete yet` (a sim whose prerequisite is the dollar ride);
   - warnings, for example `Less than 3.5 hr TT, Flt/CC Approval Required`;
   - the **+ / −** score reasons, for example `Continue String +10` or `Exhaustion −6`.
 - **Rule breaks are allowed.** The line is hardcoded anyway and marked `OVERRIDE: ...` on the output.
 - **Corner marker** on every hardcoded student: green, amber, red, or grey while checking. Hover for the reasons; right-click for more (explain, take off, *Fly wing to...*, duplicate, delete line).
-- **Mission dropdown:** `(auto)` picks the best-scoring event that passes the rules. Choose an event to hardcode it.
+- **Mission dropdown:** `(auto)` picks the best-scoring event that passes the rules. Choose an event to hardcode it. After the events the student can fly on the line come the next ones they are **not opted for** yet (marked `(not opted)`), then **Type a mission...** for anything else.
+- **A mission that breaks a rule** (not opted, already flown, not in the syllabus, wrong line type) is explained before it goes on, with the mission the scheduler would put there: **Yes** puts the recommended mission on, **No** keeps yours (the line is flagged `OVERRIDE: Not opted for ...` on the output), **Cancel** changes nothing. You always have the final say.
 - **IFT / OFT lines** are never wingmen or direct support.
 
 ### Typing lines
@@ -110,7 +113,7 @@ The board reads the **Schedule** sheet one day at a time and keeps watching it:
 | Path | What |
 |---|---|
 | `FAIS.ps1` | Entry point and settings (`$BoardSettings`, `$OutputSettings`; the Teams copy is off by default) |
-| `Modules\` | Code: engine (`SchedulingEngine`, `Syllabus`), board (`PuckBoard.xaml/.psm1`, `LoadDayDialog.xaml`, `BoardModel`, `Assessment`), Excel in/out (`DataDownload`, `DataUpload`, `ExcelFiles`), pre-run pop-ups (`PreRunMenu`), helpers (`DataManipulation`) |
+| `Modules\` | Code: engine (`SchedulingEngine`, `Syllabus`), board (`PuckBoard.xaml/.psm1`, `LoadDayDialog.xaml`, `BulkLinesDialog.xaml`, `BoardModel`, `Assessment`), Excel in/out (`DataDownload`, `DataUpload`, `ExcelFiles`), pre-run pop-ups (`PreRunMenu`), helpers (`DataManipulation`) |
 | `Boards\` | Autosaved board, one file per day (created on first run) |
 | `Templates\` | Saved wave templates |
 | `OldFunctions.psm1` | Legacy code, kept for reference only; not loaded |

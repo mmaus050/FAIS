@@ -963,9 +963,60 @@ Describe 'Test-HardRules' {
                                                 $r.Passed | Should -BeFalse
                                 }
 
+                                It 'NOT_OPTED (<Why>)' -TestCases @(
+                                                @{ Why = 'already complete'; Done = @('FI3101|2026-02-20 08:00'); Type = 'IFT'; Ip = ''; Mission = 'FI3101'; Expected = 'Not opted for FI3101: already complete' }
+                                                @{ Why = 'prereq'; Done = @(); Type = 'Day Local'; Ip = 'Jones, Bob'; Mission = 'FT5102'; Expected = "Not opted for FT5102: FT5001 isn't complete yet" }
+                                                @{ Why = 'sim before its prereq flight'; Done = @('FI3101|2026-02-20 08:00', 'FT5001|2026-02-23 08:00|Jones, Bob'); Type = 'OFT'; Ip = ''; Mission = 'FN3201'; Expected = "Not opted for FN3201: FT5102 isn't complete yet" }
+                                ) {
+                                                $s = New-TestStudent -Name 'A' -Done $Done
+                                                $r = Invoke-HR -Student $s -Sortie (New-TestRow -ETD '2026-03-03 08:00' -SortieType $Type -Instructor $Ip) -Mission $Mission -Explain
+                                                @($r.EventResults).Count | Should -Be 1
+                                                $v = Get-EvtViol $r $Mission 'NOT_OPTED'
+                                                $v.Message | Should -Be $Expected
+                                                $v.Mission | Should -Be $Mission
+                                                $v.Severity | Should -Be 'Hard'
+                                                $v.Blocks | Should -BeTrue
+                                                @((Get-EvtResult $r $Mission).Violations | Where-Object { $_.Rule -eq 'MISSION_NOT_ELIGIBLE' }).Count | Should -Be 0
+                                                (Get-EvtResult $r $Mission).Passed | Should -BeFalse
+                                                $r.Passed | Should -BeFalse
+                                }
+
+                                It 'NOT_OPTED: a sim scheduled before the dollar ride (the sim needs FT5001)' {
+                                                $s = New-TestStudent -Name 'A' -Done 'FI3101|2026-02-20 08:00'
+                                                ($s.Syllabus | Where-Object { $_.Mission -eq 'FE3102' }).Prereqs = 'FI3101, FT5001'
+                                                $r = Invoke-HR -Student $s -Sortie (New-TestRow -ETD '2026-03-03 08:00' -SortieType 'OFT') -Mission 'FE3102' -Explain
+                                                (Get-EvtViol $r 'FE3102' 'NOT_OPTED').Message | Should -Be "Not opted for FE3102: FT5001 isn't complete yet"
+                                                $r.Passed | Should -BeFalse
+                                }
+
+                                It 'NOT_OPTED lists every missing prereq' {
+                                                $s = New-TestStudent -Name 'A'
+                                                ($s.Syllabus | Where-Object { $_.Mission -eq 'FT5190' }).Prereqs = 'FT5104, FN3201'
+                                                $r = Invoke-HR -Student $s -Sortie (New-TestRow -ETD '2026-03-03 08:00' -Instructor 'Jones, Bob') -Mission 'FT5190' -Explain
+                                                (Get-EvtViol $r 'FT5190' 'NOT_OPTED').Message | Should -Be "Not opted for FT5190: FT5104, FN3201 aren't complete yet"
+                                }
+
+                                It 'a pinned line with a mission the student is not opted for is kept and flagged OVERRIDE' {
+                                                $s = @(New-TestStudent -Name 'A' -Done 'FI3101|2026-02-20 08:00')
+                                                $row = New-TestRow -ETD '2026-03-03 08:00' -Instructor 'Jones, Bob' -Id 'P1' -Student 'A' -Mission 'FT5102'
+                                                $fill = Invoke-FillSchedule -Schedule @($row) -Students $s -Instructors (New-TestInstructors) -SoftWeights (New-TestSoftWeights) 6>$null 3>$null
+                                                $out = $fill.Schedule[0]
+                                                (Get-NameText $out.Mission) | Should -Be 'FT5102'
+                                                $out.Notes | Should -BeLike "*OVERRIDE: Not opted for FT5102: FT5001 isn't complete yet*"
+                                                @($fill.Overrides).Count | Should -Be 1
+                                }
+
+                                It 'a typed mission that is not in the syllabus is kept as typed and flagged once' {
+                                                $s = @(New-TestStudent -Name 'A' -Done 'FI3101|2026-02-20 08:00')
+                                                $row = New-TestRow -ETD '2026-03-03 08:00' -Instructor 'Jones, Bob' -Id 'P1' -Student 'A' -Mission 'XX1234'
+                                                $fill = Invoke-FillSchedule -Schedule @($row) -Students $s -Instructors (New-TestInstructors) -SoftWeights (New-TestSoftWeights) 6>$null 3>$null
+                                                $out = $fill.Schedule[0]
+                                                (Get-NameText $out.Mission) | Should -Be 'XX1234'
+                                                $out.Notes | Should -BeLike "*OVERRIDE: XX1234 isn't in A's syllabus*"
+                                                $out.Notes | Should -Not -BeLike '*mission left blank*'
+                                }
+
                                 It 'MISSION_NOT_ELIGIBLE (<Why>)' -TestCases @(
-                                                @{ Why = 'already complete'; Done = @('FI3101|2026-02-20 08:00'); Type = 'IFT'; Ip = ''; Mission = 'FI3101'; Expected = "FI3101 isn't eligible here (already complete)" }
-                                                @{ Why = 'prereq'; Done = @(); Type = 'Day Local'; Ip = 'Jones, Bob'; Mission = 'FT5102'; Expected = "FT5102 isn't eligible here (prereq FT5001 not complete)" }
                                                 @{ Why = 'type'; Done = @('FI3101|2026-02-20 08:00'); Type = 'Day Local'; Ip = 'Jones, Bob'; Mission = 'FE3102'; Expected = "FE3102 isn't eligible here (Type OFT not allowed on Day Local)" }
                                                 @{ Why = 'no second O&B leg'; Done = @('FI3101|2026-02-20 08:00', 'FT5001|2026-02-23 08:00|Jones, Bob'); Type = 'O&B'; Ip = 'Jones, Bob'; Mission = 'FT5102'; Expected = "FT5102 isn't eligible here (no second O&B leg available)" }
                                 ) {

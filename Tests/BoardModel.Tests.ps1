@@ -2046,3 +2046,67 @@ Describe 'Get-NextFlyingDay' {
         @('Saturday', 'Sunday') | Should -Not -Contain ([string]$d.DayOfWeek)
     }
 }
+
+Describe 'New-BulkBoardLines (Add Bulk Lines)' {
+    It 'makes the lines that many minutes apart, 3 by default' {
+        $r = New-BulkBoardLines -Day $script:D1 -StartTime '0730' -Count '10'
+        @($r.Errors).Count | Should -Be 0
+        ($r.Times -join ',') | Should -BeExactly '0730,0733,0736,0739,0742,0745,0748,0751,0754,0757'
+        @($r.Lines).Count | Should -Be 10
+        $r.Lines[0].ETD | Should -Be ([datetime]'2026-10-20 07:30')
+        $r.Lines[9].ETD | Should -Be ([datetime]'2026-10-20 07:57')
+        @($r.Lines | Where-Object { $_.SortieType -ne 'Day Local' -or $_.Day -ne $script:D1 -or $_.Student -or $_.Instructor }).Count | Should -Be 0
+        @($r.Lines | ForEach-Object { $_.Id } | Select-Object -Unique).Count | Should -Be 10
+    }
+
+    It 'reads the boxes the way people type them' {
+        ((New-BulkBoardLines -Day $script:D1 -StartTime '7:30' -Count '3' -Every '15').Times -join ',') | Should -BeExactly '0730,0745,0800'
+        ((New-BulkBoardLines -Day $script:D1 -StartTime ' 730 ' -Count ' 2 ' -Every ' 5 ').Times -join ',') | Should -BeExactly '0730,0735'
+        ((New-BulkBoardLines -Day $script:D1 -StartTime '1300' -Count '2' -Every '0').Times -join ',') | Should -BeExactly '1300,1300'
+        ((New-BulkBoardLines -Day $script:D1 -StartTime '0800' -Count '1' -SortieType 'OFT').Lines[0].SortieType) | Should -BeExactly 'OFT'
+    }
+
+    It 'gives each O&B its linked return leg' {
+        $r = New-BulkBoardLines -Day $script:D1 -StartTime '1000' -Count '2' -Every '5' -SortieType 'O&B'
+        ($r.Times -join ',') | Should -BeExactly '1000,1005'
+        @($r.Lines).Count | Should -Be 4
+        $ob = $r.Lines[0]; $ret = $r.Lines[1]
+        $ret.SortieType | Should -BeExactly 'O&B Return'
+        $ret.ETD | Should -Be ([datetime]'2026-10-20 13:00')
+        $ob.LinkedLineId | Should -BeExactly $ret.Id
+        $ret.LinkedLineId | Should -BeExactly $ob.Id
+        $r.Lines[3].ETD | Should -Be ([datetime]'2026-10-20 13:05')
+    }
+
+    It "uses the board's return offset and return type" {
+        $r = New-BulkBoardLines -Day $script:D1 -StartTime '1000' -Count '1' -SortieType 'O&B' -Settings @{ OBReturnOffsetMinutes = 120; ReturnSortieType = 'OB RTN' }
+        $r.Lines[1].ETD | Should -Be ([datetime]'2026-10-20 12:00')
+        $r.Lines[1].SortieType | Should -BeExactly 'OB RTN'
+    }
+
+    It 'goes on a board as one undo step' {
+        $b = New-TB
+        $r = New-BulkBoardLines -Day $script:D1 -StartTime '0800' -Count '4' -Settings $b.Settings
+        Add-BoardLine -Board $b -Line $r.Lines
+        @(Get-BoardDayLines -Board $b -Day $script:D1).Count | Should -Be 4
+        Undo-Board $b | Should -BeTrue
+        @(Get-BoardDayLines -Board $b -Day $script:D1).Count | Should -Be 0
+    }
+
+    It 'says what is wrong (<Why>) and makes nothing' -TestCases @(
+        @{ Why = 'not a time'; Start = '25:00'; Count = '3'; Every = '3'; Type = 'Day Local'; Want = "Start time '25:00' isn't a time (type 0730, 730 or 7:30)." }
+        @{ Why = 'no start'; Start = ''; Count = '3'; Every = '3'; Type = 'Day Local'; Want = "Start time '' isn't a time (type 0730, 730 or 7:30)." }
+        @{ Why = 'no lines'; Start = '0730'; Count = '0'; Every = '3'; Type = 'Day Local'; Want = 'Number of lines must be a whole number from 1 to 60.' }
+        @{ Why = 'count in words'; Start = '0730'; Count = 'ten'; Every = '3'; Type = 'Day Local'; Want = 'Number of lines must be a whole number from 1 to 60.' }
+        @{ Why = 'too many'; Start = '0730'; Count = '61'; Every = '3'; Type = 'Day Local'; Want = 'Number of lines must be a whole number from 1 to 60.' }
+        @{ Why = 'negative gap'; Start = '0730'; Count = '3'; Every = '-3'; Type = 'Day Local'; Want = 'Minutes between lines must be a whole number from 0 to 240.' }
+        @{ Why = 'no type'; Start = '0730'; Count = '3'; Every = '3'; Type = ' '; Want = 'Pick a sortie type.' }
+        @{ Why = 'past midnight'; Start = '2330'; Count = '20'; Every = '3'; Type = 'Day Local'; Want = 'The last line would be at 0027 the next day. Start earlier, add fewer lines or put them closer together.' }
+        @{ Why = 'O&B return past midnight'; Start = '2200'; Count = '1'; Every = '3'; Type = 'O&B'; Want = "The last O&B's return leg would be at 0100 the next day. Start earlier or add fewer lines." }
+    ) {
+        $r = New-BulkBoardLines -Day $script:D1 -StartTime $Start -Count $Count -Every $Every -SortieType $Type
+        ($r.Errors -join '|') | Should -BeExactly $Want
+        @($r.Lines).Count | Should -Be 0
+        @($r.Times).Count | Should -Be 0
+    }
+}
