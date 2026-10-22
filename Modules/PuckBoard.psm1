@@ -13,10 +13,11 @@
 #    the current WPF event finishes, so rows are never rebuilt inside their own events.
 #  - Pinned students are re-checked in the background after every change (DispatcherTimer),
 #    which keeps the corner markers current without freezing the window.
-#  - MasterData's Schedule sheet is re-read whenever MasterData is saved (another timer watches
-#    the file). Board days nobody has edited since they were loaded update by themselves; for
-#    the rest a banner offers the change. "Load a day..." loads one day from the sheet or from
-#    the last exported schedule.
+#  - MasterData's Schedule sheet gives each day it has lines for (from the board's first day on)
+#    a tab of its own, and is re-read whenever MasterData is saved (another timer watches the
+#    file). New sheet days are added and board days nobody has edited since they were loaded
+#    update by themselves; for the rest a banner offers the change. "Load a day..." loads one
+#    day from the sheet or from the last exported schedule.
 #  - Pucks go on a line by drag and drop, or by click and place: a click picks a puck up
 #    (PB.Held), the next slot clicked gets it, and a double-click puts it on the selected line.
 #  - Clicking a line selects it (PB.SelectedLineId). The Line details panel under the days shows
@@ -179,7 +180,6 @@ function Initialize-PuckBoardWindow {
                 Register-PBHandlers
                 Register-PBMenuHandlers
                 Initialize-PBDetails
-                $controls.AddDayPicker.SelectedDate = (Get-NextFlyingDay -From ([datetime]::ParseExact($board.Days[$board.Days.Count - 1], 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)))
                 Update-PBTemplateList
                 Set-PBMode 'Edit'
                 Update-PBAll
@@ -190,6 +190,8 @@ function Initialize-PuckBoardWindow {
                                 Write-PBLog ("Schedule sheet at start: {0}`n{1}" -f $_.Exception.Message, $_.ScriptStackTrace)
                                 $sheetMsg = "Could not load MasterData's Schedule sheet ($($_.Exception.Message)). Use Load a day... to try again."
                 }
+                # After the sheet has added its days: the date box suggests the flying day after the last one
+                $controls.AddDayPicker.SelectedDate = (Get-NextFlyingDay -From ([datetime]::ParseExact($board.Days[$board.Days.Count - 1], 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)))
                 Start-PBAssessQueue
                 if (-not [string]::IsNullOrWhiteSpace([string]$Data.MasterDataPath)) { $script:PB.SheetTimer.Start() }
 
@@ -3093,8 +3095,19 @@ function Invoke-PBRemoveDay {
                 $n = @($script:PB.Board.Lines | Where-Object { $_.Day -eq $day }).Count
                 $ans = [System.Windows.MessageBox]::Show("Remove $day and its $n line(s) from the board?", 'Remove day', [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Warning)
                 if ($ans -ne [System.Windows.MessageBoxResult]::Yes) { return }
-                Invoke-PBChange { Remove-BoardDay -Board $script:PB.Board -Day $day } -Status "$day removed (Ctrl+Z to undo)."
-                $file = Join-Path $script:PB.Settings.BoardDir "$day.json"
+                Remove-PBDay $day
+}
+
+# Takes a day and its lines off the board (one undo step) and deletes its autosave file
+function Remove-PBDay {
+                param ([Parameter(Mandatory)] [string]$Day)
+
+                # A day the Schedule sheet has lines for is not put back by the next MasterData save,
+                # unless the sheet's lines for it change
+                $fp = Get-ScheduleDayFingerprint -Rows @(Get-PBSheetRows) -Day $Day
+                if ($fp -ne '') { $script:PB.SheetIgnore.Add("$Day|$fp") }
+                Invoke-PBChange { Remove-BoardDay -Board $script:PB.Board -Day $Day } -Status "$Day removed (Ctrl+Z to undo)."
+                $file = Join-Path $script:PB.Settings.BoardDir "$Day.json"
                 if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue }
 }
 
@@ -3205,12 +3218,17 @@ ADDING LINES (box at the top, press Enter)
 Templates save a day's times; "Copy previous day's lines" copies the last flying day.
 
 ONE DAY AT A TIME
+  Schedule sheet:         when the board opens, each day MasterData's Schedule sheet has lines
+                          for (from the board's first day on) gets a tab with those lines.
+                          Days before it are not loaded; if that is all the sheet has, the
+                          blue banner says so and can put them on the first day.
   Load a day...           Loads one day from MasterData's Schedule sheet, or from the schedule
                           you last exported (to change a day already sent out: everyone stays
                           where they were, so a fill only changes the lines you open up).
-  MasterData is watched:  save the Schedule sheet in Excel and the board follows: a day you have
-                          not edited since it was loaded (or that is still empty) updates by
-                          itself; for a day you have edited, the blue banner offers the change.
+  MasterData is watched:  save the Schedule sheet in Excel and the board follows: a new day on
+                          the sheet gets its own tab, and a day you have not edited since it was
+                          loaded (or that is still empty) updates by itself; for a day you have
+                          edited, the blue banner offers the change.
   Fill this day           Fills and exports just the day on screen (Ctrl+Shift+Enter). Days
                           already exported stay exactly as they were.
 
@@ -3277,8 +3295,9 @@ UPDATE SYLLABI
 # =================================================================================
 #  ONE DAY AT A TIME
 #  "Load a day..." puts one day on the board from MasterData's Schedule sheet or from the
-#  last exported schedule. The sheet is re-read whenever MasterData is saved, and the
-#  banner offers any day the board is behind on. "Fill this day" fills and exports one day.
+#  last exported schedule. The sheet is re-read whenever MasterData is saved: its new days
+#  get their own tabs, and the banner offers any day the board is behind on.
+#  "Fill this day" fills and exports one day.
 # =================================================================================
 
 function Select-PBDay {
@@ -3364,13 +3383,15 @@ function Update-PBPublishedRead {
 }
 
 # Loads the sheet onto the board days that can take it without losing anything: days still
-# empty, and days nobody has edited since they were loaded. Returns 'Tue 20 Oct (14 line(s))'
-# for each day loaded.
+# empty, days nobody has edited since they were loaded, and each day the sheet has lines for
+# (from the board's first day on) that is not on the board yet, as a tab of its own.
+# Returns 'Tue 20 Oct (14 line(s))' for each day loaded.
 function Invoke-PBSheetAutoUpdate {
                 $done = New-Object System.Collections.Generic.List[string]
                 $rows = @(Get-PBSheetRows)
                 if ($rows.Count -eq 0) { return @() }
-                foreach ($day in @($script:PB.Board.Days)) {
+                $newDays = @(Get-SheetDaysToAdd -Board $script:PB.Board -SheetRows $rows -Ignore $script:PB.SheetIgnore.ToArray() | ForEach-Object { $_.Day })
+                foreach ($day in @(@($script:PB.Board.Days) + $newDays)) {
                                 $st = Get-BoardSheetState -Board $script:PB.Board -SheetRows $rows -Day $day
                                 if ($st.State -ne 'EmptyDay' -and $st.State -ne 'Outdated') { continue }
                                 $res = Invoke-PBLoadDay -Source 'Sheet' -SourceDay $day -TargetDay $day -Replace -KeepStudents -Quiet -StayOnDay
@@ -3435,26 +3456,27 @@ function Update-PBSheetBanner {
                 if ($null -eq $info) { $C.SheetBanner.Visibility = 'Collapsed'; return }
                 $C.SheetBannerText.Text = $info.Text
                 $C.SheetBannerLoadButton.Content = $info.ActionText
-                $C.SheetBannerIgnoreButton.Content = if ($info.State -eq 'OtherDay') { 'Not now' } else { "Keep the board's lines" }
+                $C.SheetBannerIgnoreButton.Content = if (@('OtherDay', 'PastDay') -contains $info.State) { 'Not now' } else { "Keep the board's lines" }
                 $C.SheetBanner.Visibility = 'Visible'
 }
 
 function Invoke-PBSheetBannerLoad {
                 $info = $script:PB.SheetBannerInfo
                 if ($null -eq $info) { return }
-                [void](Invoke-PBLoadDay -Source 'Sheet' -SourceDay $info.Day -TargetDay $info.Day -Replace -KeepStudents)
+                [void](Invoke-PBLoadDay -Source 'Sheet' -SourceDay $info.Day -TargetDay $info.TargetDay -Replace -KeepStudents)
 }
 
 function Invoke-PBSheetBannerIgnore {
                 $info = $script:PB.SheetBannerInfo
                 if ($null -eq $info) { return }
-                if ($info.State -eq 'OtherDay') { $script:PB.SheetIgnore.Add("$($info.Day)|$($info.Fingerprint)") }
+                if (@('OtherDay', 'PastDay') -contains $info.State) { $script:PB.SheetIgnore.Add("$($info.Day)|$($info.Fingerprint)") }
                 else {
                                 Set-BoardSheetSync -Board $script:PB.Board -Day $info.Day -Entry (New-SheetSyncEntry -Fingerprint $info.Fingerprint -Action 'Ignored')
                                 Request-PBAutosave
                 }
                 Update-PBSheetBanner
-                Set-PBStatus "Kept the board's lines for $(Format-BoardDayLabel $info.Day). You will be asked again if the Schedule sheet changes."
+                $what = if (@('OtherDay', 'PastDay') -contains $info.State) { "Left the sheet's $(Format-BoardDayLabel $info.Day) off the board" } else { "Kept the board's lines for $(Format-BoardDayLabel $info.Day)" }
+                Set-PBStatus "$what. You will be asked again if the Schedule sheet changes."
 }
 
 # Puts one day's lines on the board (one undo step) from MasterData's Schedule sheet

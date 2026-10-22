@@ -1,7 +1,7 @@
 # Pester 5 tests for the puck board's one-day-at-a-time logic (Modules\PuckBoard.psm1) without
 # a window: the WPF-only helpers are mocked and the controls are plain objects. The real window
 # is driven by Tests\Invoke-SelfTest.ps1 on Windows.
-# Dates: Tue 2026-10-20 (D1), Wed 2026-10-21 (D2).
+# Dates: Tue 2026-10-20 (D1), Wed 2026-10-21 (D2), Thu 2026-10-22 (D3).
 
 BeforeAll {
     . "$PSScriptRoot/Fixtures/New-FaisTestData.ps1"
@@ -9,6 +9,7 @@ BeforeAll {
 
     $script:D1 = '2026-10-20'
     $script:D2 = '2026-10-21'
+    $script:D3 = '2026-10-22'
 
     function New-SR {
         param ([string]$Day, [string]$Time, [string]$Type = 'Day Local', [string]$IP = 'Jones, Bob', [string]$Student = $null)
@@ -145,15 +146,91 @@ Describe 'Puck board, one day at a time (no window)' {
         $pb.C.StatusText.Text | Should -BeLike 'MasterData was saved: updated Tue 20 Oct*'
     }
 
-    It 'the banner offers a later sheet day, and "Not now" hides it until that day changes' {
-        Initialize-TestBoard -Days @($script:D1) -Sheet (New-Sheet @(New-SR $script:D2 '07:30'))
+    It 'opening the board gives each sheet day from the first day on a tab of its own, with its lines' {
+        $rows = @((New-SR $script:D1 '07:30' -Student 'Adams, Al'), (New-SR $script:D1 '09:00'), (New-SR $script:D2 '07:30'), (New-SR $script:D3 '08:00'), (New-SR $script:D3 '08:30'), (New-SR '2026-10-19' '07:30'))
+        Initialize-TestBoard -Days @($script:D1) -Sheet (New-Sheet $rows)
+        $msg = InModuleScope PuckBoard { Invoke-PBSheetStartup }
+        $pb = Get-PB
+        ($pb.Board.Days.ToArray() -join ',') | Should -BeExactly "$($script:D1),$($script:D2),$($script:D3)" -Because 'Mon 19 Oct is before the board and is left off'
+        @(Get-BoardDayLines -Board $pb.Board -Day $script:D1).Count | Should -Be 2
+        @(Get-BoardDayLines -Board $pb.Board -Day $script:D2).Count | Should -Be 1
+        @(Get-BoardDayLines -Board $pb.Board -Day $script:D3).Count | Should -Be 2
+        (@(Get-BoardDayLines -Board $pb.Board -Day $script:D1))[0].Student | Should -BeExactly 'Adams, Al'
+        $msg | Should -BeLike 'Loaded Tue 20 Oct (2 line(s)), Wed 21 Oct (1 line(s)), Thu 22 Oct (2 line(s)) from MasterData*'
+        $pb.ActiveDay | Should -BeExactly $script:D1 -Because 'the board stays on its first day'
+        foreach ($d in @($script:D1, $script:D2, $script:D3)) { (Get-BoardSheetState -Board $pb.Board -SheetRows $rows -Day $d).State | Should -BeExactly 'InSync' }
+        $pb.SheetBannerInfo | Should -BeNullOrEmpty
+    }
+
+    It 'a new day on the sheet gets its own tab when MasterData is saved' {
+        Initialize-TestBoard -Days @($script:D1) -Sheet (New-Sheet @(New-SR $script:D1 '07:30'))
         [void](InModuleScope PuckBoard { Invoke-PBSheetStartup })
         $pb = Get-PB
+        $pb.Data.ScheduleSheet = New-Sheet @((New-SR $script:D1 '07:30'), (New-SR $script:D2 '08:00'))
+        $done = @(InModuleScope PuckBoard { Invoke-PBSheetAutoUpdate })
+        $done -join ', ' | Should -BeExactly 'Wed 21 Oct (1 line(s))'
+        ($pb.Board.Days.ToArray() -join ',') | Should -BeExactly "$($script:D1),$($script:D2)"
+        $pb.ActiveDay | Should -BeExactly $script:D1 -Because 'a background update does not change the day on screen'
+    }
+
+    It 'a removed sheet day stays off when MasterData is saved, until its lines on the sheet change' {
+        Initialize-TestBoard -Days @($script:D1) -Sheet (New-Sheet @((New-SR $script:D1 '07:30'), (New-SR $script:D2 '08:00')))
+        [void](InModuleScope PuckBoard { Invoke-PBSheetStartup })
+        $pb = Get-PB
+        $pb.Settings.BoardDir = $TestDrive
+        $saved = Join-Path $TestDrive "$($script:D2).json"
+        [System.IO.File]::WriteAllText($saved, '{}')
+        InModuleScope PuckBoard -Parameters @{ D = $script:D2 } { param($D) Remove-PBDay $D }
+        ($pb.Board.Days.ToArray() -join ',') | Should -BeExactly $script:D1
+        Test-Path -LiteralPath $saved | Should -BeFalse -Because 'its autosave goes with it'
+        @(InModuleScope PuckBoard { Invoke-PBSheetAutoUpdate }).Count | Should -Be 0
+        ($pb.Board.Days.ToArray() -join ',') | Should -BeExactly $script:D1
+        $pb.Data.ScheduleSheet = New-Sheet @((New-SR $script:D1 '07:30'), (New-SR $script:D2 '08:15'))
+        @(InModuleScope PuckBoard { Invoke-PBSheetAutoUpdate }).Count | Should -Be 1
+        ($pb.Board.Days.ToArray() -join ',') | Should -BeExactly "$($script:D1),$($script:D2)" -Because 'the sheet changed for that day'
+    }
+
+    It 'a sheet with only days before the board says so, and can put them on the first day' {
+        Initialize-TestBoard -Days @($script:D2) -Sheet (New-Sheet @((New-SR $script:D1 '07:30' -Student 'Adams, Al'), (New-SR $script:D1 '08:10')))
+        $msg = InModuleScope PuckBoard { Invoke-PBSheetStartup }
+        $pb = Get-PB
+        $msg | Should -BeExactly ''
+        $pb.Board.Lines.Count | Should -Be 0
+        $pb.C.SheetBanner.Visibility | Should -BeExactly 'Visible'
+        $pb.SheetBannerInfo.State | Should -BeExactly 'PastDay'
+        $pb.C.SheetBannerText.Text | Should -BeLike "*only has lines for days before Wed 21 Oct*2 line(s) for Tue 20 Oct. They were not loaded."
+        $pb.C.SheetBannerLoadButton.Content | Should -BeExactly 'Put them on Wed 21 Oct'
+        $pb.C.SheetBannerIgnoreButton.Content | Should -BeExactly 'Not now'
+        InModuleScope PuckBoard { Invoke-PBSheetBannerLoad }
+        ($pb.Board.Days.ToArray() -join ',') | Should -BeExactly $script:D2 -Because 'the earlier day is not added'
+        (@(Get-BoardDayLines -Board $pb.Board -Day $script:D2) | ForEach-Object { $_.ETD.ToString('HHmm') + ' ' + $_.Student }) -join ',' | Should -BeExactly '0730 Adams, Al,0810 '
+        $pb.C.SheetBanner.Visibility | Should -BeExactly 'Collapsed'
+    }
+
+    It '"Not now" on the earlier-days banner hides it until those lines change' {
+        Initialize-TestBoard -Days @($script:D2) -Sheet (New-Sheet @(New-SR $script:D1 '07:30'))
+        [void](InModuleScope PuckBoard { Invoke-PBSheetStartup })
+        $pb = Get-PB
+        InModuleScope PuckBoard { Invoke-PBSheetBannerIgnore }
+        $pb.C.SheetBanner.Visibility | Should -BeExactly 'Collapsed'
+        $pb.Data.ScheduleSheet = New-Sheet @(New-SR $script:D1 '07:45')
+        InModuleScope PuckBoard { Update-PBSheetBanner }
+        $pb.SheetBannerInfo.State | Should -BeExactly 'PastDay'
+    }
+
+    It 'the banner offers a later sheet day read before the board could add it, and "Not now" hides it until that day changes' {
+        Initialize-TestBoard -Days @($script:D1) -Sheet (New-Sheet @(New-SR $script:D1 '07:30'))
+        [void](InModuleScope PuckBoard { Invoke-PBSheetStartup })
+        $pb = Get-PB
+        # Read (in review mode, say) but not applied yet
+        $pb.Data.ScheduleSheet = New-Sheet @((New-SR $script:D1 '07:30'), (New-SR $script:D2 '07:30'))
+        InModuleScope PuckBoard { Update-PBSheetBanner }
         $pb.SheetBannerInfo.State | Should -BeExactly 'OtherDay'
         $pb.C.SheetBannerIgnoreButton.Content | Should -BeExactly 'Not now'
         InModuleScope PuckBoard { Invoke-PBSheetBannerIgnore }
         $pb.C.SheetBanner.Visibility | Should -BeExactly 'Collapsed'
-        $pb.Data.ScheduleSheet = New-Sheet @((New-SR $script:D2 '07:30'), (New-SR $script:D2 '08:00'))
+        @(InModuleScope PuckBoard { Invoke-PBSheetAutoUpdate }).Count | Should -Be 0 -Because 'a day waved off is not added by itself either'
+        $pb.Data.ScheduleSheet = New-Sheet @((New-SR $script:D1 '07:30'), (New-SR $script:D2 '07:30'), (New-SR $script:D2 '08:00'))
         InModuleScope PuckBoard { Update-PBSheetBanner }
         $pb.C.SheetBanner.Visibility | Should -BeExactly 'Visible'
         InModuleScope PuckBoard { Invoke-PBSheetBannerLoad }

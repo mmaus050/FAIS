@@ -9,7 +9,7 @@
 # Typing: ConvertTo-BoardTime / Format-BoardTime / ConvertTo-BoardSortieType / ConvertFrom-QuickEntry
 #         New-BulkBoardLines (Add Bulk Lines)
 # Engine: ConvertTo-ScheduleRows / ConvertFrom-ScheduleRows / Get-FillOverlay / Test-BoardReadyToFill
-# One day at a time: Resolve-SheetRowDays / ConvertFrom-SheetRows / Import-BoardDayLines / Get-BoardSheetState / Get-SheetBannerInfo
+# One day at a time: Resolve-SheetRowDays / ConvertFrom-SheetRows / Import-BoardDayLines / Get-BoardSheetState / Get-SheetBannerInfo / Get-SheetDaysToAdd
 #         Set-BoardSheetSync / ConvertFrom-PublishedRows / Get-PublishedContextRows / Split-FillResult
 # Files:  Save-BoardState / Open-BoardState / Get-SavedBoardDays
 #         Save-BoardTemplate / Get-BoardTemplateList / Import-BoardTemplate / Copy-BoardPreviousDay
@@ -1083,9 +1083,10 @@ function Get-BoardSheetState {
 
 # The one thing about the Schedule sheet worth telling the user, or $null. First a board day
 # (the active one first) whose sheet lines changed or were never loaded, else a later day the
-# sheet has lines for that is not on the board yet. -Ignore holds 'day|fingerprint' keys of
-# later days the user already waved off.
-# Returns {Day; State; Count; Fingerprint; Text; ActionText}
+# sheet has lines for that is not on the board yet, else (PastDay) why an empty board got
+# nothing: the sheet only has days before the board's first day. -Ignore holds
+# 'day|fingerprint' keys of days the user already waved off.
+# Returns {Day; TargetDay (where loading puts it); State; Count; Fingerprint; Text; ActionText}
 function Get-SheetBannerInfo {
                 param ($Board, [array]$SheetRows = @(), [string]$ActiveDay = '', [string[]]$Ignore = @())
 
@@ -1103,25 +1104,59 @@ function Get-SheetBannerInfo {
                                                 'EmptyDay' { $text = "MasterData's Schedule sheet has $($st.SheetCount) line(s) for $label."; $action = "Load $label" }
                                 }
                                 if ($null -ne $text) {
-                                                return [PSCustomObject]@{ Day = $d; State = $st.State; Count = $st.SheetCount; Fingerprint = $st.Fingerprint; Text = $text; ActionText = $action }
+                                                return [PSCustomObject]@{ Day = $d; TargetDay = $d; State = $st.State; Count = $st.SheetCount; Fingerprint = $st.Fingerprint; Text = $text; ActionText = $action }
                                 }
                 }
-                $first = if ($Board.Days.Count -gt 0) { [string]$Board.Days[0] } else { '' }
-                foreach ($g in @(Get-ScheduleSheetDays -Rows $SheetRows)) {
-                                if ($g.Day -eq '' -or $Board.Days.Contains($g.Day) -or ($first -ne '' -and $g.Day -lt $first)) { continue }
-                                $fp = Get-ScheduleDayFingerprint -Rows $SheetRows -Day $g.Day
-                                if ($Ignore -contains "$($g.Day)|$fp") { continue }
+                $later = @(Get-SheetDaysToAdd -Board $Board -SheetRows $SheetRows -Ignore $Ignore)
+                foreach ($g in $later) {
                                 $label = Format-BoardDayLabel $g.Day
                                 return [PSCustomObject]@{
                                                 Day         = $g.Day
+                                                TargetDay   = $g.Day
                                                 State       = 'OtherDay'
                                                 Count       = $g.Count
-                                                Fingerprint = $fp
+                                                Fingerprint = $g.Fingerprint
                                                 Text        = "MasterData's Schedule sheet also has $($g.Count) line(s) for $label."
                                                 ActionText  = "Add $label to the board"
                                 }
                 }
-                return $null
+                # A sheet with lines only for days before the board's first day loads nothing by itself,
+                # so while that first day is empty say why, and offer the latest of those days for it
+                $first = if ($Board.Days.Count -gt 0) { [string]$Board.Days[0] } else { '' }
+                if ($first -eq '' -or @(Get-BoardDayLines -Board $Board -Day $first).Count -gt 0) { return $null }
+                $sheetDays = @(Get-ScheduleSheetDays -Rows $SheetRows | Where-Object { $_.Day -ne '' })
+                if (@($sheetDays | Where-Object { $_.Day -ge $first }).Count -gt 0) { return $null }
+                $past = @($sheetDays | Where-Object { $_.Day -lt $first })
+                if ($past.Count -eq 0) { return $null }
+                $g = $past[-1]
+                $fp = Get-ScheduleDayFingerprint -Rows $SheetRows -Day $g.Day
+                if ($Ignore -contains "$($g.Day)|$fp") { return $null }
+                $label = Format-BoardDayLabel $g.Day
+                $firstLabel = Format-BoardDayLabel $first
+                return [PSCustomObject]@{
+                                Day         = $g.Day
+                                TargetDay   = $first
+                                State       = 'PastDay'
+                                Count       = $g.Count
+                                Fingerprint = $fp
+                                Text        = "MasterData's Schedule sheet only has lines for days before $firstLabel (the board's first day): $($g.Count) line(s) for $label. They were not loaded."
+                                ActionText  = "Put them on $firstLabel"
+                }
+}
+
+# The days MasterData's Schedule sheet has lines for that are not on the board yet: from the
+# board's first day on (earlier days are not offered), and not waved off. -Ignore holds
+# 'day|fingerprint' keys. In date order, each {Day; Count; Fingerprint}.
+function Get-SheetDaysToAdd {
+                param ($Board, [array]$SheetRows = @(), [string[]]$Ignore = @())
+
+                $first = if ($Board.Days.Count -gt 0) { [string]$Board.Days[0] } else { '' }
+                return @(foreach ($g in @(Get-ScheduleSheetDays -Rows $SheetRows)) {
+                                if ($g.Day -eq '' -or $Board.Days.Contains($g.Day) -or ($first -ne '' -and $g.Day -lt $first)) { continue }
+                                $fp = Get-ScheduleDayFingerprint -Rows $SheetRows -Day $g.Day
+                                if ($Ignore -contains "$($g.Day)|$fp") { continue }
+                                [PSCustomObject]@{ Day = $g.Day; Count = $g.Count; Fingerprint = $fp }
+                })
 }
 
 # Days the last exported MasterSchedule has lines for, in order

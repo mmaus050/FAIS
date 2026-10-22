@@ -150,6 +150,8 @@ function IngestData {
                                 $dayText = @(Get-ScheduleSheetDays -Rows $ScheduleSheet.Rows | ForEach-Object { "$($_.Label) ($($_.Count))" }) -join ', '
                                 Write-Host "Schedule sheet: $(@($ScheduleSheet.Rows).Count) line(s): $dayText" -ForegroundColor Cyan
                 }
+                elseif ($ScheduleSheet.Found) { Write-Host "Schedule sheet: no lines" -ForegroundColor Yellow }
+                else { Write-Host "Schedule sheet: MasterData has no sheet named 'Schedule'" -ForegroundColor Yellow }
                 foreach ($skip in @($ScheduleSheet.Skipped)) { Write-Host "  Schedule sheet $skip" -ForegroundColor Yellow }
                 $Schedule = @($ScheduleSheet.Rows | Where-Object { $_.ETD } | Sort-Object -Property ETD)
 

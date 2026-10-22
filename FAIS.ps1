@@ -4,8 +4,8 @@
 # Run order:
 #   1. Open MasterData / OutputSchedule workbooks are saved in Excel so the latest edits are read
 #   2. Pre-run pop-ups: log hooked (unsat) / incomplete events from the last schedule (saved right away)
-#   3. Puck board: lines come from MasterData's Schedule sheet one day at a time (re-read whenever
-#      MasterData is saved), or are typed; hardcode IPs and students, see the + / - and rule flags
+#   3. Puck board: lines come from MasterData's Schedule sheet, a tab for each day it has lines for
+#      (re-read whenever MasterData is saved), or are typed; hardcode IPs and students, see the + / - and rule flags
 #   4. "Fill this day" or "Fill all days": the scheduler fills the open lines, you review it
 #   5. Export, all or nothing, for the filled days: OutputSchedule.xlsx (MasterSchedule, other exported
 #      days kept, + each student's syllabus tab), SimDebt + cleaned-up unsats to MasterData, and
@@ -131,7 +131,7 @@ if ($null -eq $SoftWeights) {
     Write-Host "The SoftWeights sheet could not be read, so nothing can be scored. Fix MasterData.xlsx and run again." -ForegroundColor Red
     return
 }
-Write-Host ("Loaded {0} students, {1} IPs, {2} formation callsigns." -f @($Students).Count, @($Instructors).Count, @($Formations).Count) -ForegroundColor Cyan
+Write-Host ("Loaded {0} students, {1} IPs, {2} formation callsigns from {3}." -f @($Students).Count, @($Instructors).Count, @($Formations).Count, $excelInputPath) -ForegroundColor Cyan
 
 
 # ==========================================
