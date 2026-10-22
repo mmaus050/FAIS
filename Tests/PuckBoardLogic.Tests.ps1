@@ -316,12 +316,62 @@ Describe 'Puck board: missions picked by hand, Add Bulk Lines, Update Syllabi (n
         $script:Board.Version | Should -Be $v
     }
 
-    It 'the dropdown lists the missions the student is not opted for' {
+    It 'the dropdown lists the missions the student is not opted for, once the line is checked' {
+        $texts = @(& (Get-Module PuckBoard) { param($b) Get-PBMissionChoices (Get-BoardLine $b 'L1') } $script:Board)
+        ($texts -join '|') | Should -BeExactly '(auto)|FT5001|Type a mission...' -Because 'until the check is in, only MasterData''s opted events'
+        & (Get-Module PuckBoard) { param($b) $script:PB.Assess['L1'] = Get-PlacementAssessment -Board $b -LineId 'L1' -StudentName 'Adams, Al' -Data $script:PB.Data } $script:Board
         $texts = @(& (Get-Module PuckBoard) { param($b) Get-PBMissionChoices (Get-BoardLine $b 'L1') } $script:Board)
         $texts[0] | Should -BeExactly '(auto)'
         $texts[1] | Should -BeExactly 'FT5001'
         $texts | Should -Contain 'FT5102 (not opted)'
         $texts[-1] | Should -BeExactly 'Type a mission...'
+    }
+
+    It 'a pick in the dropdown becomes a command only when it changes something: <Why>' -TestCases @(
+        @{ Why = '(auto) on an (auto) line'; Value = '(auto)'; Raw = ''; Enabled = $true; Want = $false }
+        @{ Why = 'the line''s own mission again'; Value = 'FT5102'; Raw = 'FT5102'; Enabled = $true; Want = $false }
+        @{ Why = 'a different mission'; Value = 'FT5001'; Raw = ''; Enabled = $true; Want = $true }
+        @{ Why = 'a not-opted mission'; Value = 'FT5102 (not opted)'; Raw = 'FT5001'; Enabled = $true; Want = $true }
+        @{ Why = 'back to (auto)'; Value = '(auto)'; Raw = 'FT5001'; Enabled = $true; Want = $true }
+        @{ Why = 'Type a mission... always asks'; Value = 'Type a mission...'; Raw = 'FT5001'; Enabled = $true; Want = $true }
+        @{ Why = 'a case-only fix'; Value = 'FT5001'; Raw = 'ft5001'; Enabled = $true; Want = $true }
+        @{ Why = 'a disabled row'; Value = 'FT5001'; Raw = ''; Enabled = $false; Want = $false }
+        @{ Why = 'text not in the list'; Value = 'XX9999'; Raw = ''; Enabled = $true; Want = $false }
+    ) {
+        $vm = [PSCustomObject]@{ LineId = 'L1'; MissionRaw = $Raw; MissionEnabled = $Enabled
+            MissionOptions = @('(auto)', 'FT5001', 'ft5001', 'FT5102', 'FT5102 (not opted)', 'Type a mission...') }
+        $cmd = & (Get-Module PuckBoard) { param($v, $t) Get-PBMissionCommand -VM $v -Value $t } $vm $Value
+        ($null -ne $cmd) | Should -Be $Want
+        if ($Want) { $cmd.Cmd | Should -BeExactly 'ChooseMission'; $cmd.LineId | Should -BeExactly 'L1'; $cmd.Value | Should -BeExactly $Value }
+    }
+
+    It 'the ChooseMission command runs the pick' {
+        Mock -ModuleName PuckBoard Show-PBMessage { throw 'should not ask' }
+        & (Get-Module PuckBoard) { Invoke-PBCommand @{ Cmd = 'ChooseMission'; LineId = 'L1'; Value = 'FT5001' } }
+        Get-L1Mission | Should -BeExactly 'FT5001'
+    }
+
+    It 'a kept rule break says so on the status bar, after the pop-up' {
+        Mock -ModuleName PuckBoard Show-PBMessage { 'No' }
+        Mock -ModuleName PuckBoard Show-PBPlacementPopup { & (Get-Module PuckBoard) { Set-PBStatus 'Adams, Al -> 0730 Day Local: FT5102, 1 rule flag' 'Hard' } }
+        Invoke-Choose 'FT5102 (not opted)'
+        Get-LastStatus | Should -BeExactly 'Warn|FT5102 kept - it is flagged OVERRIDE on the output.'
+    }
+
+    It 'a case-only change of the mission is saved' {
+        Mock -ModuleName PuckBoard Show-PBMessage { throw 'should not ask' }
+        Set-BoardMission -Board $script:Board -Id 'L1' -Mission 'ft5001'
+        Invoke-Choose 'FT5001'
+        Get-L1Mission | Should -BeExactly 'FT5001'
+    }
+
+    It 'a typed line with a student and a mission shows the rule check' {
+        $typed = New-BoardLine -ETD ([datetime]"$($script:D1) 09:00") -SortieType 'Day Local' -Instructor 'Jones, Bob' -Student 'Adams, Al' -Mission 'FT5102' -Id 'Q1'
+        & (Get-Module PuckBoard) { param($l) Invoke-PBCommand @{ Cmd = 'AddLines'; Lines = @($l); Status = 'Added 1 line(s).' } } $typed
+        Should -Invoke -ModuleName PuckBoard Show-PBPlacementPopup -Times 1 -Exactly -ParameterFilter { $LineId -eq 'Q1' }
+        $plain = New-BoardLine -ETD ([datetime]"$($script:D1) 10:00") -SortieType 'Day Local' -Instructor 'Jones, Bob' -Id 'Q2'
+        & (Get-Module PuckBoard) { param($l) Invoke-PBCommand @{ Cmd = 'AddLines'; Lines = @($l); Status = 'Added 1 line(s).' } } $plain
+        Should -Invoke -ModuleName PuckBoard Show-PBPlacementPopup -Times 1 -Exactly -Because 'a line with no student needs no check'
     }
 
     It 'Add Bulk Lines puts the lines on the day as one undo step' {

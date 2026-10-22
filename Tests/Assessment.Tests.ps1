@@ -1313,19 +1313,46 @@ Describe 'Choosing a mission by hand: Get-MissionChoiceTexts / ConvertFrom-Missi
 
                 It 'offers (auto), the eligible events, the next ones the student is not opted for, then Type a mission' {
                                 $auto = Get-Assess $board 'C1' 'Able, Amy' $data
-                                $texts = @(Get-MissionChoiceTexts -Student $able -SortieType 'Day Local' -Eligible $auto.EligibleEvents)
+                                (@($auto.NotOptedEvents) -join ',') | Should -BeExactly 'FT5102,FT5103,FF5201,FF5202,FT5104,FT5190'
+                                $texts = @(Get-MissionChoiceTexts -Eligible $auto.EligibleEvents -NotOpted $auto.NotOptedEvents)
                                 ($texts -join '|') | Should -BeExactly '(auto)|FT5001|FT5102 (not opted)|FT5103 (not opted)|FF5201 (not opted)|FF5202 (not opted)|FT5104 (not opted)|FT5190 (not opted)|Type a mission...'
                 }
 
-                It "keeps the line's own mission in the list and never lists a mission twice" {
-                                $texts = @(Get-MissionChoiceTexts -Student $able -SortieType 'IFT' -Eligible @('ft5001', 'FT5001') -Current 'zz9')
-                                ($texts -join '|') | Should -BeExactly '(auto)|ft5001|zz9|FN3201 (not opted)|Type a mission...'
-                                $texts = @(Get-MissionChoiceTexts -Student $able -SortieType 'Day Local' -Current 'FT5102' -MaxNotOpted 2)
-                                ($texts -join '|') | Should -BeExactly '(auto)|FT5102|FT5103 (not opted)|FF5201 (not opted)|Type a mission...'
+                It "keeps the line's own mission in the list, in its own spelling, and never lists a mission twice" {
+                                $texts = @(Get-MissionChoiceTexts -Eligible @('FT5001', 'ft5001') -Current 'zz9' -NotOpted @('FN3201'))
+                                ($texts -join '|') | Should -BeExactly '(auto)|FT5001|zz9|FN3201 (not opted)|Type a mission...'
+                                # Quick entry keeps m:ft5001 as typed; the dropdown must still show it selected
+                                $texts = @(Get-MissionChoiceTexts -Eligible @('FT5001') -Current 'ft5001' -NotOpted @('FT5102'))
+                                ($texts -join '|') | Should -BeExactly '(auto)|ft5001|FT5102 (not opted)|Type a mission...'
+                                # The line's own mission is never tagged
+                                $texts = @(Get-MissionChoiceTexts -Current 'FT5102' -NotOpted @('FT5102', 'FT5103'))
+                                ($texts -join '|') | Should -BeExactly '(auto)|FT5102|FT5103 (not opted)|Type a mission...'
                 }
 
-                It 'works with no student (just auto and typing)' {
-                                (@(Get-MissionChoiceTexts -Student $null -SortieType 'Day Local') -join '|') | Should -BeExactly '(auto)|Type a mission...'
+                It 'with nothing to offer: just auto and typing' {
+                                (@(Get-MissionChoiceTexts) -join '|') | Should -BeExactly '(auto)|Type a mission...'
+                                @(Get-NotOptedChoices -Student $null -SortieType 'Day Local').Count | Should -Be 0
+                }
+
+                It 'Get-NotOptedChoices: syllabus order, the line type only, at most -Max' {
+                                (@(Get-NotOptedChoices -Student $able -SortieType 'IFT') -join ',') | Should -BeExactly 'FN3201'
+                                (@(Get-NotOptedChoices -Student $able -SortieType 'Day Local' -Max 2) -join ',') | Should -BeExactly 'FT5102,FT5103'
+                                (@(Get-NotOptedChoices -Student $able -SortieType 'OFT') -join ',') | Should -BeExactly 'FN3201' -Because 'an OFT line takes IFT events too; FE3102 is flown'
+                }
+
+                It "the not-opted list sees the student's earlier lines on the board" {
+                                $b2 = New-AsBoard -Days @('2026-03-03', '2026-03-04') @(
+                                                @{ Id = 'M1'; ETD = '2026-03-03 07:30'; Type = 'Day Local'; IP = 'Jones, Bob'; Student = 'Able, Amy'; Mission = 'FT5001' },
+                                                @{ Id = 'M2'; ETD = '2026-03-04 07:30'; Type = 'Day Local'; IP = 'Jones, Bob' }
+                                )
+                                $a = Get-Assess $b2 'M2' 'Able, Amy' $data
+                                @($a.EligibleEvents) | Should -Contain 'FT5102' -Because 'FT5001 is flown on Tuesday'
+                                @($a.NotOptedEvents) | Should -Not -Contain 'FT5102'
+                                @($a.NotOptedEvents)[0] | Should -BeExactly 'FT5103'
+                }
+
+                It 'a quick (drag) assessment leaves the not-opted list empty' {
+                                @((Get-Assess $board 'C1' 'Able, Amy' $data -Quick).NotOptedEvents).Count | Should -Be 0
                 }
 
                 It 'reads a dropdown entry: <Text> -> <Kind> <Mission>' -TestCases @(
@@ -1387,6 +1414,32 @@ Describe 'Choosing a mission by hand: Get-MissionChoiceTexts / ConvertFrom-Missi
                                 $lines | Should -Contain '  X  FT5001 isn''t eligible here (Type Single not allowed on OFT)'
                                 $lines | Should -Contain 'There is no mission Able can fly on this line right now.'
                                 $lines | Should -Contain 'OK = keep FT5001 anyway (it is flagged OVERRIDE on the output)'
+                }
+
+                It '"Other missions" lists only events that pass every rule on the line' {
+                                $chk = New-TestStudent -Name 'Chk, Cal' -Done $script:ChkDone
+                                $chkData = New-AsData @($chk)
+                                # Jones is a Check IP: the checkride FT5190 is recommended; FF5201 (with Lee's line as the wing) also passes
+                                $two = New-AsBoard @(
+                                                @{ Id = 'C1'; ETD = '2026-03-03 07:30'; Type = 'Day Local'; IP = 'Jones, Bob' },
+                                                @{ Id = 'C2'; ETD = '2026-03-03 07:45'; Type = 'Day Local'; IP = 'Lee, Ann' }
+                                )
+                                $auto = Get-Assess $two 'C1' 'Chk, Cal' $chkData
+                                $req = Get-Assess $two 'C1' 'Chk, Cal' $chkData -Mission 'FT5103'
+                                $a = Get-MissionAdvice -Requested $req -Auto $auto -Mission 'FT5103'
+                                $a.Suggested | Should -BeExactly 'FT5190'
+                                (@($a.Others) -join ',') | Should -BeExactly 'FF5201'
+                                @($a.Text -split "`n") | Should -Contain 'Other missions Chk can fly here: FF5201.'
+                                # Lee is not a Check IP and flew FT5103 with Chk, and there is no wing line: nothing passes
+                                $lee = New-AsBoard @(@{ Id = 'K1'; ETD = '2026-03-03 07:30'; Type = 'Day Local'; IP = 'Lee, Ann' })
+                                $auto = Get-Assess $lee 'K1' 'Chk, Cal' $chkData
+                                $req = Get-Assess $lee 'K1' 'Chk, Cal' $chkData -Mission 'FT5103'
+                                $a = Get-MissionAdvice -Requested $req -Auto $auto -Mission 'FT5103'
+                                @($auto.EligibleEvents).Count | Should -BeGreaterThan 0 -Because 'opted events exist, they just break rules here'
+                                @($a.Others).Count | Should -Be 0
+                                $lines = @($a.Text -split "`n")
+                                $lines | Should -Contain 'There is no mission Chk can fly on this line right now.'
+                                @($lines | Where-Object { $_ -like 'Other missions*' }).Count | Should -Be 0
                 }
 
                 It 'an event already flown is flagged as not opted' {

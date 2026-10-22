@@ -455,7 +455,7 @@ function Set-BoardMission {
                 param ($Board, [string]$Id, [string]$Mission)
 
                 $line = Get-BoardLine $Board $Id
-                if ($null -eq $line -or $line.Mission -eq $Mission) { return }
+                if ($null -eq $line -or [string]$line.Mission -ceq $Mission) { return }
                 Save-BoardUndoPoint $Board
                 $line.Mission = $Mission
                 Step-BoardVersion $Board

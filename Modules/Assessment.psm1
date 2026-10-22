@@ -142,6 +142,7 @@ function Get-PlacementAssessment {
                                 Score          = $null
                                 BestScore      = $null
                                 EligibleEvents = @()
+                                NotOptedEvents = @()
                                 EventDetails   = @()
                                 Summary        = ''
                                 Quick          = [bool]$Quick
@@ -227,6 +228,7 @@ function Get-PlacementAssessment {
                 $result.EventDetails = $details.ToArray()
                 if (-not $Quick) {
                                 $result.EligibleEvents = @(Get-ValidOptedEvents -Student $clone -Sortie $probe | ForEach-Object { [string]$_.Mission })
+                                $result.NotOptedEvents = @(Get-NotOptedChoices -Student $clone -SortieType ([string]$line.SortieType))
                 }
 
                 $flagCount = @($violations | Where-Object { $_.Severity -eq 'Hard' }).Count
@@ -291,46 +293,58 @@ $script:MissionChoice = @{
                 NotOpted  = ' (not opted)'
 }
 
-# The dropdown's entries (text) for a hardcoded student on a line of -SortieType.
-# -Eligible: events they can fly there; -Current: the mission on the line now.
+# The next events of a line's type that a student is NOT opted for yet (prereqs still to fly),
+# in syllabus order, at most -Max of them. Get-PlacementAssessment keeps this list for the
+# board-context student, so the dropdown's "(not opted)" tags agree with the NOT_OPTED flag.
+function Get-NotOptedChoices {
+                param ($Student, [string]$SortieType = '', [int]$Max = 8)
+
+                $out = New-Object System.Collections.Generic.List[string]
+                if ($null -eq $Student -or $Max -le 0) { return $out.ToArray() }
+                $types = Get-AllowedEventTypes $SortieType
+                $done = Get-MissionDoneMap $Student
+                foreach ($m in @($Student.Syllabus | Where-Object { $null -ne $_ } | Sort-Object -Property { Get-SyllabusSortKey $_ })) {
+                                if ($out.Count -ge $Max) { break }
+                                $name = ([string]$m.Mission).Trim()
+                                if ($name -eq '' -or (Test-MissionComplete $m)) { continue }
+                                if ($null -ne $types -and ([string]$m.Type).Trim() -notin $types) { continue }
+                                if ((Get-NotOptedReason -Student $Student -Mission $m -DoneMap $done) -eq '') { continue }
+                                $out.Add($name)
+                }
+                return $out.ToArray()
+}
+
+# The dropdown's entries (text) for a hardcoded line: (auto), -Eligible (events the student
+# can fly there), the line's own mission -Current, -NotOpted (Get-NotOptedChoices, tagged),
+# then "Type a mission...". The line's mission is listed in its own spelling, so the
+# dropdown shows it even when it differs from the syllabus only in case.
 function Get-MissionChoiceTexts {
                 param (
-                                $Student,
-                                [string]$SortieType = '',
                                 [string[]]$Eligible = @(),
                                 [string]$Current = '',
-                                [int]$MaxNotOpted = 8
+                                [string[]]$NotOpted = @()
                 )
 
                 $out = New-Object System.Collections.Generic.List[string]
                 $have = @{}
+                $cur = ([string]$Current).Trim()
                 $out.Add($script:MissionChoice.Auto)
                 foreach ($e in $Eligible) {
                                 $name = ([string]$e).Trim()
                                 if ($name -eq '' -or $have.ContainsKey($name.ToUpperInvariant())) { continue }
+                                if ($name -ieq $cur) { $name = $cur }
                                 $out.Add($name)
                                 $have[$name.ToUpperInvariant()] = $true
                 }
-                $cur = ([string]$Current).Trim()
                 if ($cur -ne '' -and -not $have.ContainsKey($cur.ToUpperInvariant())) {
                                 $out.Add($cur)
                                 $have[$cur.ToUpperInvariant()] = $true
                 }
-
-                # The next events of the line's type the student isn't opted for (prereqs still to fly)
-                if ($null -ne $Student -and $MaxNotOpted -gt 0) {
-                                $types = Get-AllowedEventTypes $SortieType
-                                $added = 0
-                                foreach ($m in @($Student.Syllabus | Where-Object { $null -ne $_ } | Sort-Object -Property { Get-SyllabusSortKey $_ })) {
-                                                if ($added -ge $MaxNotOpted) { break }
-                                                $name = ([string]$m.Mission).Trim()
-                                                if ($name -eq '' -or $have.ContainsKey($name.ToUpperInvariant()) -or (Test-MissionComplete $m)) { continue }
-                                                if ($null -ne $types -and ([string]$m.Type).Trim() -notin $types) { continue }
-                                                if ((Get-NotOptedReason -Student $Student -Mission $m) -eq '') { continue }
-                                                $out.Add($name + $script:MissionChoice.NotOpted)
-                                                $have[$name.ToUpperInvariant()] = $true
-                                                $added++
-                                }
+                foreach ($n in $NotOpted) {
+                                $name = ([string]$n).Trim()
+                                if ($name -eq '' -or $have.ContainsKey($name.ToUpperInvariant())) { continue }
+                                $out.Add($name + $script:MissionChoice.NotOpted)
+                                $have[$name.ToUpperInvariant()] = $true
                 }
                 $out.Add($script:MissionChoice.Type)
                 return $out.ToArray()
@@ -367,8 +381,12 @@ function Get-MissionAdvice {
                                 $suggested = [string]$Auto.AutoMission
                                 $score = $Auto.BestScore
                 }
+                # Other events that pass every rule here (not just opted ones), so "can fly" is true
                 $others = @()
-                if ($null -ne $Auto) { $others = @(@($Auto.EligibleEvents) | Where-Object { $_ -and $_ -ine $suggested -and $_ -ine $Mission } | Select-Object -First 5) }
+                if ($null -ne $Auto) {
+                                $others = @(@($Auto.EventDetails) | Where-Object { $null -ne $_ -and $_.Passed -and $_.Mission -ine $suggested -and $_.Mission -ine $Mission } |
+                                                ForEach-Object { [string]$_.Mission } | Select-Object -First 5)
+                }
 
                 $headline = "$Mission breaks a rule for $name on this line."
                 if ($problems.Count -eq 0) { $headline = "$Mission is fine for $name on this line." }

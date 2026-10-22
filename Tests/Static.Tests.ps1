@@ -198,6 +198,22 @@ Describe 'LoadDayDialog.xaml' {
                 }
 }
 
+Describe 'BoardLogo.png' {
+                It 'is a PNG with a transparent background, small enough to ship' {
+                                $path = Join-Path $script:Root 'Modules/BoardLogo.png'
+                                Test-Path -LiteralPath $path | Should -BeTrue
+                                $bytes = [System.IO.File]::ReadAllBytes($path)
+                                (@($bytes[0..7]) -join ',') | Should -BeExactly '137,80,78,71,13,10,26,10'
+                                $bytes[25] | Should -Be 6 -Because 'colour type 6 = RGBA (the background is see-through)'
+                                $bytes.Length | Should -BeLessThan 200KB
+                }
+
+                It 'is the file the board code loads' {
+                                $code = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Modules/PuckBoard.psm1'))
+                                $code | Should -Match ([regex]::Escape('Join-Path $PSScriptRoot ''BoardLogo.png'''))
+                }
+}
+
 Describe 'BulkLinesDialog.xaml' {
                 BeforeAll {
                                 $script:BulkText = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Modules/BulkLinesDialog.xaml'))
