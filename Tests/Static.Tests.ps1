@@ -223,3 +223,29 @@ Describe 'BulkLinesDialog.xaml' {
                                 @($bytes | Where-Object { $_ -gt 127 }).Count | Should -Be 0
                 }
 }
+
+Describe 'ExportResultDialog.xaml' {
+                BeforeAll {
+                                $script:ResultText = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Modules/ExportResultDialog.xaml'))
+                                $script:BoardCode4 = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Modules/PuckBoard.psm1'))
+                }
+
+                It 'is well-formed XML with no code-behind hooks' {
+                                { [xml]$script:ResultText } | Should -Not -Throw
+                                $script:ResultText | Should -Not -Match 'x:Class='
+                                $script:ResultText | Should -Not -Match '\sClick='
+                }
+
+                It 'has every named element the board code looks up' {
+                                $names = @([regex]::Matches($script:ResultText, 'x:Name="([^"]+)"') | ForEach-Object { $_.Groups[1].Value })
+                                $listBlock = [regex]::Match($script:BoardCode4, "foreach \(\`$part in @\(([^)]*)\)\)").Groups[1].Value
+                                $wanted = @([regex]::Matches($listBlock, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value })
+                                $wanted.Count | Should -BeGreaterThan 5
+                                @($wanted | Where-Object { $names -notcontains $_ }) | Should -BeNullOrEmpty
+                }
+
+                It 'is plain ASCII' {
+                                $bytes = [System.IO.File]::ReadAllBytes((Join-Path $script:Root 'Modules/ExportResultDialog.xaml'))
+                                @($bytes | Where-Object { $_ -gt 127 }).Count | Should -Be 0
+                }
+}

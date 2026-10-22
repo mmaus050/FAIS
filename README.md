@@ -16,13 +16,15 @@ Add `-Trace` to print every scheduling decision to the console. FAIS restarts it
 **What happens:**
 1. **Pre-run pop-ups.** Log any hooked (unsat) or incomplete events from the last schedule, then click **Open Puck Board**. These are saved right away (see *Data in and out*).
 2. **Puck board.** The lines for each day come from MasterData's **Schedule** sheet (or you type them), and you hardcode whoever you want. *(details below)*
-3. **Fill.** The scheduler fills every open line: formation wingmen, direct support, O&B return legs and For Sale lines included. Tick **Only this day** to fill just the day on screen. You review the result on the board.
+3. **Fill.** The scheduler fills every open line: formation wingmen, direct support, O&B return legs and For Sale lines included. **Fill <day>** fills just the day on screen; **Fill all N days** (shown when the board has more than one day) fills them all. You review the result on the board.
 4. **Export.** All or nothing: if any part fails, none of the files change. It writes the days you filled:
    - OutputSchedule: the **MasterSchedule** sheet (first tab). Only the filled days are replaced; other days already exported (today onward) are kept, so you can update **one day at a time**,
    - OutputSchedule: **each student's syllabus tab** (tomorrow's run starts from it),
    - MasterData: **SimDebt**, and **UnsatSim / UnsatFlight** reset to FALSE for students whose schedule cleans up the unsat.
 
    It also writes **ATIS.xlsx**: one tab per day (named like `Wednesday. October 21, 2026`). Each tab lists that day's flights in ETD order, then a thick border, then that day's sims (OFT / IFT) in ETD order, in the same columns as MasterSchedule. Each export rebuilds the tabs for the days it covers and keeps every other day's tab, so ATIS builds up a day-by-day history. The file opens on the first day you just exported. Set `WriteAtis = $false` in `$OutputSettings` to turn it off.
+
+   Afterwards a window says what was written (days, line counts, files, unsats cleared, OVERRIDE lines), or, if the export failed, that nothing was written and why. **Open OutputSchedule** and **Open ATIS** open the files.
 
 Closing the board without exporting writes nothing (only the pre-run pop-ups have already saved). Your lines are autosaved either way.
 
@@ -91,7 +93,7 @@ Both files are saved or neither. If they can't be saved (still open), the change
 
 1. Open FAIS, click **Load a day...**, choose **Last exported schedule (OutputSchedule)** and the day (it is added to the board if it isn't there). Everyone goes back on the board where they were exported, hardcoded.
 2. Change what changed (take a student off, swap an IP, add a line).
-3. Tick **Only this day**, **Fill this day**, then **Export**. Only the open lines are filled, and only that day is replaced in OutputSchedule. Other exported days are filled in as fixed context, so no student is double-booked or flown out of order; if your change breaks a line on another exported day, the status line says which.
+3. Press **Fill <day>** (the day on screen), then **Export**. Only the open lines are filled, and only that day is replaced in OutputSchedule. Other exported days are filled in as fixed context, so no student is double-booked or flown out of order; if your change breaks a line on another exported day, the status line says which.
 
 ## The puck board
 
@@ -103,13 +105,17 @@ Both files are saved or neither. If they can't be saved (still open), the change
 | **Load a day...** | Load one day from MasterData's Schedule sheet or from the last exported schedule. |
 | **Update Syllabi** | Pick the day's flying schedule or the Big Board; FAIS works out which it is and marks each student's events complete or not complete from it. See *Update Syllabi*. |
 | **Blue banner** | MasterData's Schedule sheet has lines the board doesn't: load them or keep the board's lines. |
-| **Only this day** (bottom) | Fill and export just the day on screen. |
+| **Menu bar** (very top) | Every action in one place, with its key: File (load a day, templates, Update Syllabi), Edit (undo, type lines, bulk lines, re-check), **Line** (what can be done to the selected line), Day, Fill, View, Help. |
+| **Fill <day> / Fill all N days** (bottom) | Fill and export just the day on screen, or every day on the board. |
+| **Line details** (under the days) | The selected line's student against every rule, and every student ranked for that line. See *Line details* below. |
+| **Colors** (top right) | A small window that says what every color on the board means (also Help > What the colors mean). |
 | **Day tabs** | One tab per day. **Add day** builds several days at once; crew rest is checked across them. |
 | **IP pucks** (left) | Drag onto a line's IP slot. The badge shows how many lines that IP has that day. |
 | **Student pucks** (right) | Drag onto a line's student slot to hardcode them. Badges: CAP, INTL, HOLD, U-SIM, U-FLT, ABS times, turns that day. |
 
+- **Two ways to put a puck on a line:** drag it onto the slot, or **click it to pick it up** (it gets a thick outline and a dark banner says what you are holding) and then **click the slot**. Hold **Ctrl** as you click the slot to keep holding the puck for another line; **Esc** or **Let go** puts it down. **Double-click** a puck to put it straight on the selected line.
 - **Moving pucks:** drag between lines to move a puck (hold **Ctrl** to copy). Drop it back on its pool to take it off the line.
-- **While you drag a student,** slots turn **green** (fine), **amber** (needs a look) or **red** (breaks a hard rule).
+- **While you drag or hold a student,** slots turn **green** (fine), **amber** (needs a look) or **red** (breaks a hard rule).
 - **When you drop a student,** a pop-up lists:
   - hard-rule flags (red ✖), for example `Turn time 2.8 hr < 3.25 hr minimum (vs 0730 FT5103)` or `Not opted for FE3102: FT5001 isn't complete yet` (a sim whose prerequisite is the dollar ride);
   - warnings, for example `Less than 3.5 hr TT, Flt/CC Approval Required`;
@@ -119,6 +125,13 @@ Both files are saved or neither. If they can't be saved (still open), the change
 - **Mission dropdown:** `(auto)` picks the best-scoring event that passes the rules. Choose an event to hardcode it. After the events the student can fly on the line come the next ones they are **not opted for** yet (marked `(not opted)`), then **Type a mission...** for anything else.
 - **A mission that breaks a rule** (not opted, already flown, not in the syllabus, wrong line type) is explained before it goes on, with the mission the scheduler would put there: **Yes** puts the recommended mission on, **No** keeps yours (the line is flagged `OVERRIDE: Not opted for ...` on the output), **Cancel** changes nothing. You always have the final say.
 - **IFT / OFT lines** are never wingmen or direct support.
+
+### Line details
+Click anywhere on a line (or right-click it, or tab into it) to select it: it gets a blue outline, and the **Line details** panel under the days shows
+- **left:** the line's student against the **hard rules** (✖ broken, or none broken), the **warnings**, and the **soft rules** (the + / − score reasons and the total), the same check as the pop-up after a drop. For an open line it explains that the scheduler fills it.
+- **right:** **every student ranked for that line**: ✔ fits, ! fits with warnings, ✖ breaks a hard rule (with the first rule it breaks), each with the mission (auto) would pick and its score. Fits come first, best score first. The list fills in a few students at a time. **Hide rule breaks** leaves out the ✖ students.
+
+Click a student in the list to see their full check on the left. **Double-click** them, or press **Put on this line**, to hardcode them there. Drag the bar above the panel to resize it; **Hide** (or View > Line details panel) closes it.
 
 ### Typing lines
 | Type this | Get |
@@ -137,15 +150,18 @@ Both files are saved or neither. If they can't be saved (still open), the change
 - **Ctrl+L**: jump to the Add lines box
 - **Ctrl+Z**: undo
 - **Delete**: clear the selected slot
+- **Ctrl+D** / **Ctrl+Delete**: duplicate / delete the selected line
+- **Ctrl+PgUp** / **Ctrl+PgDn**: previous / next day
+- **Esc**: let go of a puck you picked up
 - **F5**: re-check everything
-- **Ctrl+Enter**: fill (just this day when **Only this day** is ticked)
+- **Ctrl+Enter**: fill all days; **Ctrl+Shift+Enter**: fill the day on screen
 
 ## Files
 
 | Path | What |
 |---|---|
 | `FAIS.ps1` | Entry point and settings (`$BoardSettings`, `$OutputSettings`; the Teams copy is off by default) |
-| `Modules\` | Code: engine (`SchedulingEngine`, `Syllabus`), board (`PuckBoard.xaml/.psm1`, `LoadDayDialog.xaml`, `BulkLinesDialog.xaml`, `BoardModel`, `Assessment`), Excel in/out (`DataDownload`, `DataUpload`, `ExcelFiles`), Update Syllabi (`SyllabusImport`), pre-run pop-ups (`PreRunMenu`), helpers (`DataManipulation`) |
+| `Modules\` | Code: engine (`SchedulingEngine`, `Syllabus`), board (`PuckBoard.xaml/.psm1`, `LoadDayDialog.xaml`, `BulkLinesDialog.xaml`, `ExportResultDialog.xaml`, `BoardModel`, `Assessment`), Excel in/out (`DataDownload`, `DataUpload`, `ExcelFiles`), Update Syllabi (`SyllabusImport`), pre-run pop-ups (`PreRunMenu`), helpers (`DataManipulation`) |
 | `Boards\` | Autosaved board, one file per day (created on first run) |
 | `Templates\` | Saved wave templates |
 | `OldFunctions.psm1` | Legacy code, kept for reference only; not loaded |

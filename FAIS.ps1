@@ -6,10 +6,11 @@
 #   2. Pre-run pop-ups: log hooked (unsat) / incomplete events from the last schedule (saved right away)
 #   3. Puck board: lines come from MasterData's Schedule sheet one day at a time (re-read whenever
 #      MasterData is saved), or are typed; hardcode IPs and students, see the + / - and rule flags
-#   4. "Fill the rest of the lines" (or only this day): the scheduler fills the open lines, you review it
+#   4. "Fill this day" or "Fill all days": the scheduler fills the open lines, you review it
 #   5. Export, all or nothing, for the filled days: OutputSchedule.xlsx (MasterSchedule, other exported
 #      days kept, + each student's syllabus tab), SimDebt + cleaned-up unsats to MasterData, and
 #      ATIS.xlsx (one tab per day: flights, then sims). Excel files are saved and closed first.
+#      A window then says what was written (or why nothing was), with buttons to open the files.
 #
 # -Trace prints every scheduling decision to the console.
 param (
@@ -147,7 +148,7 @@ if (-not (Invoke-PreRunMenu -Schedule $PrevSchedule -Students $Students -SoftWei
 # ==========================================
 #      PUCK BOARD
 # ==========================================
-# Build the lines, hardcode anyone, then "Fill the rest of the lines" runs the scheduler
+# Build the lines, hardcode anyone, then "Fill this day" / "Fill all days" runs the scheduler
 # (Invoke-FillSchedule) and shows the result for review
 $BoardData = @{
     Students       = $Students
@@ -188,9 +189,17 @@ $LockedPrompt = {
     return ($answer -eq [System.Windows.MessageBoxResult]::OK)
 }
 
-$Exported = Export-FaisOutput -FillResult $FillResult -OutputPath $excelOutputPath -MasterDataPath $excelInputPath -AtisPath $atisOutputPath -Settings $OutputSettings -LockedPrompt $LockedPrompt -Days @($BoardResult.Days)
+# Unsat flags the export will change (read before it writes them), and its warnings (why it
+# failed, or names MasterData did not have) for the result window
+$UnsatChanges = Get-UnsatFlagUpdates -Students $FillResult.Students
+$ExportWarnings = @()
+$Exported = Export-FaisOutput -FillResult $FillResult -OutputPath $excelOutputPath -MasterDataPath $excelInputPath -AtisPath $atisOutputPath -Settings $OutputSettings -LockedPrompt $LockedPrompt -Days @($BoardResult.Days) -WarningVariable ExportWarnings
+$AtisWritten = if ($OutputSettings.WriteAtis) { $atisOutputPath } else { '' }
+$ExportSummary = Get-FaisExportSummary -Ok ([bool]$Exported) -FillResult $FillResult -Days @($BoardResult.Days) -OutputPath $excelOutputPath -MasterDataPath $excelInputPath `
+    -AtisPath $AtisWritten -UnsatChanges $UnsatChanges -Warnings @($ExportWarnings | ForEach-Object { [string]$_.Message })
 if (-not $Exported) {
     Write-Host "Nothing was written (OutputSchedule, MasterData and ATIS are as they were). Your board is saved; run FAIS again and Export once the files are closed." -ForegroundColor Red
+    try { Show-FaisExportResult -Summary $ExportSummary } catch { Write-Host "Could not show the export result window: $($_.Exception.Message)" -ForegroundColor Yellow }
     return
 }
 
@@ -202,3 +211,6 @@ Write-Host ("  {0} lines: {1} hardcoded, {2} filled by the scheduler, {3} wingme
 foreach ($o in $FillResult.Overrides) {
     Write-Host ("  OVERRIDE {0} {1}: {2}" -f (Format-EtdShort $o.ETD), $o.Student, ($o.Violations -join '; ')) -ForegroundColor Yellow
 }
+# The same in a window, with buttons that open the files
+try { Show-FaisExportResult -Summary $ExportSummary -OutputPath $excelOutputPath -AtisPath $AtisWritten }
+catch { Write-Host "Could not show the export result window: $($_.Exception.Message)" -ForegroundColor Yellow }
