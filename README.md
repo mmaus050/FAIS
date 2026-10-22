@@ -74,10 +74,15 @@ The board reads the **Schedule** sheet one day at a time and keeps watching it:
 - People who aren't FAIS students. The flying schedule covers the whole wing.
 - Unsat flags. Log a hook with the pre-run pop-up as before.
 
-**Names:**
-- Rank tags (`[2d Lt]`), case, periods and extra spaces don't matter.
-- A student matches on last name **and** first name (and middle initial when both have one). An initial matches the name it starts: `Quill, C.` matches `Quill, Casey B.`.
-- A student MasterData knows by last name only matches when exactly one person on the file has that last name.
+**Names** can be written any of the usual ways. `Quill, Casey B. [2d Lt]` (flying schedule), `Quill, Casey` or `Quill` (MasterData) and `Casey B. Quill` (Big Board) are all the same student.
+- A name with a comma is last name, then first names.
+- A name without one is read every way it can be:
+  - first names, then the last name: `Casey B. Quill`, `Ana M. Vega Ortiz`;
+  - a last name on its own: `Quill`, `Vega Ortiz`;
+  - last name first (`Quill Casey B`), but only when nothing else fits and the first names agree.
+- Ranks and titles (`[2d Lt]`, `2d Lt`, `Capt`), suffixes (`Jr`, `III`), case, periods, hyphens and extra spaces don't matter.
+- A student matches on last name **and** first name (and middle name or initial as far as both have one). An initial matches the name it starts: `Quill, C.` matches `Casey B. Quill`. A different first name never matches: `Ann Quill` is not `Quill, Casey`.
+- A student MasterData knows by last name only matches when exactly one person on the file can have that last name. A first name doesn't count: student `Casey` is not `Casey Quill`.
 - A name that could be more than one student is left alone and listed.
 - The IP is written the way MasterData's Instructors sheet spells them when they are on it, otherwise as the file has them, without the rank.
 

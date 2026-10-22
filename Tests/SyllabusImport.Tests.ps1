@@ -64,15 +64,23 @@ BeforeAll {
 
 
 Describe 'Matching names' {
-    It 'splits a name into last name and first names, without the rank tag, case or periods' {
+    It 'reads a comma name one way: last name, then first names (no rank tag, case or periods)' {
         $p = ConvertTo-PersonName 'Quill, Cy  D. [2d Lt]'
-        $p.Last | Should -BeExactly 'quill'
-        $p.Given -join ' ' | Should -BeExactly 'cy d'
-        (ConvertTo-PersonName 'Quill').Given.Count | Should -Be 0
-        (ConvertTo-PersonName 'Diaz-Ortega, Dee').Last | Should -BeExactly 'diaz ortega'
+        @($p.Readings).Count | Should -Be 1
+        $p.Readings[0].Last | Should -BeExactly 'quill'
+        $p.Readings[0].Given -join ' ' | Should -BeExactly 'cy d'
+        (ConvertTo-PersonName 'Diaz-Ortega, Dee').Readings[0].Last | Should -BeExactly 'diaz ortega'
+        (ConvertTo-PersonName 'Quill Jr., Cy').Readings[0].Last | Should -BeExactly 'quill'
+    }
+
+    It 'reads a name with no comma every way it can be: all last name, first names first, and last name first' {
+        @((ConvertTo-PersonName 'Quill').Readings | ForEach-Object { "$($_.Last)/$($_.Given -join ' ')/$($_.Reversed)" }) | Should -Be @('quill//False')
+        @((ConvertTo-PersonName '2d Lt Cy D. Quill').Readings | ForEach-Object { "$($_.Last)/$($_.Given -join ' ')/$($_.Reversed)" }) | Should -Be @(
+            'cy d quill//False', 'cy/d quill/True', 'quill/cy d/False', 'cy d/quill/True')
     }
 
     It '<Known> vs <Other> is <Want>' -ForEach @(
+        # Last, First on both sides
         @{ Known = 'Quill, Cy D.'; Other = 'QUILL, CY D. [2d Lt]'; Want = 'Exact' }
         @{ Known = 'Quill, Cy'; Other = 'Quill, Cy D. [2d Lt]'; Want = 'Given' }
         @{ Known = 'Quill, C.'; Other = 'Quill, Cy D. [2d Lt]'; Want = 'Given' }
@@ -82,8 +90,51 @@ Describe 'Matching names' {
         @{ Known = 'Quill'; Other = 'Quill, Cy D. [2d Lt]'; Want = 'LastOnly' }
         @{ Known = 'Quill, Cy'; Other = 'Quillon, Cy [2d Lt]'; Want = '' }
         @{ Known = 'Diaz Ortega, Dee'; Other = 'DIAZ-ORTEGA, Dee M. [Capt]'; Want = 'Given' }
+        # First Last (the Big Board), with loose ranks, suffixes and two-word last names
+        @{ Known = 'Quill, Cy D.'; Other = 'Cy D. Quill'; Want = 'Exact' }
+        @{ Known = 'Quill, Cy D.'; Other = 'CY QUILL'; Want = 'Given' }
+        @{ Known = 'Quill, Cy D.'; Other = 'Cy Dale Quill'; Want = 'Given' }
+        @{ Known = 'Quill, Cy D.'; Other = '2d Lt Cy D. Quill'; Want = 'Exact' }
+        @{ Known = 'Quill, Cy'; Other = 'Capt Cy Quill Jr.'; Want = 'Exact' }
+        @{ Known = 'Quill'; Other = 'Cy D. Quill'; Want = 'LastOnly' }
+        @{ Known = 'Vega Ortiz, Ana M.'; Other = 'Ana M. Vega Ortiz'; Want = 'Exact' }
+        @{ Known = 'Vega Ortiz'; Other = 'Ana Vega-Ortiz'; Want = 'LastOnly' }
+        @{ Known = 'Diaz Ortega, Dee'; Other = 'Dee Diaz-Ortega'; Want = 'Exact' }
+        @{ Known = 'Quill, Cy'; Other = 'Al Quill'; Want = '' }
+        @{ Known = 'Casey'; Other = 'Casey Quill'; Want = '' }
+        # A FAIS name typed first name first
+        @{ Known = 'Cy Quill'; Other = 'Quill, Cy D. [2d Lt]'; Want = 'Given' }
+        # Last First with no comma: only when the first names agree too
+        @{ Known = 'Quill, Cy D.'; Other = 'Quill Cy D'; Want = 'ReversedExact' }
+        @{ Known = 'Quill, Cy'; Other = 'QUILL CY D'; Want = 'ReversedGiven' }
+        @{ Known = 'Quill'; Other = 'Quill Cy D'; Want = '' }
     ) {
-        Get-PersonNameMatch -Known (ConvertTo-PersonName $Known) -Other (ConvertTo-PersonName $Other) | Should -BeExactly $Want
+        $m = Get-PersonNameMatch -Known (ConvertTo-PersonName $Known) -Other (ConvertTo-PersonName $Other)
+        $(if ($m) { $m.Kind } else { '' }) | Should -BeExactly $Want
+    }
+
+    It 'matches the Big Board''s First Last names to FAIS''s Last, First and last-name-only students' {
+        $students = @((New-TestStudent -Name 'Quill, Cy D.'), (New-TestStudent -Name 'Adams, Al'), (New-TestStudent -Name 'Vance'), (New-TestStudent -Name 'Vega Ortiz, Ana'), (New-TestStudent -Name 'Casey'))
+        $m = Resolve-TrainingStudents -Names @('Cy D. Quill', 'AL B ADAMS', 'Max Vance', 'Ana M. Vega Ortiz', 'Casey Moss', 'Zoe Zed') -Students $students
+        $m.Map['Cy D. Quill'].Name | Should -BeExactly 'Quill, Cy D.'
+        $m.Map['AL B ADAMS'].Name | Should -BeExactly 'Adams, Al'
+        $m.Map['Max Vance'].Name | Should -BeExactly 'Vance'
+        $m.Map['Ana M. Vega Ortiz'].Name | Should -BeExactly 'Vega Ortiz, Ana'
+        @($m.Unknown) | Should -Be @('Casey Moss', 'Zoe Zed') -Because 'Casey is Moss''s first name, not the FAIS student Casey'
+        @($m.Ambiguous).Count | Should -Be 0
+    }
+
+    It 'a last-name-only student is left alone when two First Last people share the last name' {
+        $m = Resolve-TrainingStudents -Names @('Max Vance', 'Lou K. Vance') -Students @(New-TestStudent -Name 'Vance')
+        $m.Map.Count | Should -Be 0
+        @($m.Ambiguous) | Should -Be @('Vance (more than one person on the file is called Vance)')
+    }
+
+    It 'a Last First name with no comma matches only when nothing better does' {
+        $students = @((New-TestStudent -Name 'Quill, Cy'), (New-TestStudent -Name 'Cy, Quill'))
+        $m = Resolve-TrainingStudents -Names @('Quill Cy') -Students $students
+        $m.Map['Quill Cy'].Name | Should -BeExactly 'Cy, Quill' -Because 'read first name first, Quill Cy is Quill (first) Cy (last)'
+        (Resolve-TrainingStudents -Names @('Quill Cy') -Students @($students[0])).Map['Quill Cy'].Name | Should -BeExactly 'Quill, Cy'
     }
 
     It 'matches the wing-wide schedule to FAIS students on first name too, never on last name alone' {
@@ -130,6 +181,9 @@ Describe 'Matching names' {
         Resolve-TrainingInstructor -Name 'Ortiz, S. [Capt]' -Instructors $ips | Should -BeExactly 'Ortiz, Sam'
         Resolve-TrainingInstructor -Name 'PARR, PAT  Q. [CIV]' -Instructors $ips | Should -BeExactly 'PARR, PAT Q.'
         Resolve-TrainingInstructor -Name '' -Instructors $ips | Should -BeExactly ''
+        Resolve-TrainingInstructor -Name 'Ann Lee' -Instructors $ips | Should -BeExactly 'Lee, Ann'
+        Resolve-TrainingInstructor -Name 'Maj Tom Leech' -Instructors $ips | Should -BeExactly 'Leech, Tom'
+        Resolve-TrainingInstructor -Name 'Pat Q. Parr' -Instructors $ips | Should -BeExactly 'Pat Q. Parr'
     }
 }
 
@@ -295,17 +349,17 @@ Describe 'The plan (Big Board)' {
         $script:Quill = New-TestStudent -Name 'Quill, Cy'
         $script:Students = @($script:Adams, $script:Brown, $script:Quill)
         $events = @('BA101', 'FI3101', 'FE3102', 'FT5001', 'FT5102')
-        $script:File = New-TFile -Kind 'BigBoard' -Events $events -People @('Adams, Al B.', 'Brown, Bea', 'Visitor, Vic') -Facts @(
-            New-TFact 'Adams, Al B.' 'BA101' -At '2026-07-24 15:00' -IP 'Instructor, Ivy' -Board
-            New-TFact 'Adams, Al B.' 'FI3101' -At '2026-09-18 08:00' -IP 'SIM IP' -Board
-            New-TFact 'Adams, Al B.' 'FE3102' -At '2026-09-19 09:00' -IP 'PARR, PAT' -Board
-            New-TFact 'Adams, Al B.' 'FT5001' -Board
-            New-TFact 'Adams, Al B.' 'FT5102' -Board
-            New-TFact 'Brown, Bea' 'BA101' -Board
-            New-TFact 'Brown, Bea' 'FI3101' -At '2026-09-18 08:00' -Board
-            New-TFact 'Brown, Bea' 'FE3102' -Board
-            New-TFact 'Brown, Bea' 'FT5001' -Board
-            New-TFact 'Brown, Bea' 'FT5102' -Board
+        $script:File = New-TFile -Kind 'BigBoard' -Events $events -People @('Al B. Adams', 'Bea Brown', 'Vic Visitor') -Facts @(
+            New-TFact 'Al B. Adams' 'BA101' -At '2026-07-24 15:00' -IP 'Instructor, Ivy' -Board
+            New-TFact 'Al B. Adams' 'FI3101' -At '2026-09-18 08:00' -IP 'SIM IP' -Board
+            New-TFact 'Al B. Adams' 'FE3102' -At '2026-09-19 09:00' -IP 'PARR, PAT' -Board
+            New-TFact 'Al B. Adams' 'FT5001' -Board
+            New-TFact 'Al B. Adams' 'FT5102' -Board
+            New-TFact 'Bea Brown' 'BA101' -Board
+            New-TFact 'Bea Brown' 'FI3101' -At '2026-09-18 08:00' -Board
+            New-TFact 'Bea Brown' 'FE3102' -Board
+            New-TFact 'Bea Brown' 'FT5001' -Board
+            New-TFact 'Bea Brown' 'FT5102' -Board
         )
         $script:Plan = Get-SyllabusUpdatePlan -File $script:File -Students $script:Students -Instructors (New-TestInstructors) -SoftWeights $script:SW -Now $script:Now
     }
@@ -334,10 +388,10 @@ Describe 'The plan (Big Board)' {
 
     It 'lists the FAIS students the Big Board does not have, and its people who are not FAIS students' {
         @($script:Plan.NotOnFile) | Should -Be @('Quill, Cy')
-        @($script:Plan.Unknown) | Should -Be @('Visitor, Vic')
+        @($script:Plan.Unknown) | Should -Be @('Vic Visitor')
         $text = Format-SyllabusUpdateSummary -File $script:File -Plan $script:Plan
         $text | Should -Match ([regex]::Escape('FAIS students not on the Big Board: Quill, Cy'))
-        $text | Should -Match ([regex]::Escape('Not FAIS students: Visitor, Vic'))
+        $text | Should -Match ([regex]::Escape('Not FAIS students: Vic Visitor'))
         $text | Should -Match ([regex]::Escape("Left as planned: 1 event(s) FAIS has scheduled after now, which the Big Board can't show yet."))
     }
 }
@@ -365,8 +419,8 @@ Describe 'Reading the training files' -Skip:$script:NoExcel {
 
         # Big Board: headings on row 5, each event over 4 columns (date, status, grade, IP); BA101 over 6
         $row5 = @($null, 'Student Name', 'Track', 'Org', $null, 'Class', 'BA101', $null, $null, $null, $null, $null, 'FI3101', $null, $null, $null, 'FT5001', $null, $null, $null, 'FT5102', $null, $null, $null)
-        $adams = @($null, 'Adams, Al B.', 'Default', 'E FLT', $null, '27-05', '07-24-2026-1500', $null, 'Complete', $null, $null, 'Instructor, Ivy', '09-18-2026-0800', 'Complete', $null, 'PARR, PAT Q.', '09-22-2026-0913', 'Complete', 'G', 'Jones, Bob', $null, $null, $null, $null)
-        $brown = @($null, 'Brown, Bea', 'Default', 'E FLT', $null, '27-05', $null, $null, $null, $null, $null, $null, '09-18-2026-0815', 'Complete', 'U', $null, '09-17-2026-0830', $null, $null, $null, $null, $null, $null, $null)
+        $adams = @($null, 'Al B. Adams', 'Default', 'E FLT', $null, '27-05', '07-24-2026-1500', $null, 'Complete', $null, $null, 'Instructor, Ivy', '09-18-2026-0800', 'Complete', $null, 'PARR, PAT Q.', '09-22-2026-0913', 'Complete', 'G', 'Jones, Bob', $null, $null, $null, $null)
+        $brown = @($null, 'Bea Brown', 'Default', 'E FLT', $null, '27-05', $null, $null, $null, $null, $null, $null, '09-18-2026-0815', 'Complete', 'U', $null, '09-17-2026-0830', $null, $null, $null, $null, $null, $null, $null)
         $script:Board = New-TBook 'BigBoard.xlsx' ([ordered]@{ 'Big Board' = @(@($null), @($null, $null, 'Scheduling Aid for Organization E FLT'), @($null), @($null, $null, $null, $null, $null, $null, 'Default'), $row5, $adams, $brown, @($null, $null, $null, $null, 'For CUI Use Only')) }) `
             -Merge @{ 'Big Board' = @('G5:L5', 'M5:P5', 'Q5:T5', 'U5:X5', 'D5:E5', 'G6:H6', 'I6:J6') }
 
@@ -398,20 +452,28 @@ Describe 'Reading the training files' -Skip:$script:NoExcel {
         $script:B.Kind | Should -BeExactly 'BigBoard'
         $script:B.Label | Should -BeExactly 'Big Board (Scheduling Aid for Organization E FLT)'
         @($script:B.Events) | Should -Be @('BA101', 'FI3101', 'FT5001', 'FT5102')
-        @($script:B.People) | Should -Be @('Adams, Al B.', 'Brown, Bea')
+        @($script:B.People) | Should -Be @('Al B. Adams', 'Bea Brown')
     }
 
     It 'a Big Board entry is complete with its date and IP (not its status or grade); an empty block is not' {
         @($script:B.Facts | ForEach-Object { "$($_.Student)|$($_.Mission)|$($_.Complete)|$($_.Instructor)|$(if ($_.ETD) { $_.ETD.ToString('yyyy-MM-dd HHmm') })" }) | Should -Be @(
-            'Adams, Al B.|BA101|True|Instructor, Ivy|2026-07-24 1500'
-            'Adams, Al B.|FI3101|True|PARR, PAT Q.|2026-09-18 0800'
-            'Adams, Al B.|FT5001|True|Jones, Bob|2026-09-22 0913'
-            'Adams, Al B.|FT5102|False||'
-            'Brown, Bea|BA101|False||'
-            'Brown, Bea|FI3101|True||2026-09-18 0815'
-            'Brown, Bea|FT5001|True||2026-09-17 0830'
-            'Brown, Bea|FT5102|False||'
+            'Al B. Adams|BA101|True|Instructor, Ivy|2026-07-24 1500'
+            'Al B. Adams|FI3101|True|PARR, PAT Q.|2026-09-18 0800'
+            'Al B. Adams|FT5001|True|Jones, Bob|2026-09-22 0913'
+            'Al B. Adams|FT5102|False||'
+            'Bea Brown|BA101|False||'
+            'Bea Brown|FI3101|True||2026-09-18 0815'
+            'Bea Brown|FT5001|True||2026-09-17 0830'
+            'Bea Brown|FT5102|False||'
         )
+    }
+
+    It 'the Big Board''s First Last names find the FAIS students written Last, First or by last name' {
+        $students = @((New-TestStudent -Name 'Adams, Al B.'), (New-TestStudent -Name 'Brown'))
+        $plan = Get-SyllabusUpdatePlan -File $script:B -Students $students -SoftWeights $script:SW -Now $script:Now
+        @($plan.Matched) | Should -Be @('Adams, Al B.', 'Brown')
+        @($plan.Changes | Where-Object { $_.Kind -eq 'Complete' } | ForEach-Object { "$($_.Student) $($_.Mission)" } | Sort-Object) |
+            Should -Be @('Adams, Al B. FI3101', 'Adams, Al B. FT5001', 'Brown FI3101', 'Brown FT5001')
     }
 
     It 'says so for a workbook that is neither, and for a file that is not a workbook' {

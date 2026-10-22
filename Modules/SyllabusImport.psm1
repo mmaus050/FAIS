@@ -4,7 +4,8 @@
 #             line with it: on the board, on their OutputSchedule tab and in their SimDebt
 # Read-TrainingFile / Get-SheetBlock / ConvertTo-TrainingEtd
 # Find-DailyScheduleHeadings / Read-DailyScheduleSheet / Find-BigBoardHeadings / Read-BigBoardSheet / Get-BigBoardInstructor
-# ConvertTo-PersonName / Get-PersonNameMatch / Resolve-TrainingStudents / Resolve-TrainingInstructor
+# ConvertTo-NameWords / ConvertTo-PersonName / Get-GivenNameMatch / Get-PersonNameMatch
+# New-PersonIndex / Find-PersonMatch / Resolve-TrainingStudents / Resolve-TrainingInstructor
 # Get-SyllabusUpdatePlan / Get-SyllabusTargetResult / New-SyllabusChange
 # Update-SyllabusTabTargets / Invoke-SyllabusUpdate / Save-SyllabusUpdate / Format-SyllabusUpdateSummary
 #
@@ -310,101 +311,194 @@ function Get-BigBoardInstructor {
 
 # =================================================================================
 #  WHO IS WHO
-#  The flying schedule lists the whole wing ("Quill, Casey B. [2d Lt]"), so a FAIS student
-#  is matched on more than a last name whenever FAIS has more than a last name for them.
+#  Names come written different ways: "Quill, Casey B. [2d Lt]" (the flying schedule),
+#  "Quill, Casey" or just "Quill" (MasterData), "Casey B. Quill" (the Big Board). A name with
+#  a comma is last name, then first names. A name without one is read every way it can be:
+#  first names then a last name of one or more words, a last name on its own ("Quill",
+#  "Vega Ortiz"), and - only when nothing else fits - a last name then first names.
+#  The flying schedule lists the whole wing, so a student is matched on more than a last
+#  name whenever both names have more than a last name.
 # =================================================================================
 
-# A name split for matching: "Quill, Casey B. [2d Lt]" -> Last 'quill', Given @('casey', 'b').
-# Tags in [ ], periods, apostrophes and case don't count; a hyphen counts as a space.
-# A name with no comma is all last name ("Quill").
+# Words that are never part of a name: ranks, titles and suffixes (a rank in [ ] or ( ) goes whole)
+$script:NameDropWords = @('2d', '2nd', '1st', '2lt', '1lt', 'lt', 'ltc', 'col', 'capt', 'cpt', 'maj', 'ltjg', 'lcdr', 'cdr', 'civ',
+                'mr', 'mrs', 'ms', 'dr', 'usaf', 'usn', 'usmc', 'ret', 'jr', 'sr', 'ii', 'iii', 'iv')
+
+# How two names match, best first. Reversed: one of them was read last name first, with no comma.
+$script:NameMatchKinds = @('Exact', 'Given', 'LastOnly', 'ReversedExact', 'ReversedGiven')
+
+# Part of a name as lower-case words: periods and apostrophes go, hyphens and other marks split
+# words, and ranks / titles / suffixes are dropped
+function ConvertTo-NameWords {
+                param ([string]$Text)
+
+                $s = ($Text.ToLowerInvariant() -replace "['.]", '') -replace '[^\p{L}\p{Nd}]', ' '
+                return @($s -split '\s+' | Where-Object { $_ -ne '' -and $script:NameDropWords -notcontains $_ })
+}
+
+# Every way a name can be read: {Key (the whole name, to tell people apart); Readings}, each
+# reading {Last; Given (words); Reversed}. For example:
+#   "Quill, Casey B. [2d Lt]" -> quill / casey b
+#   "Quill"                   -> quill
+#   "Casey B. Quill"          -> casey b quill (all last name); quill / casey b; and, reversed,
+#                                casey / b quill (a last name never starts with an initial)
 function ConvertTo-PersonName {
                 param ([string]$Name)
 
-                $text = Get-BaseName $Name
-                $last = $text
-                $given = ''
+                $text = ([string]$Name -replace '\[[^\]]*\]', ' ') -replace '\([^\)]*\)', ' '
+                $readings = New-Object System.Collections.Generic.List[object]
                 $comma = $text.IndexOf(',')
-                if ($comma -ge 0) { $last = $text.Substring(0, $comma); $given = $text.Substring($comma + 1) }
-                $clean = {
-                                param ([string]$Part)
-                                $s = ($Part.ToLowerInvariant() -replace "['.]", '') -replace '[^\p{L}\p{Nd}]', ' '
-                                return ($s -replace '\s+', ' ').Trim()
+                if ($comma -ge 0) {
+                                $last = @(ConvertTo-NameWords $text.Substring(0, $comma))
+                                $given = @(ConvertTo-NameWords $text.Substring($comma + 1))
+                                if ($last.Count -gt 0) { $readings.Add([PSCustomObject]@{ Last = ($last -join ' '); Given = $given; Reversed = $false }) }
+                                return [PSCustomObject]@{ Key = (($last -join ' ') + '|' + ($given -join ' ')); Readings = $readings.ToArray() }
                 }
-                $l = & $clean $last
-                $g = & $clean $given
-                # Assigned straight from @() so a single first name stays a one-item array
-                $tokens = @()
-                if ($g -ne '') { $tokens = @($g -split ' ') }
-                return [PSCustomObject]@{ Last = $l; Given = $tokens; Key = ($l + '|' + ($tokens -join ' ')) }
+
+                $words = @(ConvertTo-NameWords $text)
+                $n = $words.Count
+                if ($n -gt 0) { $readings.Add([PSCustomObject]@{ Last = ($words -join ' '); Given = @(); Reversed = $false }) }
+                for ($k = 1; $k -lt $n; $k++) {
+                                $front = @($words[0..($k - 1)])
+                                $back = @($words[$k..($n - 1)])
+                                # First names, then the last name ("Casey B. Quill", "Ana M. Vega Ortiz")
+                                if ($back[0].Length -gt 1) { $readings.Add([PSCustomObject]@{ Last = ($back -join ' '); Given = $front; Reversed = $false }) }
+                                # Last name, then first names ("Quill Casey B")
+                                if ($front[0].Length -gt 1) { $readings.Add([PSCustomObject]@{ Last = ($front -join ' '); Given = $back; Reversed = $true }) }
+                }
+                return [PSCustomObject]@{ Key = ($words -join ' '); Readings = $readings.ToArray() }
 }
 
-# How a FAIS name (-Known) matches a name from a file (-Other), both from ConvertTo-PersonName:
-#   'Exact'    same name
-#   'Given'    same last name, and the first names (and middle initials, as far as both go) agree;
-#              an initial agrees with any name it starts ("c" = "casey")
-#   'LastOnly' same last name and one of them has no first name
-#   ''         not the same person
-function Get-PersonNameMatch {
-                param ($Known, $Other)
+# How two lists of first names agree: 'Exact' (the same, or both none), 'LastOnly' (one has
+# none), 'Given' (word by word as far as both go, an initial agreeing with any name it starts:
+# "c" = "casey"), or '' (they differ)
+function Get-GivenNameMatch {
+                param ([string[]]$A = @(), [string[]]$B = @())
 
-                if ($Known.Last -eq '' -or $Known.Last -ne $Other.Last) { return '' }
-                if ($Known.Key -eq $Other.Key) { return 'Exact' }
-                if ($Known.Given.Count -eq 0 -or $Other.Given.Count -eq 0) { return 'LastOnly' }
-                $n = [math]::Min($Known.Given.Count, $Other.Given.Count)
+                if ($A.Count -eq 0 -and $B.Count -eq 0) { return 'Exact' }
+                if ($A.Count -eq 0 -or $B.Count -eq 0) { return 'LastOnly' }
+                if (($A -join ' ') -eq ($B -join ' ')) { return 'Exact' }
+                $n = [math]::Min($A.Count, $B.Count)
                 for ($i = 0; $i -lt $n; $i++) {
-                                $a = [string]$Known.Given[$i]
-                                $b = [string]$Other.Given[$i]
-                                if ($a -eq $b) { continue }
-                                if (($a.Length -eq 1 -and $b.StartsWith($a)) -or ($b.Length -eq 1 -and $a.StartsWith($b))) { continue }
+                                $x = [string]$A[$i]
+                                $y = [string]$B[$i]
+                                if ($x -eq $y) { continue }
+                                if (($x.Length -eq 1 -and $y.StartsWith($x)) -or ($y.Length -eq 1 -and $x.StartsWith($y))) { continue }
                                 return ''
                 }
                 return 'Given'
 }
 
+# How a FAIS name (-Known) matches a name from a file (-Other), both from ConvertTo-PersonName:
+# the best of every pair of their readings with the same last name, as {Kind (NameMatchKinds);
+# Last}, or $null when they can't be the same person. A reading taken last name first only
+# counts when both names have first names and they agree.
+function Get-PersonNameMatch {
+                param ($Known, $Other)
+
+                $best = -1
+                $bestLast = ''
+                foreach ($a in @($Known.Readings)) {
+                                foreach ($b in @($Other.Readings)) {
+                                                if ($a.Last -ne $b.Last) { continue }
+                                                $kind = Get-GivenNameMatch -A $a.Given -B $b.Given
+                                                if ($kind -eq '') { continue }
+                                                if ($a.Reversed -or $b.Reversed) {
+                                                                if ($kind -eq 'LastOnly') { continue }
+                                                                $kind = "Reversed$kind"
+                                                }
+                                                $rank = [array]::IndexOf($script:NameMatchKinds, $kind)
+                                                if ($best -lt 0 -or $rank -lt $best) { $best = $rank; $bestLast = $a.Last }
+                                }
+                }
+                if ($best -lt 0) { return $null }
+                return [PSCustomObject]@{ Kind = $script:NameMatchKinds[$best]; Last = $bestLast }
+}
+
+# FAIS people (students or instructors: anything with a Name) by every last name their name
+# can be read with, for Find-PersonMatch
+function New-PersonIndex {
+                param ([array]$Items = @())
+
+                $index = @{}
+                $id = 0
+                foreach ($item in $Items) {
+                                if ($null -eq $item -or [string]::IsNullOrWhiteSpace([string]$item.Name)) { continue }
+                                $person = ConvertTo-PersonName ([string]$item.Name)
+                                $entry = [PSCustomObject]@{ Id = $id; Item = $item; Person = $person }
+                                $id++
+                                foreach ($last in @($person.Readings | ForEach-Object { $_.Last } | Select-Object -Unique)) {
+                                                if (-not $index.ContainsKey($last)) { $index[$last] = New-Object System.Collections.Generic.List[object] }
+                                                $index[$last].Add($entry)
+                                }
+                }
+                return $index
+}
+
+# The FAIS people (from New-PersonIndex) a name matches best: {Kind; Last; Hits (the items)}.
+# Hits is empty and Kind '' when it matches no one.
+function Find-PersonMatch {
+                param ($Person, [hashtable]$Index)
+
+                $best = -1
+                $bestLast = ''
+                $hits = New-Object System.Collections.Generic.List[object]
+                $seen = @{}
+                foreach ($reading in @($Person.Readings)) {
+                                if (-not $Index.ContainsKey($reading.Last)) { continue }
+                                foreach ($entry in $Index[$reading.Last]) {
+                                                if ($seen.ContainsKey($entry.Id)) { continue }
+                                                $seen[$entry.Id] = $true
+                                                $m = Get-PersonNameMatch -Known $entry.Person -Other $Person
+                                                if ($null -eq $m) { continue }
+                                                $rank = [array]::IndexOf($script:NameMatchKinds, $m.Kind)
+                                                if ($best -lt 0 -or $rank -lt $best) { $best = $rank; $bestLast = $m.Last; $hits.Clear() }
+                                                if ($rank -eq $best) { $hits.Add($entry.Item) }
+                                }
+                }
+                $kind = if ($best -ge 0) { $script:NameMatchKinds[$best] } else { '' }
+                return [PSCustomObject]@{ Kind = $kind; Last = $bestLast; Hits = $hits.ToArray() }
+}
+
 # Matches the people a training file names to FAIS students. Returns {Map; Unknown; Ambiguous}:
-#   Map: file name -> student, by the closest match (Exact, then Given, then LastOnly). A student
-#   FAIS knows by last name only matches when just one person in the file has that last name.
+#   Map: file name -> student, by the closest match (see NameMatchKinds). A student FAIS knows
+#   by last name only matches when just one person in the file can have that last name.
 #   Unknown: names that are no FAIS student. Ambiguous: names left alone because they could be
 #   more than one student, or a student who could be more than one person in the file.
 function Resolve-TrainingStudents {
                 param ([string[]]$Names = @(), [array]$Students = @())
 
-                $known = @(foreach ($s in $Students) {
-                                if ($null -ne $s -and -not [string]::IsNullOrWhiteSpace([string]$s.Name)) { [PSCustomObject]@{ Student = $s; Person = ConvertTo-PersonName ([string]$s.Name) } }
-                })
+                $index = New-PersonIndex -Items $Students
                 $people = @(foreach ($n in @($Names | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)) {
                                 [PSCustomObject]@{ Raw = $n; Person = ConvertTo-PersonName $n }
                 })
-                # Last name -> how many different people in the file have it
+                # Last name -> the different people in the file who can have it (last-name-first readings aside)
                 $keysByLast = @{}
                 foreach ($p in $people) {
-                                if (-not $keysByLast.ContainsKey($p.Person.Last)) { $keysByLast[$p.Person.Last] = New-Object System.Collections.Generic.HashSet[string] }
-                                [void]$keysByLast[$p.Person.Last].Add($p.Person.Key)
+                                foreach ($reading in @($p.Person.Readings | Where-Object { -not $_.Reversed })) {
+                                                if (-not $keysByLast.ContainsKey($reading.Last)) { $keysByLast[$reading.Last] = New-Object System.Collections.Generic.HashSet[string] }
+                                                [void]$keysByLast[$reading.Last].Add($p.Person.Key)
+                                }
                 }
 
                 $map = @{}
                 $unknown = New-Object System.Collections.Generic.List[string]
                 $ambiguous = New-Object System.Collections.Generic.List[string]
                 foreach ($p in $people) {
-                                $found = @{ Exact = @(); Given = @(); LastOnly = @() }
-                                foreach ($k in $known) {
-                                                $how = Get-PersonNameMatch -Known $k.Person -Other $p.Person
-                                                if ($how) { $found[$how] += $k.Student }
+                                $found = Find-PersonMatch -Person $p.Person -Index $index
+                                $hits = @($found.Hits)
+                                if ($hits.Count -eq 0) { $unknown.Add($p.Raw); continue }
+                                if ($hits.Count -gt 1) {
+                                                $ambiguous.Add("$($p.Raw) (could be $(@($hits | ForEach-Object { $_.Name }) -join ' or '))")
+                                                continue
                                 }
-                                $matched = $false
-                                foreach ($how in @('Exact', 'Given', 'LastOnly')) {
-                                                $hits = @($found[$how])
-                                                if ($hits.Count -eq 0) { continue }
-                                                $matched = $true
-                                                if ($hits.Count -gt 1) { $ambiguous.Add("$($p.Raw) (could be $(@($hits | ForEach-Object { $_.Name }) -join ' or '))") }
-                                                elseif ($how -eq 'LastOnly' -and $keysByLast[$p.Person.Last].Count -gt 1) {
-                                                                $line = "$($hits[0].Name) (more than one person on the file is called $(Get-NormalizedLastName (Get-BaseName $p.Raw)))"
-                                                                if (-not $ambiguous.Contains($line)) { $ambiguous.Add($line) }
-                                                }
-                                                else { $map[$p.Raw] = $hits[0] }
-                                                break
+                                if ($found.Kind -eq 'LastOnly' -and $keysByLast[$found.Last].Count -gt 1) {
+                                                $called = [System.Globalization.CultureInfo]::InvariantCulture.TextInfo.ToTitleCase($found.Last)
+                                                $line = "$($hits[0].Name) (more than one person on the file is called $called)"
+                                                if (-not $ambiguous.Contains($line)) { $ambiguous.Add($line) }
+                                                continue
                                 }
-                                if (-not $matched) { $unknown.Add($p.Raw) }
+                                $map[$p.Raw] = $hits[0]
                 }
 
                 # A student matched by two names that aren't the same person is left alone
@@ -419,7 +513,7 @@ function Resolve-TrainingStudents {
                                 $same = $true
                                 for ($i = 0; $i -lt $raws.Count -and $same; $i++) {
                                                 for ($j = $i + 1; $j -lt $raws.Count; $j++) {
-                                                                if (-not (Get-PersonNameMatch -Known (ConvertTo-PersonName $raws[$i]) -Other (ConvertTo-PersonName $raws[$j]))) { $same = $false; break }
+                                                                if ($null -eq (Get-PersonNameMatch -Known (ConvertTo-PersonName $raws[$i]) -Other (ConvertTo-PersonName $raws[$j]))) { $same = $false; break }
                                                 }
                                 }
                                 if (-not $same) {
@@ -432,24 +526,16 @@ function Resolve-TrainingStudents {
 
 # The IP name to put on a syllabus event: the FAIS instructor it matches (as students are
 # matched, but no other file names are checked), else the name as the file has it, without
-# its rank tag. '' for no name.
+# its rank tag. '' for no name. -Index (New-PersonIndex of the instructors) saves building it
+# again for every name.
 function Resolve-TrainingInstructor {
-                param ([string]$Name, [array]$Instructors = @())
+                param ([string]$Name, [array]$Instructors = @(), [hashtable]$Index)
 
                 $plain = ((Get-BaseName $Name) -replace '\s+', ' ').Trim()
                 if ($plain -eq '') { return '' }
-                $person = ConvertTo-PersonName $Name
-                $found = @{ Exact = @(); Given = @(); LastOnly = @() }
-                foreach ($ip in @($Instructors)) {
-                                if ($null -eq $ip -or [string]::IsNullOrWhiteSpace([string]$ip.Name)) { continue }
-                                $how = Get-PersonNameMatch -Known (ConvertTo-PersonName ([string]$ip.Name)) -Other $person
-                                if ($how) { $found[$how] += $ip }
-                }
-                foreach ($how in @('Exact', 'Given', 'LastOnly')) {
-                                $hits = @($found[$how])
-                                if ($hits.Count -eq 1) { return ([string]$hits[0].Name).Trim() }
-                                if ($hits.Count -gt 1) { break }
-                }
+                if ($null -eq $Index) { $Index = New-PersonIndex -Items $Instructors }
+                $found = Find-PersonMatch -Person (ConvertTo-PersonName $Name) -Index $Index
+                if (@($found.Hits).Count -eq 1) { return ([string]$found.Hits[0].Name).Trim() }
                 return $plain
 }
 
@@ -511,6 +597,7 @@ function Get-SyllabusUpdatePlan {
                 }
 
                 $ipOf = @{}
+                $ipIndex = New-PersonIndex -Items $Instructors
                 $targets = New-Object System.Collections.Generic.List[object]
                 foreach ($groupKey in $groups.Keys) {
                                 $list = $groups[$groupKey]
@@ -518,7 +605,7 @@ function Get-SyllabusUpdatePlan {
                                 $pick = if ($done.Count -gt 0) { $done[$done.Count - 1] } else { $list[0] }
                                 $fact = $pick.Fact
                                 $rawIp = [string]$fact.Instructor
-                                if (-not $ipOf.ContainsKey($rawIp)) { $ipOf[$rawIp] = Resolve-TrainingInstructor -Name $rawIp -Instructors $Instructors }
+                                if (-not $ipOf.ContainsKey($rawIp)) { $ipOf[$rawIp] = Resolve-TrainingInstructor -Name $rawIp -Index $ipIndex }
                                 $targets.Add([PSCustomObject]@{
                                                 Student    = $pick.Student
                                                 Mission    = ([string]$pick.Entry.Mission).Trim()
