@@ -51,7 +51,7 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne [System.Thr
 # ==========================================
 #       CONFIGURATION
 # ==========================================
-$excelInputPath = Join-Path (Split-Path $PSScriptRoot -Parent) "MasterData.xlsx"
+$excelInputPath = Join-Path $PSScriptRoot "MasterData.xlsx"
 $desktopPath = [Environment]::GetFolderPath('Desktop')
 $excelOutputPath = Join-Path -Path $desktopPath -ChildPath "OutputSchedule.xlsx"
 $atisOutputPath = Join-Path -Path $desktopPath -ChildPath "ATIS.xlsx"
