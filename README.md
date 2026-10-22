@@ -34,6 +34,7 @@ Closing the board without exporting writes nothing (only the pre-run pop-ups hav
 | **Log Hooked Event** | | MasterData: UnsatSim or UnsatFlight = TRUE |
 | **Log Incomplete Event** | | MasterData: SimDebt (only that event's debt comes off). OutputSchedule: that event's cells on the student's tab |
 | Puck board and fill | MasterData's Schedule sheet again whenever MasterData is saved; **Load a day...** reads it (or the last exported MasterSchedule) fresh | Nothing (the board's own autosave in `Boards\` aside) |
+| **Update Syllabi** | The training file you pick (flying schedule or Big Board) | OutputSchedule: the changed events' cells on the students' tabs (a student with no tab gets one). MasterData: SimDebt |
 | **Export** | | OutputSchedule: MasterSchedule (the filled days), student tabs. MasterData: SimDebt, unsat resets. ATIS: the exported days' tabs |
 
 - **MasterSchedule is the only sheet of OutputSchedule that is rewritten**, and only the filled days in it change (ATIS rebuilds the tabs of the days it exports). A student's tab is updated in place: only the Instructor, ETD and IsComplete cells of events that changed are written, so your own columns, notes and formatting stay. A student with no tab gets a new one.
@@ -55,6 +56,37 @@ The board reads the **Schedule** sheet one day at a time and keeps watching it:
 - **SortieType** can be written short: `DL`, `OB`, `RTN`, `OFT`, `IFT`.
 - **Blank rows** and repeated heading rows are skipped. (They used to stop the read, so days after a blank row never loaded.)
 
+## Update Syllabi
+
+**Update Syllabi** (toolbar) brings each student's syllabus in line with a training file. Pick the file and FAIS works out which one it is from its headings:
+
+- **The day's flying schedule** (a tab with Student, Mission and Line Status columns). Its **Flying** and **Sims** tabs are read; the other tabs are ignored. For each FAIS student on it:
+  - Line Status **CM** or **EXEC**: the line's mission is marked complete, with the line's Instructor and ETD (Start Time on the Sims tab).
+  - Line Status **INC** or **CX**: the mission is made not complete (its IP and ETD are cleared).
+  - Any other status, or none: nothing changes.
+  - If the same student flies the same mission more than once that day, a complete line wins over an INC / CX one.
+- **The Big Board** (a Student Name column, then a block of columns for each event: date, status, grade, IP). For each FAIS student on it and each event in their syllabus:
+  - Anything in the event's columns: the event is marked complete, with the IP and the date (`MM-DD-YYYY-HHMM`) as the ETD.
+  - Nothing there: the event is made not complete, except an event FAIS has planned for later than now (the Big Board can't show it yet), which is left as planned.
+
+**What it leaves alone:**
+- Events that aren't in the student's syllabus. Most Big Board columns are academics, and they are simply ignored.
+- People who aren't FAIS students. The flying schedule covers the whole wing.
+- Unsat flags. Log a hook with the pre-run pop-up as before.
+
+**Names:**
+- Rank tags (`[2d Lt]`), case, periods and extra spaces don't matter.
+- A student matches on last name **and** first name (and middle initial when both have one). An initial matches the name it starts: `Quill, C.` matches `Quill, Casey B.`.
+- A student MasterData knows by last name only matches when exactly one person on the file has that last name.
+- A name that could be more than one student is left alone and listed.
+- The IP is written the way MasterData's Instructors sheet spells them when they are on it, otherwise as the file has them, without the rank.
+
+**Before anything is saved** you see what will change, student by student: events marked complete, events marked NOT complete (with the status, e.g. `(CX)`), IP / ETD updates, and each student's SimDebt change. Then come the people, events and planned events left alone. The console lists everything. **Yes** saves right away:
+- the changed events' Instructor, ETD and IsComplete cells on each student's tab in OutputSchedule (nothing else on the tab is touched; a student with no tab gets one);
+- SimDebt in MasterData, moved by each changed event, the same way a scheduled event or a logged incomplete moves it.
+
+Both files are saved or neither. If they can't be saved (still open), the change is kept for this run and Export writes it. If you are reviewing a fill, it is thrown away (it was made from the old syllabi), so fill again.
+
 ## Changing a day you already exported
 
 1. Open FAIS, click **Load a day...**, choose **Last exported schedule (OutputSchedule)** and the day (it is added to the board if it isn't there). Everyone goes back on the board where they were exported, hardcoded.
@@ -66,8 +98,10 @@ The board reads the **Schedule** sheet one day at a time and keeps watching it:
 | Area | What it does |
 |---|---|
 | **Add lines** box (top) | Type lines and press Enter. See *Typing lines* below. |
+| **Add Bulk Lines** (top) | Asks for a start time, how many lines and the minutes between them (3 by default), then adds them to the day on screen: `0730`, `10` lines, `3` min gives 0730, 0733 ... 0757. Pick the line type too (an O&B gets its return leg). One **Ctrl+Z** takes the whole run off. |
 | **Template / Copy previous day's lines** | Reuse a saved wave, or copy the last flying day's times, types and IPs. |
 | **Load a day...** | Load one day from MasterData's Schedule sheet or from the last exported schedule. |
+| **Update Syllabi** | Pick the day's flying schedule or the Big Board; FAIS works out which it is and marks each student's events complete or not complete from it. See *Update Syllabi*. |
 | **Blue banner** | MasterData's Schedule sheet has lines the board doesn't: load them or keep the board's lines. |
 | **Only this day** (bottom) | Fill and export just the day on screen. |
 | **Day tabs** | One tab per day. **Add day** builds several days at once; crew rest is checked across them. |
@@ -77,12 +111,13 @@ The board reads the **Schedule** sheet one day at a time and keeps watching it:
 - **Moving pucks:** drag between lines to move a puck (hold **Ctrl** to copy). Drop it back on its pool to take it off the line.
 - **While you drag a student,** slots turn **green** (fine), **amber** (needs a look) or **red** (breaks a hard rule).
 - **When you drop a student,** a pop-up lists:
-  - hard-rule flags (red ✖), for example `Turn time 2.8 hr < 3.25 hr minimum (vs 0730 FT5103)`;
+  - hard-rule flags (red ✖), for example `Turn time 2.8 hr < 3.25 hr minimum (vs 0730 FT5103)` or `Not opted for FE3102: FT5001 isn't complete yet` (a sim whose prerequisite is the dollar ride);
   - warnings, for example `Less than 3.5 hr TT, Flt/CC Approval Required`;
   - the **+ / −** score reasons, spelled out, for example `3 String +10`, `Breaks 4 String w/ Lee −5` or `2 Flights and 2 Sims in last 5 Days −6`.
 - **Rule breaks are allowed.** The line is hardcoded anyway and marked `OVERRIDE: ...` on the output.
 - **Corner marker** on every hardcoded student: green, amber, red, or grey while checking. Hover for the reasons; right-click for more (explain, take off, *Fly wing to...*, duplicate, delete line).
-- **Mission dropdown:** `(auto)` picks the best-scoring event that passes the rules. Choose an event to hardcode it.
+- **Mission dropdown:** `(auto)` picks the best-scoring event that passes the rules. Choose an event to hardcode it. After the events the student can fly on the line come the next ones they are **not opted for** yet (marked `(not opted)`), then **Type a mission...** for anything else.
+- **A mission that breaks a rule** (not opted, already flown, not in the syllabus, wrong line type) is explained before it goes on, with the mission the scheduler would put there: **Yes** puts the recommended mission on, **No** keeps yours (the line is flagged `OVERRIDE: Not opted for ...` on the output), **Cancel** changes nothing. You always have the final say.
 - **IFT / OFT lines** are never wingmen or direct support.
 
 ### Typing lines
@@ -110,7 +145,7 @@ The board reads the **Schedule** sheet one day at a time and keeps watching it:
 | Path | What |
 |---|---|
 | `FAIS.ps1` | Entry point and settings (`$BoardSettings`, `$OutputSettings`; the Teams copy is off by default) |
-| `Modules\` | Code: engine (`SchedulingEngine`, `Syllabus`), board (`PuckBoard.xaml/.psm1`, `LoadDayDialog.xaml`, `BoardModel`, `Assessment`), Excel in/out (`DataDownload`, `DataUpload`, `ExcelFiles`), pre-run pop-ups (`PreRunMenu`), helpers (`DataManipulation`) |
+| `Modules\` | Code: engine (`SchedulingEngine`, `Syllabus`), board (`PuckBoard.xaml/.psm1`, `LoadDayDialog.xaml`, `BulkLinesDialog.xaml`, `BoardModel`, `Assessment`), Excel in/out (`DataDownload`, `DataUpload`, `ExcelFiles`), Update Syllabi (`SyllabusImport`), pre-run pop-ups (`PreRunMenu`), helpers (`DataManipulation`) |
 | `Boards\` | Autosaved board, one file per day (created on first run) |
 | `Templates\` | Saved wave templates |
 | `OldFunctions.psm1` | Legacy code, kept for reference only; not loaded |

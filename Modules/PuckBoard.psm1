@@ -112,7 +112,7 @@ function Initialize-PuckBoardWindow {
                 $controls = @{}
                 foreach ($name in @('UndoButton', 'HelpButton', 'QuickEntryBox', 'AddLineButton', 'QuickEntryFeedback', 'TemplateCombo',
                                 'LoadTemplateButton', 'SaveTemplateButton', 'CopyPrevDayButton', 'LoadDayButton', 'AddDayPicker', 'AddDayButton',
-                                'RemoveDayButton', 'CancelButton', 'BackToEditButton', 'RefillButton', 'ExportButton', 'FillButton', 'FillDayOnlyCheck', 'StatusText',
+                                'RemoveDayButton', 'BulkLinesButton', 'UpdateSyllabiButton', 'CancelButton', 'BackToEditButton', 'RefillButton', 'ExportButton', 'FillButton', 'FillDayOnlyCheck', 'StatusText',
                                 'CountsText', 'IPSearchBox', 'IPPool', 'StudentSearchBox', 'StudentPool', 'ModeBanner', 'ModeBannerText', 'DayTabs',
                                 'SheetBanner', 'SheetBannerText', 'SheetBannerLoadButton', 'SheetBannerIgnoreButton',
                                 'BusyOverlay', 'BusyText', 'BusyProgress', 'DropPopup', 'DropPopupPanel')) {
@@ -152,6 +152,7 @@ function Initialize-PuckBoardWindow {
                                 SheetStamp  = ''
                                 SheetPending = ''
                                 SheetAutoPending = $false
+                                ImportDir   = ''
                 }
 
                 Initialize-PBTimers
@@ -404,6 +405,8 @@ function Register-PBHandlers {
                                 [System.Windows.RoutedEventHandler]{ param($s, $e) Invoke-PBSafe { Invoke-PBRowClick $e } }, $true)
 
                 $C.AddLineButton.Add_Click({ Invoke-PBSafe { Invoke-PBQuickEntry } })
+                $C.BulkLinesButton.Add_Click({ Invoke-PBSafe { Invoke-PBBulkLines } })
+                $C.UpdateSyllabiButton.Add_Click({ Invoke-PBSafe { Invoke-PBUpdateSyllabi } })
                 $C.UndoButton.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'Undo' } } })
                 $C.HelpButton.Add_Click({ Invoke-PBSafe { Show-PBHelp } })
                 $C.LoadTemplateButton.Add_Click({ Invoke-PBSafe { Invoke-PBLoadTemplate } })
@@ -594,26 +597,23 @@ function Test-PBAssessmentFresh {
                 return ($null -ne $a -and $a.BoardVersion -eq $script:PB.Board.Version -and [string]$a.RequestedMission -ieq [string]$Line.Mission)
 }
 
-# Missions offered in a pinned line's dropdown
+# Missions offered in a pinned line's dropdown: (auto), the events the student can fly here,
+# the next ones they aren't opted for yet (marked), and "Type a mission..."
 function Get-PBMissionChoices {
                 param ($Line)
 
-                $choices = New-Object System.Collections.Generic.List[string]
-                $choices.Add($script:PBAutoText)
                 $a = Get-PBCurrentAssessment $Line
+                $student = Resolve-StudentByName -Students $script:PB.Data.Students -Name $Line.Student
                 $names = @()
                 if ($null -ne $a -and @($a.EligibleEvents).Count -gt 0) { $names = @($a.EligibleEvents) }
                 else {
-                                $student = Resolve-StudentByName -Students $script:PB.Data.Students -Name $Line.Student
                                 $types = Get-AllowedEventTypes ([string]$Line.SortieType)
                                 if ($null -ne $student -and $null -ne $types) {
                                                 $names = @(Get-OptedEvents -SyllabusData $student.Syllabus | Where-Object { ([string]$_.Type).Trim() -in $types } |
                                                                 Sort-Object -Property { Get-SyllabusSortKey $_ } | ForEach-Object { [string]$_.Mission })
                                 }
                 }
-                foreach ($n in $names) { if (-not $choices.Contains($n)) { $choices.Add($n) } }
-                if ($Line.Mission -and -not $choices.Contains([string]$Line.Mission)) { $choices.Add([string]$Line.Mission) }
-                return $choices.ToArray()
+                return @(Get-MissionChoiceTexts -Student $student -SortieType ([string]$Line.SortieType) -Eligible $names -Current ([string]$Line.Mission))
 }
 
 # The view model a row's DataTemplate binds to
@@ -1221,9 +1221,10 @@ function Invoke-PBSelectionChanged {
                                                 if ($value -and $value -ne $vm.SortieType) { Request-PBCommand @{ Cmd = 'SetType'; LineId = $vm.LineId; Value = $value } }
                                 }
                                 'MissionBox' {
-                                                if (@($vm.MissionOptions) -notcontains $value) { return }
-                                                $mission = if ($value -eq $script:PBAutoText) { '' } else { $value }
-                                                if ($vm.MissionEnabled -and $mission -ne $vm.MissionRaw) { Request-PBCommand @{ Cmd = 'SetMission'; LineId = $vm.LineId; Value = $mission } }
+                                                if (@($vm.MissionOptions) -notcontains $value -or -not $vm.MissionEnabled) { return }
+                                                # Checked (and typed, for "Type a mission...") after this event, not inside it
+                                                $choice = ConvertFrom-MissionChoiceText $value
+                                                if ($choice.Kind -eq 'Type' -or $choice.Mission -ne $vm.MissionRaw) { Request-PBCommand @{ Cmd = 'ChooseMission'; LineId = $vm.LineId; Value = $value } }
                                 }
                 }
 }
@@ -1490,6 +1491,7 @@ function Invoke-PBCommand {
                                                 Invoke-PBChange { Set-BoardMission -Board $board -Id $id -Mission $Cmd.Value }
                                                 Show-PBPlacementPopup $id
                                 }
+                                'ChooseMission' { Invoke-PBChooseMission -LineId $id -Choice ([string]$Cmd.Value) }
                                 'SetField' {
                                                 # Notes / callsign don't change any rule, so only this row is redrawn
                                                 Set-BoardLineField -Board $board -Id $id -Field $Cmd.Field -Value $Cmd.Value
@@ -1536,6 +1538,346 @@ function Invoke-PBCommand {
                                 'CopyPrevDay' { Invoke-PBCopyPrevDay }
                                 'Fill' { Invoke-PBFill -Refill:([bool]$Cmd.Refill) }
                 }
+}
+
+
+# =================================================================================
+#  MISSIONS PICKED BY HAND
+#  Any mission can go on a pinned line. One the scheduler wouldn't put there (not opted,
+#  not in the syllabus, wrong line...) is explained first, with the right mission offered;
+#  if the user keeps it anyway it goes on and is flagged OVERRIDE on the output.
+# =================================================================================
+
+# A choice from a pinned line's mission dropdown: (auto), a mission, or "Type a mission..."
+function Invoke-PBChooseMission {
+                param ([string]$LineId, [string]$Choice)
+
+                $board = $script:PB.Board
+                $line = Get-BoardLine $board $LineId
+                if ($null -eq $line -or [string]::IsNullOrWhiteSpace($line.Student)) { return }
+                $picked = ConvertFrom-MissionChoiceText $Choice
+                $mission = [string]$picked.Mission
+                if ($picked.Kind -eq 'Type') {
+                                $mission = (Read-PBText -Prompt "Mission for $($line.Student) (e.g. FT5102):" -Title 'Type a mission' -Default ([string]$line.Mission)).Trim()
+                                if ($mission -eq '') { Reset-PBLineRow $LineId; return }
+                                $mission = Resolve-PBMissionName -Line $line -Mission $mission
+                }
+
+                $override = $false
+                if ($mission -ne '') {
+                                $advice = Get-PBMissionAdvice -Line $line -Mission $mission
+                                if ($advice.NeedsConfirm) {
+                                                $answer = Show-PBMessage -Text $advice.Text -Title $advice.Title -Buttons $advice.Buttons -Icon 'Warning'
+                                                if ($answer -eq 'Yes') { $mission = $advice.Suggested }
+                                                elseif ($answer -eq 'No' -or $answer -eq 'OK') { $override = $true }
+                                                else { Reset-PBLineRow $LineId; Set-PBStatus 'Mission left as it was.'; return }
+                                }
+                }
+                if ($mission -ceq [string]$line.Mission) { Reset-PBLineRow $LineId; return }
+
+                $status = if ($mission -eq '') { 'Mission set to (auto).' } elseif ($override) { "$mission kept - it is flagged OVERRIDE on the output." } else { "Mission set to $mission." }
+                Invoke-PBChange { Set-BoardMission -Board $board -Id $LineId -Mission $mission } -Status $status
+                if ($override) { Set-PBStatus $status 'Warn' }
+                Show-PBPlacementPopup $LineId
+}
+
+# The rule check for a mission picked by hand (Get-MissionAdvice with both assessments)
+function Get-PBMissionAdvice {
+                param ($Line, [string]$Mission)
+
+                $board = $script:PB.Board
+                $requested = Get-PlacementAssessment -Board $board -LineId $Line.Id -StudentName $Line.Student -MissionName $Mission -Data $script:PB.Data
+                $auto = Get-PlacementAssessment -Board $board -LineId $Line.Id -StudentName $Line.Student -MissionName '' -Data $script:PB.Data
+                return Get-MissionAdvice -Requested $requested -Auto $auto -Mission $Mission
+}
+
+# A typed mission spelled the way the student's syllabus has it ("ft5102" -> "FT5102")
+function Resolve-PBMissionName {
+                param ($Line, [string]$Mission)
+
+                $student = Resolve-StudentByName -Students $script:PB.Data.Students -Name $Line.Student
+                if ($null -ne $student) {
+                                foreach ($m in @($student.Syllabus)) {
+                                                if ($null -ne $m -and ([string]$m.Mission).Trim() -ieq $Mission) { return ([string]$m.Mission).Trim() }
+                                }
+                }
+                return $Mission
+}
+
+# Redraws a line's row the way the board has it (after a cancelled choice in its dropdown)
+function Reset-PBLineRow {
+                param ([string]$LineId)
+
+                $line = Get-BoardLine $script:PB.Board $LineId
+                if ($null -eq $line) { return }
+                $focus = Get-PBFocusState
+                $script:PB.Busy = $true
+                try { Update-PBDay $line.Day } finally { $script:PB.Busy = $false }
+                Restore-PBFocus $focus
+}
+
+# Message box and text prompt (wrapped so the tests can answer them).
+# Show-PBMessage returns 'OK', 'Yes', 'No' or 'Cancel'; Read-PBText returns '' when cancelled.
+function Show-PBMessage {
+                param ([string]$Text, [string]$Title, [string]$Buttons = 'OK', [string]$Icon = 'Information')
+
+                $answer = [System.Windows.MessageBox]::Show($Text, $Title, [System.Windows.MessageBoxButton]$Buttons, [System.Windows.MessageBoxImage]$Icon)
+                return [string]$answer
+}
+
+function Read-PBText {
+                param ([string]$Prompt, [string]$Title, [string]$Default = '')
+
+                return [string][Microsoft.VisualBasic.Interaction]::InputBox($Prompt, $Title, $Default)
+}
+
+
+# =================================================================================
+#  ADD BULK LINES
+# =================================================================================
+
+# The "Add Bulk Lines" button: asks for the start time, how many lines and the minutes
+# between them, then puts them on the day being looked at (one undo step)
+function Invoke-PBBulkLines {
+                $day = Get-PBActiveDay
+                if ($null -eq $day) { Set-PBStatus 'Add a day first.' 'Warn'; return }
+                $request = Show-PBBulkLinesDialog -Day $day
+                if ($null -eq $request) { return }
+                [void](Add-PBBulkLines -Day $day -StartTime $request.StartTime -Count $request.Count -Every $request.Every -SortieType $request.SortieType)
+}
+
+# Returns $true when the lines went on
+function Add-PBBulkLines {
+                param ([string]$Day, [string]$StartTime, [string]$Count, [string]$Every = '3', [string]$SortieType = 'Day Local')
+
+                $made = New-BulkBoardLines -Day $Day -StartTime $StartTime -Count $Count -Every $Every -SortieType $SortieType -Settings $script:PB.Board.Settings
+                if (@($made.Errors).Count -gt 0) { Set-PBStatus (@($made.Errors) -join ' ') 'Warn'; return $false }
+                $newLines = @($made.Lines)
+                $summary = 'Added ' + (Format-PBBulkTimes -Times $made.Times -Every $Every -SortieType $SortieType -DayText (ConvertTo-PBDayDate $Day).ToString('ddd dd MMM')) + '.'
+                Invoke-PBChange { Add-BoardLine -Board $script:PB.Board -Line $newLines } -Status $summary
+                return $true
+}
+
+# "10 Day Local lines: 0730 to 0757, every 3 min" (-DayText adds " on Tue 20 Oct" before the colon)
+function Format-PBBulkTimes {
+                param ([string[]]$Times, [string]$Every, [string]$SortieType, [string]$DayText = '')
+
+                $n = @($Times).Count
+                if ($n -eq 0) { return '' }
+                $noun = if ($n -eq 1) { 'line' } else { 'lines' }
+                $on = if ($DayText) { " on $DayText" } else { '' }
+                $text = "$n $SortieType $noun$on at $($Times[0])"
+                if ($n -gt 1) { $text = "$n $SortieType $noun$on`: $($Times[0]) to $($Times[$n - 1]), every $($Every.Trim()) min" }
+                if (Test-IsOBSortieType $SortieType) { $text += ' (each with its return leg)' }
+                return $text
+}
+
+function ConvertTo-PBDayDate {
+                param ([string]$Day)
+
+                return [datetime]::ParseExact($Day, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+# The boxes' starting values: the next start after the day's last line (else 0730), 3 minutes apart
+function Get-PBBulkDefaults {
+                param ([string]$Day)
+
+                $every = 3
+                $start = '0730'
+                $last = @(Get-BoardDayLines -Board $script:PB.Board -Day $Day | Where-Object { -not (Test-IsReturnSortieType ([string]$_.SortieType)) } | Sort-Object -Property ETD | Select-Object -Last 1)
+                if ($last.Count -gt 0) {
+                                $next = $last[0].ETD.AddMinutes($every)
+                                if ($next.Date -eq $last[0].ETD.Date) { $start = $next.ToString('HHmm') }
+                }
+                return @{ StartTime = $start; Count = ''; Every = [string]$every; SortieType = 'Day Local' }
+}
+
+# The Add bulk lines window. Returns @{ StartTime; Count; Every; SortieType } or $null when cancelled.
+function Show-PBBulkLinesDialog {
+                param ([string]$Day)
+
+                $win = Initialize-PBBulkLinesDialog -Day $Day
+                try { [void]$win.ShowDialog() } catch { Write-PBLog "Add bulk lines dialog: $($_.Exception.Message)" }
+                $result = $script:PBBulk.Result
+                $script:PBBulk = $null
+                return $result
+}
+
+# Builds the Add bulk lines window without showing it. Its state lives in $script:PBBulk.
+function Initialize-PBBulkLinesDialog {
+                param ([string]$Day)
+
+                [xml]$xaml = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'BulkLinesDialog.xaml') -Raw -Encoding UTF8
+                $win = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
+                $bulk = @{ Window = $win; Day = $Day; Result = $null }
+                foreach ($field in @('DayText', 'StartTimeBox', 'CountBox', 'IntervalBox', 'TypeCombo', 'PreviewText', 'AddButton', 'CancelButton')) {
+                                $c = $win.FindName($field)
+                                if ($null -eq $c) { throw "BulkLinesDialog.xaml is missing the element '$field'" }
+                                $bulk[$field] = $c
+                }
+                $script:PBBulk = $bulk
+                try { if ($script:PB.Window.IsVisible) { $win.Owner = $script:PB.Window } } catch { }
+
+                $start = Get-PBBulkDefaults -Day $Day
+                $bulk.DayText.Text = "Lines go on " + (ConvertTo-PBDayDate $Day).ToString('dddd dd MMM yyyy') + '.'
+                $bulk.StartTimeBox.Text = $start.StartTime
+                $bulk.CountBox.Text = $start.Count
+                $bulk.IntervalBox.Text = $start.Every
+                $returnType = [string]$script:PB.Board.Settings.ReturnSortieType
+                $bulk.TypeCombo.ItemsSource = @($script:PB.TypeOptions | Where-Object { $_ -and $_ -ne $returnType })
+                $bulk.TypeCombo.SelectedItem = $start.SortieType
+                if ($null -eq $bulk.TypeCombo.SelectedItem) { $bulk.TypeCombo.SelectedIndex = 0 }
+
+                $bulk.StartTimeBox.Add_TextChanged({ Invoke-PBSafe { Update-PBBulkPreview } })
+                $bulk.CountBox.Add_TextChanged({ Invoke-PBSafe { Update-PBBulkPreview } })
+                $bulk.IntervalBox.Add_TextChanged({ Invoke-PBSafe { Update-PBBulkPreview } })
+                $bulk.TypeCombo.Add_SelectionChanged({ Invoke-PBSafe { Update-PBBulkPreview } })
+                $bulk.AddButton.Add_Click({ Invoke-PBSafe { Submit-PBBulkLinesDialog } })
+                $win.Add_Loaded({ Invoke-PBSafe { [void]$script:PBBulk.CountBox.Focus() } })
+                Update-PBBulkPreview
+                return $win
+}
+
+# What the boxes ask for right now
+function Get-PBBulkRequest {
+                $bulk = $script:PBBulk
+                return @{
+                                StartTime  = [string]$bulk.StartTimeBox.Text
+                                Count      = [string]$bulk.CountBox.Text
+                                Every      = [string]$bulk.IntervalBox.Text
+                                SortieType = [string]$bulk.TypeCombo.SelectedItem
+                }
+}
+
+# Shows the times the lines would get, or what is wrong with the boxes. Returns $true when they are good.
+function Update-PBBulkPreview {
+                $bulk = $script:PBBulk
+                if ($null -eq $bulk) { return $false }
+                $request = Get-PBBulkRequest
+                if ([string]::IsNullOrWhiteSpace($request.Count)) {
+                                $bulk.PreviewText.Text = 'Type how many lines to add.'
+                                $bulk.PreviewText.Foreground = Get-PBBrush '#64748B'
+                                $bulk.AddButton.IsEnabled = $false
+                                return $false
+                }
+                $made = New-BulkBoardLines -Day $bulk.Day -StartTime $request.StartTime -Count $request.Count -Every $request.Every -SortieType $request.SortieType -Settings $script:PB.Board.Settings
+                if (@($made.Errors).Count -gt 0) {
+                                $bulk.PreviewText.Text = (@($made.Errors) -join "`n")
+                                $bulk.PreviewText.Foreground = Get-PBBrush '#B91C1C'
+                                $bulk.AddButton.IsEnabled = $false
+                                return $false
+                }
+                $times = @($made.Times)
+                $shown = if ($times.Count -le 12) { $times -join ' ' } else { (@($times[0..7]) -join ' ') + ' ... ' + (@($times[($times.Count - 2)..($times.Count - 1)]) -join ' ') }
+                $bulk.PreviewText.Text = (Format-PBBulkTimes -Times $times -Every $request.Every -SortieType $request.SortieType) + "`n" + $shown
+                $bulk.PreviewText.Foreground = Get-PBBrush '#0F172A'
+                $bulk.AddButton.IsEnabled = $true
+                return $true
+}
+
+function Submit-PBBulkLinesDialog {
+                $bulk = $script:PBBulk
+                if (-not (Update-PBBulkPreview)) { return }
+                $bulk.Result = Get-PBBulkRequest
+                try { $bulk.Window.DialogResult = $true } catch { $bulk.Window.Close() }
+}
+
+
+# =================================================================================
+#  UPDATE SYLLABI
+#  Reads a training file (the day's flying schedule or the Big Board), works out which one
+#  it is and brings the students' syllabi in line with it (SyllabusImport). What will change
+#  is shown first; on Yes the board's syllabi change and are saved right away.
+# =================================================================================
+
+# The "Update Syllabi" button
+function Invoke-PBUpdateSyllabi {
+                $path = Show-PBOpenFileDialog -Title 'Update Syllabi: pick the flying schedule or the Big Board'
+                if ([string]::IsNullOrWhiteSpace($path)) { return }
+                $fileName = [System.IO.Path]::GetFileName($path)
+                $data = $script:PB.Data
+                $now = Get-Date
+
+                Show-BusyOverlay "Reading $fileName..."
+                try {
+                                $read = Read-TrainingFile -Path $path
+                                $plan = $null
+                                if (-not $read.Error) {
+                                                $plan = Get-SyllabusUpdatePlan -File $read -Students @($data.Students) -Instructors @($data.Instructors) -OutputPath ([string]$data.OutputPath) -SoftWeights $data.SoftWeights -Now $now
+                                }
+                }
+                finally { Hide-BusyOverlay }
+                if ($read.Error) {
+                                [void](Show-PBMessage -Text $read.Error -Title 'Update Syllabi' -Buttons 'OK' -Icon 'Warning')
+                                Set-PBStatus "Update Syllabi: $fileName was not used - nothing was changed." 'Warn'
+                                return
+                }
+
+                $summary = Format-SyllabusUpdateSummary -File $read -Plan $plan
+                Write-Host "`nUpdate Syllabi from $path" -ForegroundColor Cyan
+                Write-Host (Format-SyllabusUpdateSummary -File $read -Plan $plan -MaxLines 100000 -MaxMissions 100000)
+                if (@($plan.Changes).Count -eq 0) {
+                                [void](Show-PBMessage -Text $summary -Title 'Update Syllabi' -Buttons 'OK' -Icon 'Information')
+                                Set-PBStatus "Update Syllabi: every syllabus already matches $fileName - nothing was changed." 'Good'
+                                return
+                }
+                $question = "$summary`n`nUpdate these syllabi? Each student's tab in OutputSchedule and their SimDebt in MasterData are saved right away."
+                if ($script:PB.Mode -eq 'Review') { $question += "`n`nThe fill you are reviewing is thrown away (it was made from the old syllabi). Fill again afterwards." }
+                if ((Show-PBMessage -Text $question -Title 'Update Syllabi' -Buttons 'YesNo' -Icon 'Question') -ne 'Yes') {
+                                Set-PBStatus 'Update Syllabi cancelled - nothing was changed.'
+                                return
+                }
+
+                # A fill made from the old syllabi would put them back on Export
+                Exit-PBReview
+                $memory = @(Invoke-SyllabusUpdate -Targets $plan.Targets -SoftWeights $data.SoftWeights -Now $now)
+                $prompt = {
+                                param($file)
+                                $text = "$file is still open and FAIS could not close it (a cell may be in edit mode, or someone else has it open).`n`nClose it, then press OK to try again."
+                                return ((Show-PBMessage -Text $text -Title 'File is open' -Buttons 'OKCancel' -Icon 'Warning') -eq 'OK')
+                }
+                Show-BusyOverlay 'Saving the syllabi...'
+                try {
+                                $saved = Save-SyllabusUpdate -Targets $plan.Targets -MemoryChanges $memory -OutputPath ([string]$data.OutputPath) -MasterDataPath ([string]$data.MasterDataPath) `
+                                                -SoftWeights $data.SoftWeights -LockedPrompt $prompt -Now $now
+                }
+                finally { Hide-BusyOverlay }
+
+                # Every hardcoded student is checked again against the new syllabi
+                Clear-AssessmentCache
+                $script:PB.Assess = @{}
+                Update-PBAll
+                Start-PBAssessQueue
+
+                $students = @($plan.Changes | ForEach-Object { $_.Student } | Sort-Object -Unique).Count
+                $done = "Updated $(@($plan.Changes).Count) event(s) for $students student(s) from $fileName"
+                if ($saved.Saved) {
+                                Set-PBStatus "$done and saved them to OutputSchedule and MasterData." 'Good'
+                }
+                else {
+                                $text = "$done for this run only: they could not be saved ($($saved.Message)). Export writes them with the schedule."
+                                [void](Show-PBMessage -Text $text -Title 'Update Syllabi' -Buttons 'OK' -Icon 'Warning')
+                                Set-PBStatus $text 'Warn'
+                }
+}
+
+# The Excel file picker for Update Syllabi (wrapped so the tests can answer it). Opens where
+# the last file came from, else Downloads. Returns the file picked, or '' when cancelled.
+function Show-PBOpenFileDialog {
+                param ([string]$Title)
+
+                $dlg = New-Object Microsoft.Win32.OpenFileDialog
+                $dlg.Title = $Title
+                $dlg.Filter = 'Excel workbooks (*.xlsx;*.xlsm)|*.xlsx;*.xlsm|All files (*.*)|*.*'
+                $dlg.CheckFileExists = $true
+                $dir = [string]$script:PB.ImportDir
+                if ($dir -eq '' -or -not (Test-Path -LiteralPath $dir)) { $dir = Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Downloads' }
+                if (Test-Path -LiteralPath $dir) { $dlg.InitialDirectory = $dir }
+                $owner = $script:PB.Window
+                $picked = if ($null -ne $owner -and $owner.IsVisible) { $dlg.ShowDialog($owner) } else { $dlg.ShowDialog() }
+                if ($picked -ne $true) { return '' }
+                $script:PB.ImportDir = [System.IO.Path]::GetDirectoryName($dlg.FileName)
+                return [string]$dlg.FileName
 }
 
 
@@ -1752,6 +2094,8 @@ ADDING LINES (box at the top, press Enter)
   1300 OFT x2             two OFT lines (IFT works the same)
   0800 DL Jones sp:Smith  IP Jones, student Smith hardcoded (m:FT5103 sets the mission)
   Several at once:        0730 DL, 0745 DL, 0800 DL
+  Add Bulk Lines          asks for a start time, how many lines and the minutes between them
+                          (3 by default), e.g. 0730, 10 lines -> 0730 0733 ... 0757
 Templates save a day's times; "Copy previous day's lines" copies the last flying day.
 
 ONE DAY AT A TIME
@@ -1770,6 +2114,13 @@ PUCKS
   While dragging a student, slots turn green (ok), amber (needs a look), red (breaks a rule).
   Rule breaks are allowed - the line is flagged OVERRIDE on the output.
 
+MISSIONS
+  A hardcoded student's mission dropdown lists (auto), the events they can fly on the line,
+  the next events they are NOT opted for yet (marked), and "Type a mission..." for anything.
+  A mission that breaks a rule (not opted - e.g. a sim before the dollar ride - not in the
+  syllabus, or the wrong line type) is explained first, with the scheduler's pick offered:
+  Yes = use the recommended mission, No = keep yours (flagged OVERRIDE), Cancel = no change.
+
 MARKERS
   The corner triangle on a hardcoded student: green clean, amber warnings, red rule broken,
   grey still checking. Hover it for the + / - reasons. Right-click for more.
@@ -1785,6 +2136,15 @@ FILL
   "Fill the rest of the lines" schedules every open line like before. Review the result,
   then Export (writes OutputSchedule.xlsx), Re-fill, or go Back to edit.
   Excel files FAIS writes are saved and closed for you first, and opened again afterwards.
+
+UPDATE SYLLABI
+  Pick a training file; FAIS works out which one it is:
+  - the day's flying schedule (Flying and Sims tabs): a student's line marked CM or EXEC
+    marks its mission complete with the line's IP and ETD; INC or CX makes sure it is not.
+  - the Big Board: an entry in an event's columns marks it complete with its IP and date;
+    no entry makes sure it is not complete (an event FAIS has planned for later stays).
+  Only events in a student's syllabus change. You see what will change first; Yes saves
+  each student's tab in OutputSchedule and their SimDebt in MasterData right away.
 "@
                 [void][System.Windows.MessageBox]::Show($text, 'FAIS Puck Board help', [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
 }
@@ -2341,6 +2701,35 @@ function Test-PuckBoardWindow {
                                 Submit-PBDialog
                                 & $check ($null -ne $script:PBDlg.Result -and $script:PBDlg.Result.SourceDay -eq $day2 -and $script:PBDlg.Result.TargetDay -eq $day2) 'dialog returns the picked day'
                                 $script:PBDlg = $null
+
+                                $step = 'mission dropdown'
+                                $pinned = @(Get-BoardDayLines -Board $script:PB.Board -Day $day2 | Where-Object { $_.Student })
+                                & $check ($pinned.Count -ge 1) 'a student is pinned on the loaded day'
+                                if ($pinned.Count -ge 1) {
+                                                $opts = @(Get-PBMissionChoices $pinned[0])
+                                                & $check ($opts[0] -eq '(auto)' -and $opts[-1] -eq 'Type a mission...') 'mission dropdown offers (auto) and typing a mission'
+                                }
+
+                                $step = 'add bulk lines dialog'
+                                [void](Initialize-PBBulkLinesDialog -Day $day2)
+                                & $check (-not $script:PBBulk.AddButton.IsEnabled) 'Add lines waits for the number of lines'
+                                & $check ([string]$script:PBBulk.IntervalBox.Text -eq '3') 'minutes between lines starts at 3'
+                                $script:PBBulk.StartTimeBox.Text = '1400'
+                                $script:PBBulk.CountBox.Text = '400'
+                                & $check (-not $script:PBBulk.AddButton.IsEnabled) 'too many lines is refused'
+                                $script:PBBulk.CountBox.Text = '4'
+                                & $check ($script:PBBulk.AddButton.IsEnabled -and [string]$script:PBBulk.PreviewText.Text -like '*1400 1403 1406 1409*') 'preview shows the times'
+                                Submit-PBBulkLinesDialog
+                                $bulkAsk = $script:PBBulk.Result
+                                $script:PBBulk = $null
+                                & $check ($null -ne $bulkAsk -and $bulkAsk.Count -eq '4' -and $bulkAsk.StartTime -eq '1400' -and $bulkAsk.SortieType -eq 'Day Local') 'dialog returns what was typed'
+                                $before = @(Get-BoardDayLines -Board $script:PB.Board -Day $day2).Count
+                                if ($null -ne $bulkAsk) {
+                                                & $check (Add-PBBulkLines -Day $day2 -StartTime $bulkAsk.StartTime -Count $bulkAsk.Count -Every $bulkAsk.Every -SortieType $bulkAsk.SortieType) 'bulk lines added'
+                                                & $check (@(Get-BoardDayLines -Board $script:PB.Board -Day $day2).Count -eq $before + 4 -and $script:PB.DayColls[$day2].Count -eq $before + 4) 'four new rows on the day'
+                                                Invoke-PBCommand @{ Cmd = 'Undo' }
+                                                & $check (@(Get-BoardDayLines -Board $script:PB.Board -Day $day2).Count -eq $before) 'one undo takes them all off'
+                                }
 
                                 $step = 'fill only this day'
                                 Select-PBDay $day2

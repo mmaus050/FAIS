@@ -7,6 +7,7 @@
 #        Set-BoardLineType / Set-BoardInstructor / Set-BoardPin / Clear-BoardPin / Move-BoardPin
 #        Set-BoardMission / Set-BoardLineField / Set-FormationPair / Unlink-ReturnLine
 # Typing: ConvertTo-BoardTime / Format-BoardTime / ConvertTo-BoardSortieType / ConvertFrom-QuickEntry
+#         New-BulkBoardLines (Add Bulk Lines)
 # Engine: ConvertTo-ScheduleRows / ConvertFrom-ScheduleRows / Get-FillOverlay / Test-BoardReadyToFill
 # One day at a time: Resolve-SheetRowDays / ConvertFrom-SheetRows / Import-BoardDayLines / Get-BoardSheetState / Get-SheetBannerInfo
 #         Set-BoardSheetSync / ConvertFrom-PublishedRows / Get-PublishedContextRows / Split-FillResult
@@ -669,6 +670,72 @@ function ConvertFrom-QuickEntry {
                                 Links    = $links.ToArray()
                                 Errors   = $errors.ToArray()
                                 Warnings = $warnings.ToArray()
+                }
+}
+
+# Add Bulk Lines: -Count lines of -SortieType on -Day, the first at -StartTime and each one
+# -Every minutes after the one before (3 by default). Values come straight from the dialog's
+# boxes, so they are checked here. An O&B gets its linked return leg, like a typed one.
+# Returns {Lines; Times ('HHmm' of each line); Errors}. Lines is empty when there are errors.
+function New-BulkBoardLines {
+                param (
+                                [Parameter(Mandatory)] $Day,
+                                [string]$StartTime,
+                                [string]$Count,
+                                [string]$Every = '3',
+                                [string]$SortieType = 'Day Local',
+                                [string]$Instructor = '',
+                                $Settings
+                )
+
+                $defaults = Get-DefaultBoardSettings
+                if ($null -eq $Settings) { $Settings = $defaults }
+                $errors = New-Object System.Collections.Generic.List[string]
+                $lines = New-Object System.Collections.Generic.List[object]
+                $times = New-Object System.Collections.Generic.List[string]
+                $maxLines = 60
+
+                $start = ConvertTo-BoardTime $StartTime
+                if ($null -eq $start) { $errors.Add("Start time '$StartTime' isn't a time (type 0730, 730 or 7:30).") }
+                $n = 0
+                if (-not [int]::TryParse(([string]$Count).Trim(), [ref]$n) -or $n -lt 1 -or $n -gt $maxLines) { $errors.Add("Number of lines must be a whole number from 1 to $maxLines.") }
+                $gap = 0
+                if (-not [int]::TryParse(([string]$Every).Trim(), [ref]$gap) -or $gap -lt 0 -or $gap -gt 240) { $errors.Add('Minutes between lines must be a whole number from 0 to 240.') }
+                $type = ([string]$SortieType).Trim()
+                if ($type -eq '') { $errors.Add('Pick a sortie type.') }
+                $dayText = ConvertTo-BoardDay $Day
+                if ($null -eq $dayText) { $errors.Add("'$Day' isn't a day.") }
+
+                if ($errors.Count -eq 0) {
+                                $dayDate = [datetime]::ParseExact($dayText, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
+                                $first = $dayDate.Add($start)
+                                $last = $first.AddMinutes($gap * ($n - 1))
+                                $offset = [int]$Settings.OBReturnOffsetMinutes
+                                if ($offset -le 0) { $offset = [int]$defaults.OBReturnOffsetMinutes }
+                                $returnType = [string]$Settings.ReturnSortieType
+                                if ($returnType.Trim() -eq '') { $returnType = [string]$defaults.ReturnSortieType }
+                                $returnBoard = [PSCustomObject]@{ Settings = @{ OBReturnOffsetMinutes = $offset; ReturnSortieType = $returnType } }
+                                $isOB = Test-IsOBSortieType $type
+                                if ($last.Date -ne $dayDate) {
+                                                $errors.Add(("The last line would be at {0} the next day. Start earlier, add fewer lines or put them closer together." -f $last.ToString('HHmm')))
+                                }
+                                elseif ($isOB -and $last.AddMinutes($offset).Date -ne $dayDate) {
+                                                $errors.Add(("The last O&B's return leg would be at {0} the next day. Start earlier or add fewer lines." -f $last.AddMinutes($offset).ToString('HHmm')))
+                                }
+                                else {
+                                                for ($i = 0; $i -lt $n; $i++) {
+                                                                $etd = $first.AddMinutes($gap * $i)
+                                                                $line = New-BoardLine -ETD $etd -SortieType $type -Instructor $Instructor -Source 'Bulk'
+                                                                $lines.Add($line)
+                                                                $times.Add($etd.ToString('HHmm'))
+                                                                if ($isOB) { $lines.Add((New-ReturnLineFor -Board $returnBoard -OBLine $line -ReturnETD $etd.AddMinutes($offset))) }
+                                                }
+                                }
+                }
+                return [PSCustomObject]@{
+                                Lines  = $(if ($errors.Count -eq 0) { $lines.ToArray() } else { @() })
+                                Times  = $(if ($errors.Count -eq 0) { $times.ToArray() } else { @() })
+                                Errors = $errors.ToArray()
                 }
 }
 

@@ -435,7 +435,15 @@ function Test-HardRules {
                                                 $isValid = $false
                                                 foreach ($v in $valid) { if ([string]$v.Mission -ieq [string]$explicit.Mission) { $isValid = $true; break } }
                                                 if (-not $isValid) {
-                                                                $explicitIneligible = New-RuleViolation 'MISSION_NOT_ELIGIBLE' ("{0} isn't eligible here ({1})" -f $explicit.Mission, (Get-IneligibleReason -Student $Student -Mission $explicit -Sortie $Sortie)) -Mission ([string]$explicit.Mission)
+                                                                # Not opted (already flown, or a prereq still to fly) is its own flag; anything
+                                                                # else is about this line (wrong type, pinned elsewhere, no O&B second leg)
+                                                                $notOpted = Get-NotOptedReason -Student $Student -Mission $explicit
+                                                                if ($notOpted -ne '') {
+                                                                                $explicitIneligible = New-RuleViolation 'NOT_OPTED' ("Not opted for {0}: {1}" -f $explicit.Mission, $notOpted) -Mission ([string]$explicit.Mission)
+                                                                }
+                                                                else {
+                                                                                $explicitIneligible = New-RuleViolation 'MISSION_NOT_ELIGIBLE' ("{0} isn't eligible here ({1})" -f $explicit.Mission, (Get-IneligibleReason -Student $Student -Mission $explicit -Sortie $Sortie)) -Mission ([string]$explicit.Mission)
+                                                                }
                                                 }
                                 }
                 }
@@ -605,6 +613,22 @@ function Get-NoEligibleMessage {
                 }
                 $nextList = (@($opted | Select-Object -First 3 | ForEach-Object { "$($_.Mission) $($_.Type)" })) -join ', '
                 return "No eligible $label events (next: $nextList)"
+}
+
+# Why a student isn't opted for an event ('' when they are): it is already complete, or a
+# prereq isn't complete yet (e.g. a sim whose prereq is the dollar ride)
+function Get-NotOptedReason {
+                param ($Student, $Mission)
+
+                if (Test-MissionComplete $Mission) { return 'already complete' }
+                $prereqText = [string]$Mission.Prereqs
+                if ($prereqText.Trim() -eq '0' -or [string]::IsNullOrWhiteSpace($prereqText)) { return '' }
+                $done = @{}
+                foreach ($m in @($Student.Syllabus)) { if ($null -ne $m) { $done[([string]$m.Mission).Trim().ToUpperInvariant()] = (Test-MissionComplete $m) } }
+                $missing = @($prereqText -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' -and -not $done[$_.ToUpperInvariant()] })
+                if ($missing.Count -eq 0) { return '' }
+                $verb = if ($missing.Count -eq 1) { "isn't" } else { "aren't" }
+                return "$($missing -join ', ') $verb complete yet"
 }
 
 # Why one specific event can't go on this line
@@ -1434,7 +1458,8 @@ function Invoke-PinnedLine {
                                 $er = Find-EventResult -Hard $hr -Evt $mission
                                 if ($null -ne $er) { foreach ($v in @($er.Violations)) { if ($v.Severity -eq 'Hard') { $hard.Add($v.Message) } } }
                 }
-                else {
+                elseif ($explicitName -eq '') {
+                                # (A typed mission that isn't in the syllabus is kept as typed; MISSION_NOT_FOUND says why)
                                 $hard.Add('no eligible event - mission left blank')
                 }
                 $hardList = @($hard | Select-Object -Unique)

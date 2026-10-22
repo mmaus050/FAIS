@@ -5,6 +5,7 @@
 # Get-BoardEvalRows / Get-BoardStudentContext
 # Get-PlacementAssessment
 # Get-AssessmentLines (text for tooltips / popups)
+# Get-MissionChoiceTexts / ConvertFrom-MissionChoiceText / Get-MissionAdvice (the mission dropdown)
 # Get-StudentPuckInfo / Get-InstructorPuckInfo
 
 
@@ -278,6 +279,140 @@ function Get-AssessmentLines {
                                 $out.Add([PSCustomObject]@{ Kind = 'Info'; Text = 'Based on pinned lines only; auto-filled lines can change turns.' })
                 }
                 return $out.ToArray()
+}
+
+# =================================================================================
+#  CHOOSING A MISSION BY HAND
+#  The mission dropdown offers the events the student can fly on the line, then the
+#  next ones they aren't opted for yet, then "Type a mission..." for anything else.
+#  A choice that breaks a rule is checked with Get-MissionAdvice before it goes on.
+# =================================================================================
+
+$script:MissionChoice = @{
+                Auto      = '(auto)'
+                Type      = 'Type a mission...'
+                NotOpted  = ' (not opted)'
+}
+
+# The dropdown's entries (text) for a hardcoded student on a line of -SortieType.
+# -Eligible: events they can fly there; -Current: the mission on the line now.
+function Get-MissionChoiceTexts {
+                param (
+                                $Student,
+                                [string]$SortieType = '',
+                                [string[]]$Eligible = @(),
+                                [string]$Current = '',
+                                [int]$MaxNotOpted = 8
+                )
+
+                $out = New-Object System.Collections.Generic.List[string]
+                $have = @{}
+                $out.Add($script:MissionChoice.Auto)
+                foreach ($e in $Eligible) {
+                                $name = ([string]$e).Trim()
+                                if ($name -eq '' -or $have.ContainsKey($name.ToUpperInvariant())) { continue }
+                                $out.Add($name)
+                                $have[$name.ToUpperInvariant()] = $true
+                }
+                $cur = ([string]$Current).Trim()
+                if ($cur -ne '' -and -not $have.ContainsKey($cur.ToUpperInvariant())) {
+                                $out.Add($cur)
+                                $have[$cur.ToUpperInvariant()] = $true
+                }
+
+                # The next events of the line's type the student isn't opted for (prereqs still to fly)
+                if ($null -ne $Student -and $MaxNotOpted -gt 0) {
+                                $types = Get-AllowedEventTypes $SortieType
+                                $added = 0
+                                foreach ($m in @($Student.Syllabus | Where-Object { $null -ne $_ } | Sort-Object -Property { Get-SyllabusSortKey $_ })) {
+                                                if ($added -ge $MaxNotOpted) { break }
+                                                $name = ([string]$m.Mission).Trim()
+                                                if ($name -eq '' -or $have.ContainsKey($name.ToUpperInvariant()) -or (Test-MissionComplete $m)) { continue }
+                                                if ($null -ne $types -and ([string]$m.Type).Trim() -notin $types) { continue }
+                                                if ((Get-NotOptedReason -Student $Student -Mission $m) -eq '') { continue }
+                                                $out.Add($name + $script:MissionChoice.NotOpted)
+                                                $have[$name.ToUpperInvariant()] = $true
+                                                $added++
+                                }
+                }
+                $out.Add($script:MissionChoice.Type)
+                return $out.ToArray()
+}
+
+# What a dropdown entry means: {Kind 'Auto'|'Type'|'Mission'; Mission}
+function ConvertFrom-MissionChoiceText {
+                param ([string]$Text)
+
+                $t = ([string]$Text).Trim()
+                if ($t -eq '' -or $t -eq $script:MissionChoice.Auto) { return [PSCustomObject]@{ Kind = 'Auto'; Mission = '' } }
+                if ($t -eq $script:MissionChoice.Type) { return [PSCustomObject]@{ Kind = 'Type'; Mission = '' } }
+                if ($t.EndsWith($script:MissionChoice.NotOpted)) { $t = $t.Substring(0, $t.Length - $script:MissionChoice.NotOpted.Length).Trim() }
+                return [PSCustomObject]@{ Kind = 'Mission'; Mission = $t }
+}
+
+# Whether a mission picked by hand needs a second look before it goes on, and what to fly instead.
+# -Requested: the assessment with that mission; -Auto: the assessment with (auto).
+# Problems are the rule flags that come from the mission itself (not opted, not in the syllabus,
+# wrong line, a checkride rule...), not ones any mission would have (turn time, absence...).
+# Returns {NeedsConfirm; Problems; Suggested; SuggestedScore; Others; Mission; Title; Text; Buttons}
+function Get-MissionAdvice {
+                param ($Requested, $Auto, [Parameter(Mandatory)] [string]$Mission)
+
+                $missionRules = @('NOT_OPTED', 'MISSION_NOT_ELIGIBLE', 'MISSION_NOT_FOUND')
+                $hard = @($Requested.Violations | Where-Object { $null -ne $_ -and $_.Severity -eq 'Hard' -and ($missionRules -contains $_.Rule -or ([string]$_.Mission) -ne '') })
+                $problems = @($hard | ForEach-Object { [string]$_.Message } | Select-Object -Unique)
+                $name = if ($null -ne $Requested -and $Requested.StudentName) { [string]$Requested.StudentName } else { 'This student' }
+                $first = (($name -split ',')[0]).Trim()
+
+                $suggested = ''
+                $score = $null
+                if ($null -ne $Auto -and -not [string]::IsNullOrWhiteSpace([string]$Auto.AutoMission) -and [string]$Auto.AutoMission -ine $Mission) {
+                                $suggested = [string]$Auto.AutoMission
+                                $score = $Auto.BestScore
+                }
+                $others = @()
+                if ($null -ne $Auto) { $others = @(@($Auto.EligibleEvents) | Where-Object { $_ -and $_ -ine $suggested -and $_ -ine $Mission } | Select-Object -First 5) }
+
+                $headline = "$Mission breaks a rule for $name on this line."
+                if ($problems.Count -eq 0) { $headline = "$Mission is fine for $name on this line." }
+                elseif (@($hard | Where-Object { $_.Rule -eq 'NOT_OPTED' }).Count -gt 0) { $headline = "$name isn't opted for $Mission." }
+                elseif (@($hard | Where-Object { $_.Rule -eq 'MISSION_NOT_FOUND' }).Count -gt 0) { $headline = "$Mission isn't in $name's syllabus." }
+                elseif (@($hard | Where-Object { $_.Rule -eq 'MISSION_NOT_ELIGIBLE' }).Count -gt 0) { $headline = "$name can't fly $Mission on this line." }
+
+                $lines = New-Object System.Collections.Generic.List[string]
+                $lines.Add($headline)
+                $lines.Add('')
+                foreach ($p in $problems) { $lines.Add("  X  $p") }
+                $lines.Add('')
+                if ($suggested -ne '') {
+                                $scoreText = if ($null -ne $score) { ' (score {0:+0.0;-0.0;0})' -f [double]$score } else { '' }
+                                $lines.Add("Recommended: $suggested, the mission the scheduler would put here$scoreText.")
+                }
+                else {
+                                $lines.Add("There is no mission $first can fly on this line right now.")
+                }
+                if ($others.Count -gt 0) { $lines.Add("Other missions $first can fly here: $($others -join ', ').") }
+                $lines.Add('')
+                if ($suggested -ne '') {
+                                $lines.Add("Yes = put $suggested on the line (recommended)")
+                                $lines.Add("No = keep $Mission anyway (it is flagged OVERRIDE on the output)")
+                }
+                else {
+                                $lines.Add("OK = keep $Mission anyway (it is flagged OVERRIDE on the output)")
+                }
+                $lines.Add('Cancel = leave the mission as it was')
+
+                return [PSCustomObject]@{
+                                NeedsConfirm   = ($problems.Count -gt 0)
+                                Problems       = $problems
+                                Suggested      = $suggested
+                                SuggestedScore = $score
+                                Others         = $others
+                                Mission        = $Mission
+                                Title          = "Check the mission for $name"
+                                Text           = ($lines -join "`n")
+                                Buttons        = $(if ($suggested -ne '') { 'YesNoCancel' } else { 'OKCancel' })
+                }
 }
 
 # Badges and counts for a student puck on one day

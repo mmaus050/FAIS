@@ -250,7 +250,7 @@ Describe 'Invoke-FillSchedule' {
                                                 $p1 = Get-TRow $r 'P1'
                                                 Get-NameText $p1.Mission | Should -Be 'FT5103'
                                                 $p1.FilledBy | Should -Be 'Pin'
-                                                @(Get-TNotes $p1) | Should -Contain "OVERRIDE: FT5103 isn't eligible here (prereq FT5102 not complete)"
+                                                @(Get-TNotes $p1) | Should -Contain "OVERRIDE: Not opted for FT5103: FT5102 isn't complete yet"
                                                 @(Get-TNotes $p1) | Should -Contain 'Solo Flight'
                                                 (Get-TNotes $p1)[-1] | Should -BeLike 'OVERRIDE: *'
 
@@ -263,7 +263,7 @@ Describe 'Invoke-FillSchedule' {
                                                 $o.LineId | Should -Be 'P1'
                                                 $o.ETD | Should -Be '2026-10-20 07:00:00'
                                                 $o.Student | Should -Be 'Able, Amy'
-                                                @($o.Violations) | Should -Be @("FT5103 isn't eligible here (prereq FT5102 not complete)")
+                                                @($o.Violations) | Should -Be @("Not opted for FT5103: FT5102 isn't complete yet")
                                 }
 
                                 It 'flags a pinned checkride with a non-Check IP' {
@@ -345,7 +345,7 @@ Describe 'Invoke-FillSchedule' {
                                                 $r = Invoke-TFill -Schedule $rows -Students $students
 
                                                 (Get-TRow $r 'P1').Notes | Should -Be "OVERRIDE: FT5001 isn't eligible here (already pinned on another line)"
-                                                (Get-TRow $r 'P2').Notes | Should -Be "OVERRIDE: FT5001 isn't eligible here (already complete)"
+                                                (Get-TRow $r 'P2').Notes | Should -Be "OVERRIDE: Not opted for FT5001: already complete"
                                                 $students[0].SimDebt | Should -Be 1
                                 }
                 }
@@ -470,7 +470,7 @@ Describe 'Invoke-FillSchedule' {
                                                 # Control: the FT5102 pin alone is missing its prereq
                                                 $ctlStudents = @(New-TestStudent -Name 'Able, Amy' -Done @('FI3101|2026-10-15 08:00'))
                                                 $ctl = Invoke-TFill -Schedule @(New-TestRow -ETD '2026-10-20 14:00' -Instructor 'Jones, Bob' -Id 'P1' -Student 'Able, Amy' -Mission 'FT5102') -Students $ctlStudents
-                                                (Get-TRow $ctl 'P1').Notes | Should -Be "OVERRIDE: FT5102 isn't eligible here (prereq FT5001 not complete)"
+                                                (Get-TRow $ctl 'P1').Notes | Should -Be "OVERRIDE: Not opted for FT5102: FT5001 isn't complete yet"
 
                                                 $students = @(New-TestStudent -Name 'Able, Amy' -Done @('FI3101|2026-10-15 08:00'))
                                                 $rows = @(
