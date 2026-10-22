@@ -153,6 +153,7 @@ function Initialize-PuckBoardWindow {
                                 SheetStamp  = ''
                                 SheetPending = ''
                                 SheetAutoPending = $false
+                                ImportDir   = ''
                 }
 
                 Initialize-PBTimers
@@ -1837,15 +1838,100 @@ function Submit-PBBulkLinesDialog {
 
 
 # =================================================================================
-#  UPDATE SYLLABI (not built yet)
+#  UPDATE SYLLABI
+#  Reads a training file (the day's flying schedule or the Big Board), works out which one
+#  it is and brings the students' syllabi in line with it (SyllabusImport). What will change
+#  is shown first; on Yes the board's syllabi change and are saved right away.
 # =================================================================================
 
-# The "Update Syllabi" button. Updating each student's syllabus tab from the training files
-# comes later; for now it only says so and changes nothing.
+# The "Update Syllabi" button
 function Invoke-PBUpdateSyllabi {
-                $text = "Update Syllabi doesn't work yet.`n`nIt will update each student's syllabus tab in MasterData from the training files. Nothing was changed."
-                [void](Show-PBMessage -Text $text -Title 'Update Syllabi' -Buttons 'OK' -Icon 'Warning')
-                Set-PBStatus 'Update Syllabi is not available yet - nothing was changed.' 'Warn'
+                $path = Show-PBOpenFileDialog -Title 'Update Syllabi: pick the flying schedule or the Big Board'
+                if ([string]::IsNullOrWhiteSpace($path)) { return }
+                $fileName = [System.IO.Path]::GetFileName($path)
+                $data = $script:PB.Data
+                $now = Get-Date
+
+                Show-BusyOverlay "Reading $fileName..."
+                try {
+                                $read = Read-TrainingFile -Path $path
+                                $plan = $null
+                                if (-not $read.Error) {
+                                                $plan = Get-SyllabusUpdatePlan -File $read -Students @($data.Students) -Instructors @($data.Instructors) -OutputPath ([string]$data.OutputPath) -SoftWeights $data.SoftWeights -Now $now
+                                }
+                }
+                finally { Hide-BusyOverlay }
+                if ($read.Error) {
+                                [void](Show-PBMessage -Text $read.Error -Title 'Update Syllabi' -Buttons 'OK' -Icon 'Warning')
+                                Set-PBStatus "Update Syllabi: $fileName was not used - nothing was changed." 'Warn'
+                                return
+                }
+
+                $summary = Format-SyllabusUpdateSummary -File $read -Plan $plan
+                Write-Host "`nUpdate Syllabi from $path" -ForegroundColor Cyan
+                Write-Host (Format-SyllabusUpdateSummary -File $read -Plan $plan -MaxLines 100000 -MaxMissions 100000)
+                if (@($plan.Changes).Count -eq 0) {
+                                [void](Show-PBMessage -Text $summary -Title 'Update Syllabi' -Buttons 'OK' -Icon 'Information')
+                                Set-PBStatus "Update Syllabi: every syllabus already matches $fileName - nothing was changed." 'Good'
+                                return
+                }
+                $question = "$summary`n`nUpdate these syllabi? Each student's tab in OutputSchedule and their SimDebt in MasterData are saved right away."
+                if ($script:PB.Mode -eq 'Review') { $question += "`n`nThe fill you are reviewing is thrown away (it was made from the old syllabi). Fill again afterwards." }
+                if ((Show-PBMessage -Text $question -Title 'Update Syllabi' -Buttons 'YesNo' -Icon 'Question') -ne 'Yes') {
+                                Set-PBStatus 'Update Syllabi cancelled - nothing was changed.'
+                                return
+                }
+
+                # A fill made from the old syllabi would put them back on Export
+                Exit-PBReview
+                $memory = @(Invoke-SyllabusUpdate -Targets $plan.Targets -SoftWeights $data.SoftWeights -Now $now)
+                $prompt = {
+                                param($file)
+                                $text = "$file is still open and FAIS could not close it (a cell may be in edit mode, or someone else has it open).`n`nClose it, then press OK to try again."
+                                return ((Show-PBMessage -Text $text -Title 'File is open' -Buttons 'OKCancel' -Icon 'Warning') -eq 'OK')
+                }
+                Show-BusyOverlay 'Saving the syllabi...'
+                try {
+                                $saved = Save-SyllabusUpdate -Targets $plan.Targets -MemoryChanges $memory -OutputPath ([string]$data.OutputPath) -MasterDataPath ([string]$data.MasterDataPath) `
+                                                -SoftWeights $data.SoftWeights -LockedPrompt $prompt -Now $now
+                }
+                finally { Hide-BusyOverlay }
+
+                # Every hardcoded student is checked again against the new syllabi
+                Clear-AssessmentCache
+                $script:PB.Assess = @{}
+                Update-PBAll
+                Start-PBAssessQueue
+
+                $students = @($plan.Changes | ForEach-Object { $_.Student } | Sort-Object -Unique).Count
+                $done = "Updated $(@($plan.Changes).Count) event(s) for $students student(s) from $fileName"
+                if ($saved.Saved) {
+                                Set-PBStatus "$done and saved them to OutputSchedule and MasterData." 'Good'
+                }
+                else {
+                                $text = "$done for this run only: they could not be saved ($($saved.Message)). Export writes them with the schedule."
+                                [void](Show-PBMessage -Text $text -Title 'Update Syllabi' -Buttons 'OK' -Icon 'Warning')
+                                Set-PBStatus $text 'Warn'
+                }
+}
+
+# The Excel file picker for Update Syllabi (wrapped so the tests can answer it). Opens where
+# the last file came from, else Downloads. Returns the file picked, or '' when cancelled.
+function Show-PBOpenFileDialog {
+                param ([string]$Title)
+
+                $dlg = New-Object Microsoft.Win32.OpenFileDialog
+                $dlg.Title = $Title
+                $dlg.Filter = 'Excel workbooks (*.xlsx;*.xlsm)|*.xlsx;*.xlsm|All files (*.*)|*.*'
+                $dlg.CheckFileExists = $true
+                $dir = [string]$script:PB.ImportDir
+                if ($dir -eq '' -or -not (Test-Path -LiteralPath $dir)) { $dir = Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Downloads' }
+                if (Test-Path -LiteralPath $dir) { $dlg.InitialDirectory = $dir }
+                $owner = $script:PB.Window
+                $picked = if ($null -ne $owner -and $owner.IsVisible) { $dlg.ShowDialog($owner) } else { $dlg.ShowDialog() }
+                if ($picked -ne $true) { return '' }
+                $script:PB.ImportDir = [System.IO.Path]::GetDirectoryName($dlg.FileName)
+                return [string]$dlg.FileName
 }
 
 
@@ -2107,7 +2193,13 @@ FILL
   Excel files FAIS writes are saved and closed for you first, and opened again afterwards.
 
 UPDATE SYLLABI
-  Not built yet. It will update each student's syllabus tab from the training files.
+  Pick a training file; FAIS works out which one it is:
+  - the day's flying schedule (Flying and Sims tabs): a student's line marked CM or EXEC
+    marks its mission complete with the line's IP and ETD; INC or CX makes sure it is not.
+  - the Big Board: an entry in an event's columns marks it complete with its IP and date;
+    no entry makes sure it is not complete (an event FAIS has planned for later stays).
+  Only events in a student's syllabus change. You see what will change first; Yes saves
+  each student's tab in OutputSchedule and their SimDebt in MasterData right away.
 "@
                 [void][System.Windows.MessageBox]::Show($text, 'FAIS Puck Board help', [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
 }

@@ -245,6 +245,42 @@ if (Get-Module -ListAvailable -Name ImportExcel) {
         $debt = @(Import-Excel -Path $md -WorksheetName 'Students')[0].SimDebt
         $ok -and (($back -join ',') -eq ((@($days) + '2026-10-22' | Sort-Object -Unique) -join ',')) -and [double]$debt -eq [double]$copyA[0].SimDebt
     }
+    Assert-That 'Update Syllabi: a flying schedule CM completes an event and CX takes one back, on the tab (a hand-added column stays) and in SimDebt' {
+        $sched = Join-Path $work 'FlyingSchedule.xlsx'
+        $upd = @(Copy-StudentList $copyA)
+        $open = @($upd[0].Syllabus | Where-Object { -not (Test-MissionComplete $_) })[0].Mission
+        $flown = @($upd[0].Syllabus | Where-Object { Test-MissionComplete $_ })[0].Mission
+        $pkg = Open-ExcelPackage -Path $sched -Create
+        $ws = Add-Worksheet -ExcelPackage $pkg -WorksheetName 'Flying (21-Oct-2026)'
+        $cells = @(@('Line', 'ETD', 'Student', 'Mission', 'Instructor', 'Line Status'), @('1', '0730', 'Adams, Al [2d Lt]', $open, 'Jones, Bob [Maj]', 'CM'), @('2', '1000', 'Adams, Al [2d Lt]', $flown, 'Lee, Ann [Capt]', 'CX'))
+        for ($r = 0; $r -lt $cells.Count; $r++) { for ($c = 0; $c -lt $cells[$r].Count; $c++) { $ws.Cells[($r + 1), ($c + 1)].Value = $cells[$r][$c] } }
+        Close-ExcelPackage $pkg
+        $read = Read-TrainingFile -Path $sched
+        $plan = Get-SyllabusUpdatePlan -File $read -Students $upd -Instructors $ips -OutputPath $xlsx -SoftWeights $sw
+        $mem = @(Invoke-SyllabusUpdate -Targets $plan.Targets -SoftWeights $sw)
+        $saved = Save-SyllabusUpdate -Targets $plan.Targets -MemoryChanges $mem -OutputPath $xlsx -MasterDataPath $md -SoftWeights $sw 6>$null
+        $tab = @(Import-Excel -Path $xlsx -WorksheetName 'Adams, Al')
+        $a = $tab | Where-Object { $_.Mission -eq $open }
+        $b = $tab | Where-Object { $_.Mission -eq $flown }
+        $debt = @(Import-Excel -Path $md -WorksheetName 'Students')[0].SimDebt
+        $read.Kind -eq 'DailySchedule' -and $saved.Saved -and @($plan.Changes).Count -eq 2 -and (ConvertTo-FaisBool $a.IsComplete) -and $a.Instructor -eq 'Jones, Bob' -and
+            $a.ETD -eq '2026-10-21 07:30:00' -and -not (ConvertTo-FaisBool $b.IsComplete) -and $tab[0].MyNotes -eq 'keep me' -and [double]$debt -eq [double]$upd[0].SimDebt
+    }
+    Assert-That 'Update Syllabi: a Big Board is recognized and each event block read (date, IP; empty = not complete)' {
+        $bb = Join-Path $work 'BigBoard.xlsx'
+        $pkg = Open-ExcelPackage -Path $bb -Create
+        $ws = Add-Worksheet -ExcelPackage $pkg -WorksheetName 'Big Board'
+        $put = @{ C2 = 'Scheduling Aid for Organization E FLT'; B5 = 'Student Name'; C5 = 'Track'; D5 = 'Org'; F5 = 'Class'; G5 = 'BA101'; K5 = 'FT5001'; O5 = 'FT5102'
+            B6 = 'Adams, Al'; G6 = '07-24-2026-1500'; I6 = 'Complete'; K6 = '10-16-2026-0915'; L6 = 'Complete'; M6 = 'G'; N6 = 'Jones, Bob' }
+        foreach ($k in $put.Keys) { $ws.Cells[$k].Value = $put[$k] }
+        foreach ($m in @('D5:E5', 'G5:J5', 'K5:N5', 'O5:R5', 'G6:H6')) { $ws.Cells[$m].Merge = $true }
+        Close-ExcelPackage $pkg
+        $read = Read-TrainingFile -Path $bb
+        $f = $read.Facts | Where-Object { $_.Mission -eq 'FT5001' }
+        $g = $read.Facts | Where-Object { $_.Mission -eq 'FT5102' }
+        $read.Kind -eq 'BigBoard' -and (@($read.Events) -join ',') -eq 'BA101,FT5001,FT5102' -and $f.Complete -and $f.Instructor -eq 'Jones, Bob' -and
+            $f.ETD -eq [datetime]'2026-10-16 09:15' -and -not $g.Complete
+    }
 }
 else {
     Write-Host "  SKIP  ImportExcel is not installed" -ForegroundColor Yellow

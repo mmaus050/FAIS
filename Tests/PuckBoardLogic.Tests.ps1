@@ -420,12 +420,108 @@ Describe 'Puck board: missions picked by hand, Add Bulk Lines, Update Syllabi (n
         & (Get-Module PuckBoard) { Format-PBBulkTimes -Times @('1000', '1005') -Every '5' -SortieType 'O&B' } | Should -BeExactly '2 O&B lines: 1000 to 1005, every 5 min (each with its return leg)'
     }
 
-    It 'Update Syllabi only warns that it does not work yet' {
-        Mock -ModuleName PuckBoard Show-PBMessage { 'OK' }
-        $v = $script:Board.Version
-        & (Get-Module PuckBoard) { Invoke-PBUpdateSyllabi }
-        Should -Invoke -ModuleName PuckBoard Show-PBMessage -Times 1 -Exactly -ParameterFilter { $Title -eq 'Update Syllabi' -and $Icon -eq 'Warning' -and $Text -like "Update Syllabi doesn't work yet.*Nothing was changed." }
-        $script:Board.Version | Should -Be $v
-        Get-LastStatus | Should -BeExactly 'Warn|Update Syllabi is not available yet - nothing was changed.'
+    Context 'Update Syllabi' {
+        BeforeEach {
+            Mock -ModuleName PuckBoard Show-BusyOverlay { }
+            Mock -ModuleName PuckBoard Hide-BusyOverlay { }
+            Mock -ModuleName PuckBoard Write-Host { }
+            Mock -ModuleName PuckBoard Show-PBOpenFileDialog { Join-Path ([System.IO.Path]::GetTempPath()) 'Sched.xlsx' }
+            Mock -ModuleName PuckBoard Save-SyllabusUpdate { [PSCustomObject]@{ Saved = $true; Changes = @(); Message = '' } }
+
+            # The flying schedule: Adams flew FT5001 (CM), Brown's FI3101 line was cancelled (CX)
+            function New-SchedFile {
+                param ([array]$Facts)
+                [PSCustomObject]@{ Path = 'Sched.xlsx'; Kind = 'DailySchedule'; Label = 'Flying schedule for Fri 16 Oct 2026'; Day = [datetime]'2026-10-16'
+                    Sheets = @('Flying (16-Oct-2026)'); Events = @(); Facts = $Facts; People = @($Facts | ForEach-Object { $_.Student } | Sort-Object -Unique); Error = '' }
+            }
+            function New-SchedFact {
+                param ([string]$Student, [string]$Mission, [string]$Status, [string]$IP = '', [string]$At = '')
+                [PSCustomObject]@{ Student = $Student; Mission = $Mission; Complete = ($Status -in @('CM', 'EXEC')); Explicit = $true; Status = $Status; Instructor = $IP
+                    ETD = $(if ($At) { [datetime]$At } else { $null }) }
+            }
+            $script:Sched = New-SchedFile @(
+                New-SchedFact 'Adams, Al [2d Lt]' 'FT5001' 'CM' 'Jones, Bob [Maj]' '2026-10-16 07:30'
+                New-SchedFact 'Brown, Bea [2d Lt]' 'FI3101' 'CX'
+            )
+            Mock -ModuleName PuckBoard Read-TrainingFile { $script:Sched }
+
+            function Get-Event {
+                param ([string]$Student, [string]$Mission)
+                $s = (Get-PB).Data.Students | Where-Object { $_.Name -eq $Student }
+                $s.Syllabus | Where-Object { $_.Mission -eq $Mission }
+            }
+        }
+
+        It 'cancelling the file picker changes nothing' {
+            Mock -ModuleName PuckBoard Show-PBOpenFileDialog { '' }
+            Mock -ModuleName PuckBoard Show-PBMessage { throw 'should not ask' }
+            & (Get-Module PuckBoard) { Invoke-PBUpdateSyllabi }
+            Should -Invoke -ModuleName PuckBoard Read-TrainingFile -Times 0 -Exactly
+            (Get-Event 'Adams, Al' 'FT5001').IsComplete | Should -BeFalse
+        }
+
+        It 'a file that is neither training file is explained, and nothing changes' {
+            Mock -ModuleName PuckBoard Read-TrainingFile { [PSCustomObject]@{ Kind = ''; Error = 'Notes.xlsx is not a flying schedule (...) or a Big Board (...), so nothing was changed.' } }
+            Mock -ModuleName PuckBoard Show-PBMessage { 'OK' }
+            & (Get-Module PuckBoard) { Invoke-PBUpdateSyllabi }
+            Should -Invoke -ModuleName PuckBoard Show-PBMessage -Times 1 -Exactly -ParameterFilter { $Icon -eq 'Warning' -and $Text -like 'Notes.xlsx is not a flying schedule*' }
+            Should -Invoke -ModuleName PuckBoard Save-SyllabusUpdate -Times 0 -Exactly
+            Get-LastStatus | Should -BeExactly 'Warn|Update Syllabi: Sched.xlsx was not used - nothing was changed.'
+        }
+
+        It 'shows what will change first, and No changes nothing' {
+            Mock -ModuleName PuckBoard Show-PBMessage { 'No' }
+            & (Get-Module PuckBoard) { Invoke-PBUpdateSyllabi }
+            Should -Invoke -ModuleName PuckBoard Show-PBMessage -Times 1 -Exactly -ParameterFilter {
+                $Title -eq 'Update Syllabi' -and $Buttons -eq 'YesNo' -and
+                $Text -like 'Flying schedule for Fri 16 Oct 2026*Adams, Al: complete FT5001; SimDebt +1*Brown, Bea: NOT complete FI3101 (CX); SimDebt +0.5*Update these syllabi?*' -and
+                $Text -notlike '*fill you are reviewing*'
+            }
+            (Get-Event 'Adams, Al' 'FT5001').IsComplete | Should -BeFalse
+            (Get-Event 'Brown, Bea' 'FI3101').IsComplete | Should -BeTrue
+            Should -Invoke -ModuleName PuckBoard Save-SyllabusUpdate -Times 0 -Exactly
+            Get-LastStatus | Should -BeExactly '|Update Syllabi cancelled - nothing was changed.'
+        }
+
+        It 'Yes changes the syllabi on the board, saves them right away and checks the board again' {
+            Mock -ModuleName PuckBoard Show-PBMessage { 'Yes' }
+            & (Get-Module PuckBoard) { Invoke-PBUpdateSyllabi }
+            $a = Get-Event 'Adams, Al' 'FT5001'
+            $a.IsComplete | Should -BeTrue
+            $a.Instructor | Should -BeExactly 'Jones, Bob'
+            $a.ETD | Should -BeExactly '2026-10-16 07:30:00'
+            (Get-Event 'Brown, Bea' 'FI3101').IsComplete | Should -BeFalse
+            ((Get-PB).Data.Students | Where-Object { $_.Name -eq 'Adams, Al' }).SimDebt | Should -Be 1
+            Should -Invoke -ModuleName PuckBoard Save-SyllabusUpdate -Times 1 -Exactly -ParameterFilter { @($Targets).Count -eq 2 -and @($MemoryChanges).Count -eq 2 }
+            Should -Invoke -ModuleName PuckBoard Start-PBAssessQueue -Times 1
+            Get-LastStatus | Should -BeExactly 'Good|Updated 2 event(s) for 2 student(s) from Sched.xlsx and saved them to OutputSchedule and MasterData.'
+        }
+
+        It 'when the files cannot be saved the change is kept for this run, and it says so' {
+            Mock -ModuleName PuckBoard Show-PBMessage { if ($Buttons -eq 'YesNo') { 'Yes' } else { 'OK' } }
+            Mock -ModuleName PuckBoard Save-SyllabusUpdate { [PSCustomObject]@{ Saved = $false; Changes = @(); Message = 'MasterData.xlsx is still open' } }
+            & (Get-Module PuckBoard) { Invoke-PBUpdateSyllabi }
+            (Get-Event 'Adams, Al' 'FT5001').IsComplete | Should -BeTrue
+            Should -Invoke -ModuleName PuckBoard Show-PBMessage -Times 1 -Exactly -ParameterFilter { $Icon -eq 'Warning' -and $Text -like '*for this run only*(MasterData.xlsx is still open). Export writes them*' }
+            Get-LastStatus | Should -BeLike 'Warn|Updated 2 event(s) for 2 student(s) from Sched.xlsx for this run only*'
+        }
+
+        It 'while reviewing a fill: warns that the fill goes, and Yes throws it away' {
+            & (Get-Module PuckBoard) { $script:PB.Mode = 'Review'; $script:PB.FillResult = 'old fill' }
+            Mock -ModuleName PuckBoard Show-PBMessage { 'Yes' }
+            & (Get-Module PuckBoard) { Invoke-PBUpdateSyllabi }
+            Should -Invoke -ModuleName PuckBoard Show-PBMessage -Times 1 -Exactly -ParameterFilter { $Text -like '*The fill you are reviewing is thrown away*' }
+            (Get-PB).Mode | Should -BeExactly 'Edit'
+            (Get-PB).FillResult | Should -BeNullOrEmpty
+        }
+
+        It 'when every syllabus already matches it says so and asks nothing' {
+            $script:Sched = New-SchedFile @(New-SchedFact 'Adams, Al [2d Lt]' 'FI3101' 'CM' 'SIM IP' '2026-10-15 08:00')
+            Mock -ModuleName PuckBoard Show-PBMessage { 'OK' }
+            & (Get-Module PuckBoard) { Invoke-PBUpdateSyllabi }
+            Should -Invoke -ModuleName PuckBoard Show-PBMessage -Times 1 -Exactly -ParameterFilter { $Buttons -eq 'OK' -and $Icon -eq 'Information' -and $Text -like '*nothing to change*' }
+            Should -Invoke -ModuleName PuckBoard Save-SyllabusUpdate -Times 0 -Exactly
+            Get-LastStatus | Should -BeExactly 'Good|Update Syllabi: every syllabus already matches Sched.xlsx - nothing was changed.'
+        }
     }
 }

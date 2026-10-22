@@ -211,7 +211,7 @@
                             ToolTip="Load one day's lines from MasterData's Schedule sheet, or from the schedule you last exported (to change a day already sent out)."/>
                     <Rectangle Width="1" Height="20" Fill="#94A3B8" Margin="8,0"/>
                     <Button x:Name="UpdateSyllabiButton" Content="Update Syllabi" Style="{StaticResource BarButton}"
-                            ToolTip="Update each student's syllabus tab from the training files (not available yet)."/>
+                            ToolTip="Pick the day's flying schedule or the Big Board: FAIS works out which it is and marks each student's events complete or not complete from it. You see what will change before anything is saved."/>
                     <Rectangle Width="1" Height="20" Fill="#94A3B8" Margin="8,0"/>
                     <DatePicker x:Name="AddDayPicker" Width="125" VerticalAlignment="Center"/>
                     <Button x:Name="AddDayButton" Content="Add day" Style="{StaticResource BarButton}"/>

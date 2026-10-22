@@ -91,7 +91,7 @@ catch {
 }
 
 # Order matters: later modules call earlier ones
-$ModuleOrder = @('DataManipulation', 'ExcelFiles', 'Syllabus', 'DataDownload', 'SchedulingEngine', 'DataUpload', 'PreRunMenu', 'BoardModel', 'Assessment', 'PuckBoard')
+$ModuleOrder = @('DataManipulation', 'ExcelFiles', 'Syllabus', 'DataDownload', 'SchedulingEngine', 'DataUpload', 'SyllabusImport', 'PreRunMenu', 'BoardModel', 'Assessment', 'PuckBoard')
 foreach ($moduleName in $ModuleOrder) {
     $modulePath = Join-Path $PSScriptRoot "Modules\$moduleName.psm1"
     try {

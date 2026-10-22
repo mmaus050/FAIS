@@ -60,6 +60,40 @@ function Format-Hours {
                 return $Hours.ToString('0.0', [System.Globalization.CultureInfo]::InvariantCulture)
 }
 
+# 2.5, 3, 0.25 (no trailing zeros)
+function Format-Number {
+                param ([double]$Value)
+                return $Value.ToString('0.##', [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+# "1 Flight", "2 Flights"
+function Format-Count {
+                param ([int]$Count, [string]$Word)
+                if ($Count -eq 1) { return "1 $Word" }
+                return "$Count $($Word)s"
+}
+
+# IP last name for score reasons: 'Jones, Bob [EXP]' -> 'Jones'
+function Get-ShortIPName {
+                param ([string]$Name)
+
+                $base = Get-BaseName $Name
+                if ($base -match '^([^,]+),') { return $Matches[1].Trim() }
+                return $base
+}
+
+# How many of the newest flights in a row were with this IP ($Flights newest first)
+function Get-IPRunLength {
+                param ([array]$Flights, [string]$IPBase)
+
+                $n = 0
+                foreach ($f in $Flights) {
+                                if ((Get-BaseName (Get-NameText $f.Instructor)) -ne $IPBase) { break }
+                                $n++
+                }
+                return $n
+}
+
 
 # =================================================================================
 #  CONTEXT LOOKUPS
@@ -641,7 +675,8 @@ function Get-IneligibleReason {
 # |____/ \___/|_|  \__| |_| \_\\__,_|_|\___||___/
 #
 # Score for one student flying $Sortie.Mission on $Sortie. Higher is better.
-# -Detailed returns {Score, Breakdown (label -> points), Notes, Student, Mission, ETD}.
+# -Detailed returns {Score, Breakdown (label -> points), Reasons (label -> text for
+# the board), Notes, Student, Mission, ETD}.
 # =================================================================================
 function SoftRules {
                 param (
@@ -654,6 +689,7 @@ function SoftRules {
 
                 $Score = 0.0
                 $Breakdown = [ordered]@{}
+                $Reasons = [ordered]@{}
                 $NewNotes = New-Object System.Collections.Generic.List[string]
                 $SortieDate = Parse-ETD $Sortie.ETD
                 $missionName = Get-NameText $Sortie.Mission
@@ -663,6 +699,7 @@ function SoftRules {
                 $ip = Resolve-SortieInstructor -Instructors $Instructors -Instructor $Sortie.Instructor
                 $CurrentIP = Get-NameText $ip
                 $CurrentIP_Base = ''
+                $CurrentIP_Short = ''
 
                 ####################################
                 # RULE : DOLLAR RIDE BONUS
@@ -672,6 +709,7 @@ function SoftRules {
                                 $pts = Get-Weight $Config 'DollarRideBonus'
                                 $Score += $pts
                                 $Breakdown['Dollar Ride Bonus'] = $pts
+                                $Reasons['Dollar Ride Bonus'] = "Dollar Ride $missionName"
                 }
 
                 ###############################################################
@@ -680,16 +718,20 @@ function SoftRules {
                 ###############################################################
                 $simDebt = 0.0
                 if ($null -ne $Student.SimDebt -and [string]$Student.SimDebt -ne '') { $simDebt = [double]$Student.SimDebt }
+                # A negative SimDebt means the student is ahead on sims
+                $debtText = if ($simDebt -lt 0) { "Sim credit $(Format-Number (-$simDebt))" } else { "Sim Debt $(Format-Number $simDebt)" }
                 if ($missionName -like '*FT5*' -or $missionName -like '*FF5*' -or $missionName -like '*AA5*') {
                                 $pts = -$simDebt
                                 $Score += $pts
                                 $Breakdown['Sim Debt (flight)'] = $pts
+                                $Reasons['Sim Debt (flight)'] = if ($simDebt -lt 0) { "$debtText, flight uses it" } else { "$debtText, flight adds to it" }
                 }
                 elseif ($missionName -like '*FI3*' -or $missionName -like '*FE3*' -or $missionName -like '*FI4*' -or $missionName -like '*FE4*' -or
                                 $missionName -like '*FN3*' -or $missionName -like '*FN4*' -or $missionName -like '*AA4*') {
                                 $pts = $simDebt
                                 $Score += $pts
                                 $Breakdown['Sim Debt (sim)'] = $pts
+                                $Reasons['Sim Debt (sim)'] = if ($simDebt -lt 0) { "$debtText, sim adds to it" } else { "$debtText, sim pays it down" }
                 }
 
                 ####################################
@@ -701,6 +743,7 @@ function SoftRules {
                                 $pts = Get-Weight $Config 'CAPBonus'
                                 $Score += $pts
                                 $Breakdown['CAP Bonus'] = $pts
+                                $Reasons['CAP Bonus'] = 'CAP student'
                 }
 
                 #####################################
@@ -726,37 +769,47 @@ function SoftRules {
 
                 if ($hasRealIP) {
                                 $CurrentIP_Base = Get-BaseName $CurrentIP
+                                $CurrentIP_Short = Get-ShortIPName $CurrentIP
+                                $nonCounterTag = ''
 
                                 # A non-counter who flew the student's last ride (or the one before) counts as a counter
                                 if (-not $IsEffectiveCounter -and ($CurrentIP_Base -eq $IP1_Base -or ($CurrentIP_Base -eq $IP2_Base -and $CurrentIP_Base -ne ''))) {
                                                 $IsEffectiveCounter = $true
+                                                $nonCounterTag = ' (non-counter)'
                                 }
 
                                 if (-not $IsEffectiveCounter) {
                                                 $pts = Get-Weight $Config 'NonCounter'
                                                 $Score += $pts
                                                 $Breakdown['Non-Counter'] = $pts
+                                                $Reasons['Non-Counter'] = "$CurrentIP_Short is a non-counter"
                                 }
                                 else {
                                                 if ($IP1_Base -eq $CurrentIP_Base) {
+                                                                # This ride plus the rides in a row this IP already flew
+                                                                $StringText = "$(1 + (Get-IPRunLength -Flights $PastFlights -IPBase $CurrentIP_Base)) String$nonCounterTag"
                                                                 if ($IP1_Base -eq $IP2_Base -and $IP2_Base -eq $IP3_Base -and $IP3_Base -eq $IP4_Base) {
                                                                                 $pts = Get-Weight $Config 'String5' -100
                                                                                 $Score += $pts
                                                                                 $Breakdown['String 5'] = $pts
+                                                                                $Reasons['String 5'] = $StringText
                                                                 }
                                                                 elseif ($IP1_Base -eq $IP2_Base -and $IP2_Base -eq $IP3_Base) {
                                                                                 $pts = Get-Weight $Config 'String4' -10
                                                                                 $Score += $pts
                                                                                 $Breakdown['String 4'] = $pts
+                                                                                $Reasons['String 4'] = $StringText
                                                                 }
                                                                 else {
                                                                                 $pts = Get-Weight $Config 'ContString'
                                                                                 $Score += $pts
                                                                                 $Breakdown['Continue String'] = $pts
+                                                                                $Reasons['Continue String'] = $StringText
                                                                                 if ($isCap) {
                                                                                                 $pts2 = Get-Weight $Config 'CAPBonus'
                                                                                                 $Score += $pts2
                                                                                                 $Breakdown['CAP Bonus (string)'] = $pts2
+                                                                                                $Reasons['CAP Bonus (string)'] = "CAP student, $StringText"
                                                                                 }
                                                                 }
                                                 }
@@ -764,11 +817,16 @@ function SoftRules {
                                                                 $pts = Get-Weight $Config 'Zipper'
                                                                 $Score += $pts
                                                                 $Breakdown['Zipper'] = $pts
+                                                                $arrow = " $([char]0x2192) "
+                                                                $Reasons['Zipper'] = "Zipper: $CurrentIP_Short$arrow$(Get-ShortIPName (Get-NameText $PastFlights[0].Instructor))$arrow$CurrentIP_Short$nonCounterTag"
                                                 }
                                                 elseif ($IP1_Base -ne '' -and $IP1_Base -ne $CurrentIP_Base) {
                                                                 $pts = Get-Weight $Config 'BreakString'
                                                                 $Score += $pts
                                                                 $Breakdown['Break String'] = $pts
+                                                                $brokenRun = Get-IPRunLength -Flights $PastFlights -IPBase $IP1_Base
+                                                                $lastIP = Get-ShortIPName (Get-NameText $PastFlights[0].Instructor)
+                                                                $Reasons['Break String'] = if ($brokenRun -ge 2) { "Breaks $brokenRun String w/ $lastIP" } else { "New IP after 1 ride w/ $lastIP" }
                                                 }
                                 }
                 }
@@ -781,7 +839,8 @@ function SoftRules {
                                 $pts = Get-Weight $Config 'OFTIFTPen'
                                 $Score += $pts
                                 $Breakdown['OFT/IFT Mismatch'] = $pts
-                                [void]$NewNotes.Add('IFT in an OFT')
+                                $Reasons['OFT/IFT Mismatch'] = "IFT event $missionName in an OFT"
+                                [void]$NewNotes.Add("$missionName (IFT) in an OFT")
                 }
 
                 ############################################
@@ -804,6 +863,13 @@ function SoftRules {
                 $pts = (($RecentFlights * 2) + $RecentSims) * $ExhaustionMult
                 $Score += $pts
                 $Breakdown['Exhaustion'] = $pts
+                $recentParts = @(
+                                if ($RecentFlights -gt 0) { Format-Count $RecentFlights 'Flight' }
+                                if ($RecentSims -gt 0) { Format-Count $RecentSims 'Sim' }
+                )
+                $recentText = if ($recentParts.Count -gt 0) { $recentParts -join ' and ' } else { 'No Flights or Sims' }
+                $dayWord = if ($ExhaustionDays -eq 1) { 'Day' } else { 'Days' }
+                $Reasons['Exhaustion'] = "$recentText in last $(Format-Number $ExhaustionDays) $dayWord"
 
                 ##########################################################
                 # RULE: BIT TRACKER
@@ -815,18 +881,22 @@ function SoftRules {
                                 $LastFlightDate = Parse-ETD $PastFlights[0].ETD
                                 $EffectiveBreakDays = ($SortieDate.Date - $LastFlightDate.Date).TotalDays - 1
                                 $capMult = if ($isCap) { 2 } else { 1 }
+                                $daysOff = "$(Format-Count ([int]$EffectiveBreakDays) 'day') without a flight"
 
                                 if ($EffectiveBreakDays -gt 0) {
                                                 if ($EffectiveBreakDays -le $BIT_Y) {
                                                                 $pts = $EffectiveBreakDays * $BIT_X * $capMult
                                                                 $Score += $pts
                                                                 $Breakdown['BIT Tracker'] = $pts
+                                                                $lastFlew = $LastFlightDate.ToString('ddd M/d', [System.Globalization.CultureInfo]::InvariantCulture)
+                                                                $Reasons['BIT Tracker'] = "$daysOff (last flew $lastFlew)$(if ($isCap) { ', CAP x2' })"
                                                 }
                                                 else {
                                                                 $pts = $BIT_X * ($BIT_Y / 2.0)
                                                                 $Score += $pts
                                                                 $Breakdown['BIT Tracker (capped)'] = $pts
-                                                                [void]$NewNotes.Add('BIT! Consider an 86')
+                                                                $Reasons['BIT Tracker (capped)'] = "$daysOff, past the $(Format-Number $BIT_Y)-day BIT limit"
+                                                                [void]$NewNotes.Add("BIT! $daysOff, consider an 86")
                                                 }
                                 }
                 }
@@ -841,6 +911,8 @@ function SoftRules {
                                                 $pts = Get-Weight $Config 'CounterContinuity' 5
                                                 $Score += $pts
                                                 $Breakdown['Counter Continuity'] = $pts
+                                                $ridesWithIP = @($PastFlights | Where-Object { (Get-BaseName (Get-NameText $_.Instructor)) -eq $CurrentIP_Base }).Count
+                                                $Reasons['Counter Continuity'] = "$CurrentIP_Short already flew $ridesWithIP of $(Format-Count $PastFlights.Count 'ride')"
                                 }
                 }
 
@@ -852,6 +924,7 @@ function SoftRules {
                                 $pts = 50
                                 $Score += $pts
                                 $Breakdown['Checkride Priority'] = $pts
+                                $Reasons['Checkride Priority'] = "Checkride $missionName with check IP $(Get-ShortIPName $CurrentIP)"
                                 [void]$NewNotes.Add('Checkride! Requires Formal')
                 }
 
@@ -863,11 +936,13 @@ function SoftRules {
                 if ($null -ne $Student.Priority -and [string]$Student.Priority -ne '') { [void][double]::TryParse([string]$Student.Priority, [ref]$pts) }
                 $Score += $pts
                 $Breakdown['Student Priority'] = $pts
+                $Reasons['Student Priority'] = 'Student Priority'
 
                 if ($Detailed) {
                                 return [PSCustomObject]@{
                                                 Score     = $Score
                                                 Breakdown = $Breakdown
+                                                Reasons   = $Reasons
                                                 Notes     = $NewNotes.ToArray()
                                                 Student   = [string]$Student.Name
                                                 Mission   = $missionName

@@ -6,7 +6,7 @@ $script:FaisRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 function Import-FaisModules {
                 param ([switch]$IncludeUI)
 
-                $names = @('DataManipulation', 'ExcelFiles', 'Syllabus', 'DataDownload', 'SchedulingEngine', 'DataUpload', 'PreRunMenu', 'BoardModel', 'Assessment')
+                $names = @('DataManipulation', 'ExcelFiles', 'Syllabus', 'DataDownload', 'SchedulingEngine', 'DataUpload', 'SyllabusImport', 'PreRunMenu', 'BoardModel', 'Assessment')
                 if ($IncludeUI) { $names += 'PuckBoard' }
                 foreach ($n in $names) {
                                 $path = Join-Path $script:FaisRoot "Modules\$n.psm1"
