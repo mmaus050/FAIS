@@ -53,7 +53,7 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne [System.Thr
 # ==========================================
 $excelInputPath = Join-Path $PSScriptRoot "MasterData.xlsx"
 $desktopPath = [Environment]::GetFolderPath('Desktop')
-$excelOutputPath = Join-Path -Path $desktopPath -ChildPath "OutputSchedule.xlsx"
+$excelOutputPath = Join-Path -Path $PSScriptRoot -ChildPath "OutputSchedule.xlsx"
 $atisOutputPath = Join-Path -Path $desktopPath -ChildPath "ATIS.xlsx"
 
 # Puck board
@@ -114,7 +114,7 @@ if (-not (Test-Path -LiteralPath $excelInputPath)) {
 }
 # Workbooks open in Excel are saved first, so edits not saved yet are read too
 [void](Close-FaisExcelFiles -Path @($excelInputPath, $excelOutputPath) -SaveOnly)
-$Ingested = IngestData -excelInputPath $excelInputPath -desktopPath $desktopPath -excelOutputPath $excelOutputPath
+$Ingested = IngestData -excelInputPath $excelInputPath -excelOutputPath $excelOutputPath
 if ($Ingested.OutputError) {
     # Carrying on would start every student from the blank syllabus and overwrite their tabs on export
     Write-Host "OutputSchedule.xlsx could not be opened, so the students' progress can't be read: $($Ingested.OutputError)" -ForegroundColor Red
@@ -139,7 +139,7 @@ Write-Host ("Loaded {0} students, {1} IPs, {2} formation callsigns from {3}." -f
 # ==========================================
 # Brings in the previous schedule (with the complex objects attached) so lines can be
 # marked hooked (unsat) or incomplete before anything is scheduled
-$PrevSchedule = @(DownloadPrevSchedule -Students $Students -Instructors $Instructors -desktopPath $desktopPath -excelOutputPath $excelOutputPath)
+$PrevSchedule = @(DownloadPrevSchedule -Students $Students -Instructors $Instructors -excelOutputPath $excelOutputPath)
 if (-not (Invoke-PreRunMenu -Schedule $PrevSchedule -Students $Students -SoftWeights $SoftWeights -MasterDataPath $excelInputPath -OutputPath $excelOutputPath)) {
     return
 }

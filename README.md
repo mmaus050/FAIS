@@ -9,7 +9,7 @@ powershell.exe -STA -File .\FAIS.ps1
 ```
 Add `-Trace` to print every scheduling decision to the console. FAIS restarts itself in STA mode if needed.
 
-**Needs:** Windows PowerShell 5.1 and the ImportExcel module. `MasterData.xlsx` lives in the FAIS folder, next to `FAIS.ps1`. `OutputSchedule.xlsx` and `ATIS.xlsx` are written to the Desktop.
+**Needs:** Windows PowerShell 5.1 and the ImportExcel module. `MasterData.xlsx` and `OutputSchedule.xlsx` live in the FAIS folder, next to `FAIS.ps1`. `ATIS.xlsx` is written to the Desktop.
 
 **You can leave Excel open.** If MasterData or OutputSchedule is open in Excel, FAIS saves it before reading it (so edits you have not saved yet are read too), and saves and closes it before writing it (so there is no "file is open" error), then opens it again afterwards. You only see a "file is open" box if Excel can't be reached, for example while a cell is still being edited.
 
