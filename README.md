@@ -79,7 +79,7 @@ The board reads the **Schedule** sheet one day at a time and keeps watching it:
 - **When you drop a student,** a pop-up lists:
   - hard-rule flags (red ✖), for example `Turn time 2.8 hr < 3.25 hr minimum (vs 0730 FT5103)`;
   - warnings, for example `Less than 3.5 hr TT, Flt/CC Approval Required`;
-  - the **+ / −** score reasons, for example `Continue String +10` or `Exhaustion −6`.
+  - the **+ / −** score reasons, spelled out, for example `3 String +10`, `Breaks 4 String w/ Lee −5` or `2 Flights and 2 Sims in last 5 Days −6`.
 - **Rule breaks are allowed.** The line is hardcoded anyway and marked `OVERRIDE: ...` on the output.
 - **Corner marker** on every hardcoded student: green, amber, red, or grey while checking. Hover for the reasons; right-click for more (explain, take off, *Fly wing to...*, duplicate, delete line).
 - **Mission dropdown:** `(auto)` picks the best-scoring event that passes the rules. Choose an event to hardcode it.

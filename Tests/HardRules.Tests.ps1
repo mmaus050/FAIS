@@ -1347,6 +1347,11 @@ Describe 'SoftRules -Detailed' {
                                 $r.Breakdown['Sim Debt (flight)'] | Should -Be 0
                                 $r.Breakdown['Exhaustion'] | Should -Be -1
                                 $r.Score | Should -Be 19
+                                @($r.Reasons.Keys) | Should -Be @($r.Breakdown.Keys)
+                                $r.Reasons['Dollar Ride Bonus'] | Should -Be 'Dollar Ride FT5001'
+                                $r.Reasons['Sim Debt (flight)'] | Should -Be 'Sim Debt 0, flight adds to it'
+                                $r.Reasons['Exhaustion'] | Should -Be '1 Sim in last 5 Days'
+                                $r.Reasons['Student Priority'] | Should -Be 'Student Priority'
                                 $total = 0.0
                                 foreach ($k in $r.Breakdown.Keys) { $total += $r.Breakdown[$k] }
                                 $r.Score | Should -Be $total
@@ -1363,13 +1368,14 @@ Describe 'SoftRules -Detailed' {
                 }
 
                 It 'Sim Debt: flights pay -SimDebt, sims earn +SimDebt (<Mission> on <SortieType>)' -TestCases @(
-                                @{ Mission = 'FT5102'; SortieType = 'Day Local'; Label = 'Sim Debt (flight)'; Points = -3 }
-                                @{ Mission = 'FE3102'; SortieType = 'OFT'; Label = 'Sim Debt (sim)'; Points = 3 }
-                                @{ Mission = 'FN3201'; SortieType = 'IFT'; Label = 'Sim Debt (sim)'; Points = 3 }
+                                @{ Mission = 'FT5102'; SortieType = 'Day Local'; Label = 'Sim Debt (flight)'; Points = -3; Reason = 'Sim Debt 3, flight adds to it' }
+                                @{ Mission = 'FE3102'; SortieType = 'OFT'; Label = 'Sim Debt (sim)'; Points = 3; Reason = 'Sim Debt 3, sim pays it down' }
+                                @{ Mission = 'FN3201'; SortieType = 'IFT'; Label = 'Sim Debt (sim)'; Points = 3; Reason = 'Sim Debt 3, sim pays it down' }
                 ) {
                                 $s = New-TestStudent -Name 'A' -SimDebt 3
                                 $r = Get-Soft -Student $s -SortieType $SortieType -Mission $Mission
                                 $r.Breakdown[$Label] | Should -Be $Points
+                                $r.Reasons[$Label] | Should -Be $Reason
                                 $other = if ($Label -eq 'Sim Debt (flight)') { 'Sim Debt (sim)' } else { 'Sim Debt (flight)' }
                                 $r.Breakdown.Contains($other) | Should -BeFalse
                 }
@@ -1378,7 +1384,18 @@ Describe 'SoftRules -Detailed' {
                                 $s = New-TestStudent -Name 'A' -IsCap
                                 $r = Get-Soft -Student $s -SortieType 'IFT' -Mission 'FI3101'
                                 $r.Breakdown['CAP Bonus'] | Should -Be 8
+                                $r.Reasons['CAP Bonus'] | Should -Be 'CAP student'
                                 $r.Breakdown.Contains('CAP Bonus (string)') | Should -BeFalse
+                }
+
+                It 'a negative SimDebt reads as a sim credit (<Mission>)' -TestCases @(
+                                @{ Mission = 'FT5102'; SortieType = 'Day Local'; Label = 'Sim Debt (flight)'; Points = 1.5; Reason = 'Sim credit 1.5, flight uses it' }
+                                @{ Mission = 'FE3102'; SortieType = 'OFT'; Label = 'Sim Debt (sim)'; Points = -1.5; Reason = 'Sim credit 1.5, sim adds to it' }
+                ) {
+                                $s = New-TestStudent -Name 'A' -SimDebt -1.5
+                                $r = Get-Soft -Student $s -SortieType $SortieType -Mission $Mission
+                                $r.Breakdown[$Label] | Should -Be $Points
+                                $r.Reasons[$Label] | Should -Be $Reason
                 }
 
                 Context 'strings and counters' {
@@ -1386,8 +1403,18 @@ Describe 'SoftRules -Detailed' {
                                                 $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Lee, Ann', 'FT5102|2026-02-26 08:00|Jones, Bob'
                                                 $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5103'
                                                 $r.Breakdown['Continue String'] | Should -Be 10
+                                                $r.Reasons['Continue String'] | Should -Be '2 String'
                                                 $r.Breakdown['Counter Continuity'] | Should -Be 5
+                                                $r.Reasons['Counter Continuity'] | Should -Be 'Jones already flew 1 of 2 rides'
                                                 foreach ($k in 'String 4', 'String 5', 'Zipper', 'Break String', 'Non-Counter', 'CAP Bonus (string)') { $r.Breakdown.Contains($k) | Should -BeFalse }
+                                }
+
+                                It 'Continue String reads 3 String on the third ride in a row' {
+                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Lee, Ann', 'FT5102|2026-02-25 08:00|Jones, Bob', 'FT5103|2026-02-26 08:00|Jones, Bob'
+                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5104'
+                                                $r.Breakdown['Continue String'] | Should -Be 10
+                                                $r.Reasons['Continue String'] | Should -Be '3 String'
+                                                $r.Reasons['Counter Continuity'] | Should -Be 'Jones already flew 2 of 3 rides'
                                 }
 
                                 It 'CAP Bonus (string) reads the student''s IsCap' {
@@ -1396,12 +1423,14 @@ Describe 'SoftRules -Detailed' {
                                                 $r.Breakdown['CAP Bonus'] | Should -Be 8
                                                 $r.Breakdown['Continue String'] | Should -Be 10
                                                 $r.Breakdown['CAP Bonus (string)'] | Should -Be 8
+                                                $r.Reasons['CAP Bonus (string)'] | Should -Be 'CAP student, 2 String'
                                 }
 
                                 It 'String 4 after three in a row with the same IP' {
                                                 $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-25 08:00|Jones, Bob', 'FT5103|2026-02-26 08:00|Jones, Bob'
                                                 $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5104'
                                                 $r.Breakdown['String 4'] | Should -Be -10
+                                                $r.Reasons['String 4'] | Should -Be '4 String'
                                                 $r.Breakdown.Contains('Continue String') | Should -BeFalse
                                                 $r.Breakdown.Contains('String 5') | Should -BeFalse
                                 }
@@ -1410,13 +1439,22 @@ Describe 'SoftRules -Detailed' {
                                                 $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-23 08:00|Jones, Bob', 'FT5102|2026-02-24 08:00|Jones, Bob', 'FT5103|2026-02-25 08:00|Jones, Bob', 'FT5104|2026-02-26 08:00|Jones, Bob'
                                                 $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FF5201'
                                                 $r.Breakdown['String 5'] | Should -Be -100
+                                                $r.Reasons['String 5'] | Should -Be '5 String'
                                                 $r.Breakdown.Contains('String 4') | Should -BeFalse
+                                }
+
+                                It 'String 5 counts the whole run past five' {
+                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-22 08:00|Jones, Bob', 'FT5102|2026-02-23 08:00|Jones, Bob', 'FT5103|2026-02-24 08:00|Jones, Bob', 'FT5104|2026-02-25 08:00|Jones, Bob', 'FF5201|2026-02-26 08:00|Jones, Bob'
+                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FF5202'
+                                                $r.Breakdown['String 5'] | Should -Be -100
+                                                $r.Reasons['String 5'] | Should -Be '6 String'
                                 }
 
                                 It 'Zipper when the IP flew the ride before last' {
                                                 $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-26 08:00|Lee, Ann'
                                                 $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5103'
                                                 $r.Breakdown['Zipper'] | Should -Be 5
+                                                $r.Reasons['Zipper'] | Should -Be "Zipper: Jones $([char]0x2192) Lee $([char]0x2192) Jones"
                                                 $r.Breakdown['Counter Continuity'] | Should -Be 5
                                                 $r.Breakdown.Contains('Break String') | Should -BeFalse
                                 }
@@ -1425,20 +1463,31 @@ Describe 'SoftRules -Detailed' {
                                                 $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Lee, Ann', 'FT5102|2026-02-26 08:00|Ortiz, Sam'
                                                 $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5103'
                                                 $r.Breakdown['Break String'] | Should -Be -5
+                                                $r.Reasons['Break String'] | Should -Be 'New IP after 1 ride w/ Ortiz'
                                                 $r.Breakdown.Contains('Counter Continuity') | Should -BeFalse
+                                }
+
+                                It 'Break String names the length of the string it breaks' {
+                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Lee, Ann', 'FT5102|2026-02-25 08:00|Lee, Ann', 'FT5103|2026-02-26 08:00|Lee, Ann'
+                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5104'
+                                                $r.Breakdown['Break String'] | Should -Be -5
+                                                $r.Reasons['Break String'] | Should -Be 'Breaks 3 String w/ Lee'
                                 }
 
                                 It 'Counter Continuity for an IP who flew the student before (older than the zipper)' {
                                                 $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-25 08:00|Lee, Ann', 'FT5103|2026-02-26 08:00|Ortiz, Sam'
                                                 $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5104'
                                                 $r.Breakdown['Break String'] | Should -Be -5
+                                                $r.Reasons['Break String'] | Should -Be 'New IP after 1 ride w/ Ortiz'
                                                 $r.Breakdown['Counter Continuity'] | Should -Be 5
+                                                $r.Reasons['Counter Continuity'] | Should -Be 'Jones already flew 1 of 3 rides'
                                 }
 
                                 It 'a sim flown with a named IP is not a flight for strings (decided by Type)' {
                                                 $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Jones, Bob', 'FE3102|2026-02-26 08:00|Lee, Ann'
                                                 $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5102'
                                                 $r.Breakdown['Continue String'] | Should -Be 10
+                                                $r.Reasons['Continue String'] | Should -Be '2 String'
                                                 $r.Breakdown.Contains('Break String') | Should -BeFalse
                                 }
 
@@ -1446,6 +1495,7 @@ Describe 'SoftRules -Detailed' {
                                                 $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-26 08:00|Ortiz, Sam'
                                                 $r = Get-Soft -Student $s -Instructor 'Leech, Tom' -Mission 'FT5103'
                                                 $r.Breakdown['Non-Counter'] | Should -Be -15
+                                                $r.Reasons['Non-Counter'] | Should -Be 'Leech is a non-counter'
                                                 foreach ($k in 'Continue String', 'Zipper', 'Break String', 'Counter Continuity') { $r.Breakdown.Contains($k) | Should -BeFalse }
                                 }
 
@@ -1454,6 +1504,7 @@ Describe 'SoftRules -Detailed' {
                                                 $r = Get-Soft -Student $s -Instructor 'Leech, Tom' -Mission 'FT5103'
                                                 $r.Breakdown.Contains('Non-Counter') | Should -BeFalse
                                                 $r.Breakdown['Continue String'] | Should -Be 10
+                                                $r.Reasons['Continue String'] | Should -Be '2 String (non-counter)'
                                                 $r.Breakdown['Counter Continuity'] | Should -Be 5
                                 }
 
@@ -1462,12 +1513,14 @@ Describe 'SoftRules -Detailed' {
                                                 $r = Get-Soft -Student $s -Instructor 'Leech, Tom' -Mission 'FT5103'
                                                 $r.Breakdown.Contains('Non-Counter') | Should -BeFalse
                                                 $r.Breakdown['Zipper'] | Should -Be 5
+                                                $r.Reasons['Zipper'] | Should -Be "Zipper: Leech $([char]0x2192) Jones $([char]0x2192) Leech (non-counter)"
                                 }
 
                                 It 'Leech stays a non-counter if he only flew IP3' {
                                                 $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Leech, Tom', 'FT5102|2026-02-25 08:00|Jones, Bob', 'FT5103|2026-02-26 08:00|Ortiz, Sam'
                                                 $r = Get-Soft -Student $s -Instructor 'Leech, Tom' -Mission 'FT5104'
                                                 $r.Breakdown['Non-Counter'] | Should -Be -15
+                                                $r.Reasons['Non-Counter'] | Should -Be 'Leech is a non-counter'
                                                 $r.Breakdown.Contains('Counter Continuity') | Should -BeFalse
                                 }
 
@@ -1482,6 +1535,7 @@ Describe 'SoftRules -Detailed' {
                                                 $blank.Breakdown['Break String'] | Should -Be -5
                                                 $text = Get-Soft -Student $s -Instructor 'Text, Ty' -Mission 'FT5103' -Instructors $ips
                                                 $text.Breakdown['Non-Counter'] | Should -Be -15
+                                                $text.Reasons['Non-Counter'] | Should -Be 'Text is a non-counter'
                                 }
 
                                 It 'no string or counter scoring with SIM IP or no IP' {
@@ -1497,7 +1551,8 @@ Describe 'SoftRules -Detailed' {
                                                 $s = New-TestStudent -Name 'A'
                                                 $r = Get-Soft -Student $s -SortieType 'OFT' -Mission 'FI3101'
                                                 $r.Breakdown['OFT/IFT Mismatch'] | Should -Be -7
-                                                @($r.Notes) | Should -Be @('IFT in an OFT')
+                                                $r.Reasons['OFT/IFT Mismatch'] | Should -Be 'IFT event FI3101 in an OFT'
+                                                @($r.Notes) | Should -Be @('FI3101 (IFT) in an OFT')
 
                                                 $w = New-TestSoftWeights
                                                 $w.OFTIFTPen = -3
@@ -1518,24 +1573,38 @@ Describe 'SoftRules -Detailed' {
                                                 $s = New-TestStudent -Name 'A' -Done 'FI3101|2026-02-25 08:00', 'FE3102|2026-02-26 08:00', 'FT5001|2026-03-02 08:00|Jones, Bob', 'FT5102|2026-03-03 06:00|Jones, Bob', 'FN3201|2026-03-03 15:00'
                                                 $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5103'
                                                 $r.Breakdown['Exhaustion'] | Should -Be -5
+                                                $r.Reasons['Exhaustion'] | Should -Be '2 Flights and 1 Sim in last 5 Days'
                                 }
 
                                 It 'Exhaustion is always reported (0 when rested)' {
                                                 $s = New-TestStudent -Name 'A'
-                                                (Get-Soft -Student $s -SortieType 'IFT' -Mission 'FI3101').Breakdown['Exhaustion'] | Should -Be 0
+                                                $r = Get-Soft -Student $s -SortieType 'IFT' -Mission 'FI3101'
+                                                $r.Breakdown['Exhaustion'] | Should -Be 0
+                                                $r.Reasons['Exhaustion'] | Should -Be 'No Flights or Sims in last 5 Days'
+                                }
+
+                                It 'Exhaustion text leaves out a zero count and reads ExhaustionDays' {
+                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-03-02 08:00|Jones, Bob'
+                                                $w = New-TestSoftWeights
+                                                $w.ExhaustionDays = 1
+                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5102' -Weights $w
+                                                $r.Breakdown['Exhaustion'] | Should -Be -2
+                                                $r.Reasons['Exhaustion'] | Should -Be '1 Flight in last 1 Day'
                                 }
 
                                 It 'BIT Tracker: last flight <LastFlight> -> <Label> <Points>' -TestCases @(
-                                                @{ LastFlight = '2026-02-28 08:00'; Cap = $false; Label = 'BIT Tracker'; Points = 3 }
-                                                @{ LastFlight = '2026-02-28 08:00'; Cap = $true; Label = 'BIT Tracker'; Points = 6 }
-                                                @{ LastFlight = '2026-02-24 08:00'; Cap = $false; Label = 'BIT Tracker'; Points = 9 }
-                                                @{ LastFlight = '2026-02-20 08:00'; Cap = $false; Label = 'BIT Tracker (capped)'; Points = 4.5 }
+                                                @{ LastFlight = '2026-03-01 08:00'; Cap = $false; Label = 'BIT Tracker'; Points = 1.5; Reason = '1 day without a flight (last flew Sun 3/1)' }
+                                                @{ LastFlight = '2026-02-28 08:00'; Cap = $false; Label = 'BIT Tracker'; Points = 3; Reason = '2 days without a flight (last flew Sat 2/28)' }
+                                                @{ LastFlight = '2026-02-28 08:00'; Cap = $true; Label = 'BIT Tracker'; Points = 6; Reason = '2 days without a flight (last flew Sat 2/28), CAP x2' }
+                                                @{ LastFlight = '2026-02-24 08:00'; Cap = $false; Label = 'BIT Tracker'; Points = 9; Reason = '6 days without a flight (last flew Tue 2/24)' }
+                                                @{ LastFlight = '2026-02-20 08:00'; Cap = $false; Label = 'BIT Tracker (capped)'; Points = 4.5; Reason = '10 days without a flight, past the 6-day BIT limit' }
                                 ) {
                                                 $s = New-TestStudent -Name 'A' -IsCap:$Cap -Done "FT5001|$LastFlight|Lee, Ann"
                                                 $r = Get-Soft -Student $s -Instructor 'Ortiz, Sam' -Mission 'FT5102'
                                                 $r.Breakdown[$Label] | Should -Be $Points
+                                                $r.Reasons[$Label] | Should -Be $Reason
                                                 if ($Label -eq 'BIT Tracker (capped)') {
-                                                                @($r.Notes) | Should -Be @('BIT! Consider an 86')
+                                                                @($r.Notes) | Should -Be @('BIT! 10 days without a flight, consider an 86')
                                                                 $r.Breakdown.Contains('BIT Tracker') | Should -BeFalse
                                                 }
                                                 else {
@@ -1557,6 +1626,7 @@ Describe 'SoftRules -Detailed' {
                                                 $s = New-TestStudent -Name 'A' -Done 'FT5104|2026-03-02 08:00|Lee, Ann'
                                                 $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5190'
                                                 $r.Breakdown['Checkride Priority'] | Should -Be 50
+                                                $r.Reasons['Checkride Priority'] | Should -Be 'Checkride FT5190 with check IP Jones'
                                                 @($r.Notes) | Should -Contain 'Checkride! Requires Formal'
                                                 (Get-Soft -Student $s -Instructor 'Ortiz, Sam' -Mission 'FT5190').Breakdown.Contains('Checkride Priority') | Should -BeFalse
                                                 (Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5102').Breakdown.Contains('Checkride Priority') | Should -BeFalse
@@ -1566,6 +1636,7 @@ Describe 'SoftRules -Detailed' {
                                                 $s = New-TestStudent -Name 'A' -Priority 7
                                                 $r = Get-Soft -Student $s -SortieType 'IFT' -Mission 'FI3101'
                                                 $r.Breakdown['Student Priority'] | Should -Be 7
+                                                $r.Reasons['Student Priority'] | Should -Be 'Student Priority'
                                                 $r.Score | Should -Be 7
                                 }
 
@@ -1575,6 +1646,10 @@ Describe 'SoftRules -Detailed' {
                                                 $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5102'
                                                 @($r.Breakdown.Keys) | Should -Be @('Sim Debt (flight)', 'CAP Bonus', 'Continue String', 'CAP Bonus (string)', 'Exhaustion', 'BIT Tracker', 'Counter Continuity', 'Student Priority')
                                                 @($r.Breakdown.Values) | Should -Be @(-2, 8, 10, 8, -3, 6, 5, 1)
+                                                @($r.Reasons.Values) | Should -Be @(
+                                                                'Sim Debt 2, flight adds to it', 'CAP student', '2 String', 'CAP student, 2 String', '1 Flight and 1 Sim in last 5 Days',
+                                                                '2 days without a flight (last flew Sat 2/28), CAP x2', 'Jones already flew 1 of 1 ride', 'Student Priority'
+                                                )
                                                 $r.Score | Should -Be 33
                                 }
 
@@ -1595,7 +1670,7 @@ Describe 'SoftRules -Detailed' {
                                                 $snap = $s | ConvertTo-Json -Depth 6
                                                 $rowSnap = $row | ConvertTo-Json -Depth 6
                                                 $r = SoftRules -Student $s -Config $script:W -Sortie $row -Instructors $script:IPs -Detailed
-                                                @($r.Notes) | Should -Be @('BIT! Consider an 86')
+                                                @($r.Notes) | Should -Be @('BIT! 10 days without a flight, consider an 86')
                                                 $s.PSObject.Properties['PendingNote'] | Should -BeNullOrEmpty
                                                 ($s | ConvertTo-Json -Depth 6) | Should -Be $snap
                                                 ($row | ConvertTo-Json -Depth 6) | Should -Be $rowSnap

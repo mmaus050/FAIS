@@ -193,13 +193,15 @@ Describe 'Get-PlacementAssessment: status and result shape' {
                                 $d.Score | Should -Be 20
                 }
 
-                It 'gives the breakdown as {Label, Points} items that add up to the score' {
+                It 'gives the breakdown as {Label, Points, Text} items that add up to the score' {
                                 $d = (Get-Assess $board 'L1' 'Able, Amy' $data).EventDetails[0]
                                 foreach ($b in @($d.Breakdown)) {
                                                 $b.PSObject.Properties['Label'] | Should -Not -BeNullOrEmpty
                                                 $b.PSObject.Properties['Points'] | Should -Not -BeNullOrEmpty
+                                                $b.PSObject.Properties['Text'] | Should -Not -BeNullOrEmpty
                                 }
                                 (@($d.Breakdown) | ForEach-Object { $_.Label }) -join ',' | Should -Be 'Dollar Ride Bonus,Sim Debt (flight),Exhaustion,Student Priority'
+                                (@($d.Breakdown) | ForEach-Object { $_.Text }) -join '|' | Should -Be 'Dollar Ride FT5001|Sim Debt 0, flight adds to it|No Flights or Sims in last 5 Days|Student Priority'
                                 Get-Points $d 'Dollar Ride Bonus' | Should -Be 20
                                 $sum = 0.0
                                 foreach ($b in @($d.Breakdown)) { $sum += $b.Points }
@@ -1065,6 +1067,23 @@ Describe 'Get-AssessmentLines' {
                                 ) -join "`n")
                 }
 
+                It 'shows an item''s Text in place of its Label when it has one' {
+                                $fake = [PSCustomObject]@{
+                                                Summary = 'T'; Quick = $true; Mission = 'M1'; Violations = @(); Notes = @()
+                                                EventDetails = @([PSCustomObject]@{ Mission = 'M1'; Passed = $true; Score = 5; Violations = @(); Notes = @(); Breakdown = @(
+                                                                [PSCustomObject]@{ Label = 'Continue String'; Points = 10; Text = '3 String' }
+                                                                [PSCustomObject]@{ Label = 'Exhaustion'; Points = -5; Text = '2 Flights and 1 Sim in last 5 Days' }
+                                                                [PSCustomObject]@{ Label = 'Student Priority'; Points = 1; Text = '' }
+                                                ) })
+                                }
+                                (Get-LineText @(Get-AssessmentLines $fake)) -join "`n" | Should -Be (@(
+                                                'Title|T',
+                                                'Plus|3 String +10',
+                                                'Minus|2 Flights and 1 Sim in last 5 Days -5',
+                                                'Plus|Student Priority +1'
+                                ) -join "`n")
+                }
+
                 It 'leaves out the footer for a -Quick assessment' {
                                 $fake = [PSCustomObject]@{ Summary = 'T'; Quick = $true; Mission = ''; Violations = @(); Notes = @(); EventDetails = @() }
                                 (Get-LineText @(Get-AssessmentLines $fake)) -join "`n" | Should -Be 'Title|T'
@@ -1083,8 +1102,8 @@ Describe 'Get-AssessmentLines' {
                                 @($a.EventDetails[0].Breakdown | Where-Object { $_.Points -eq 0 }).Count | Should -BeGreaterThan 0
                                 (Get-LineText @(Get-AssessmentLines $a)) -join "`n" | Should -Be (@(
                                                 'Title|Debt, Dee -> 0730 Day Local: FT5001 +18.0',
-                                                'Plus|Dollar Ride Bonus +20',
-                                                'Minus|Sim Debt (flight) -2',
+                                                'Plus|Dollar Ride FT5001 +20',
+                                                'Minus|Sim Debt 2, flight adds to it -2',
                                                 "Info|$script:FooterText"
                                 ) -join "`n")
                 }
@@ -1100,10 +1119,10 @@ Describe 'Get-AssessmentLines' {
                                 (Get-LineText @(Get-AssessmentLines $a)) -join "`n" | Should -Be (@(
                                                 'Title|Chk, Cal -> 0730 Day Local: FT5190 +49.0',
                                                 'Note|Checkride! Requires Formal',
-                                                'Plus|Checkride Priority +50',
-                                                'Plus|BIT Tracker +6',
-                                                'Minus|Break String -5',
-                                                'Minus|Exhaustion -2',
+                                                'Plus|Checkride FT5190 with check IP Jones +50',
+                                                'Plus|4 days without a flight (last flew Thu 2/26) +6',
+                                                'Minus|Breaks 4 String w/ Lee -5',
+                                                'Minus|1 Flight in last 5 Days -2',
                                                 'Info|Other events: FF5201 -1.0',
                                                 "Info|$script:FooterText"
                                 ) -join "`n")

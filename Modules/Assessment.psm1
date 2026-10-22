@@ -195,7 +195,7 @@ function Get-PlacementAssessment {
                                 if (-not $Quick) {
                                                 $sr = Get-EventScore -Student $clone -Sortie $probe -Evt $er.Event -SoftWeights $Data.SoftWeights -Instructors $Data.Instructors
                                                 $d.Score = [math]::Round([double]$sr.Score, 1)
-                                                $d.Breakdown = @(foreach ($k in $sr.Breakdown.Keys) { [PSCustomObject]@{ Label = $k; Points = [math]::Round([double]$sr.Breakdown[$k], 1) } })
+                                                $d.Breakdown = @(foreach ($k in $sr.Breakdown.Keys) { [PSCustomObject]@{ Label = $k; Points = [math]::Round([double]$sr.Breakdown[$k], 1); Text = [string]$sr.Reasons[$k] } })
                                                 $d.Notes = @(@($er.Notes) + @($sr.Notes) | Select-Object -Unique)
                                                 if ($er.Passed -and (-not $isWing -or $d.Type -like '*Form*')) {
                                                                 $cand = [PSCustomObject]@{ Student = $student; Event = $er.Event; Score = $sr.Score; Detail = $d }
@@ -254,8 +254,11 @@ function Get-AssessmentLines {
                 $chosen = $Assessment.EventDetails | Where-Object { $_.Mission -eq $Assessment.Mission } | Select-Object -First 1
                 if ($null -ne $chosen) {
                                 foreach ($b in @($chosen.Breakdown | Sort-Object -Property { [math]::Abs($_.Points) } -Descending)) {
-                                                if ($b.Points -gt 0) { $out.Add([PSCustomObject]@{ Kind = 'Plus'; Text = ('{0} +{1:0.#}' -f $b.Label, $b.Points) }) }
-                                                elseif ($b.Points -lt 0) { $out.Add([PSCustomObject]@{ Kind = 'Minus'; Text = ('{0} {1:0.#}' -f $b.Label, $b.Points) }) }
+                                                # The descriptive reason when the soft rules gave one, else the rule's label
+                                                $label = [string](Get-OptionalProperty $b 'Text' '')
+                                                if ($label -eq '') { $label = $b.Label }
+                                                if ($b.Points -gt 0) { $out.Add([PSCustomObject]@{ Kind = 'Plus'; Text = ('{0} +{1:0.#}' -f $label, $b.Points) }) }
+                                                elseif ($b.Points -lt 0) { $out.Add([PSCustomObject]@{ Kind = 'Minus'; Text = ('{0} {1:0.#}' -f $label, $b.Points) }) }
                                 }
                 }
 
