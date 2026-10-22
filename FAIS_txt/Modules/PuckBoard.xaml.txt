@@ -1,0 +1,435 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="FAIS Puck Board" Height="900" Width="1520" MinHeight="600" MinWidth="1150"
+        WindowStartupLocation="CenterScreen" Background="#EEF1F5"
+        FontFamily="Segoe UI" FontSize="12">
+    <Window.Resources>
+
+        <Style x:Key="BarButton" TargetType="Button">
+            <Setter Property="Padding" Value="10,3"/>
+            <Setter Property="Margin" Value="3,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <Style x:Key="PuckBorder" TargetType="Border">
+            <Setter Property="CornerRadius" Value="13"/>
+            <Setter Property="Padding" Value="9,3"/>
+            <Setter Property="Margin" Value="3,2"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+
+        <Style x:Key="CellBox" TargetType="TextBox">
+            <Setter Property="Margin" Value="2"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="BorderBrush" Value="#CBD5E1"/>
+        </Style>
+
+        <Style x:Key="HeaderText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="#64748B"/>
+            <Setter Property="Margin" Value="4,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <!-- IP puck in the left pool -->
+        <DataTemplate x:Key="IPPuckTemplate">
+            <Border Tag="IPPuck" Style="{StaticResource PuckBorder}" Background="#DBEAFE" BorderBrush="{Binding BorderBrush}"
+                    BorderThickness="{Binding PuckBorderThickness}" ToolTip="{Binding ToolTipText}" ToolTipService.ShowDuration="30000">
+                <DockPanel LastChildFill="True">
+                    <Border DockPanel.Dock="Right" Background="#1D4ED8" CornerRadius="8" Padding="6,0" Margin="6,0,0,0"
+                            VerticalAlignment="Center" Visibility="{Binding CountVisibility}">
+                        <TextBlock Text="{Binding CountText}" Foreground="White" FontSize="10" FontWeight="SemiBold"/>
+                    </Border>
+                    <StackPanel>
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="#1E3A8A" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding SubText}" FontSize="10" Foreground="#475569" TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+        </DataTemplate>
+
+        <!-- Student puck in the right pool -->
+        <DataTemplate x:Key="StudentPuckTemplate">
+            <Border Tag="StudentPuck" Style="{StaticResource PuckBorder}" Background="{Binding Background}" BorderBrush="{Binding BorderBrush}"
+                    BorderThickness="{Binding PuckBorderThickness}" ToolTip="{Binding ToolTipText}" ToolTipService.ShowDuration="30000">
+                <DockPanel LastChildFill="True">
+                    <Border DockPanel.Dock="Right" Background="{Binding TurnsBrush}" CornerRadius="8" Padding="6,0" Margin="6,0,0,0"
+                            VerticalAlignment="Center" Visibility="{Binding TurnsVisibility}">
+                        <TextBlock Text="{Binding TurnsText}" Foreground="White" FontSize="10" FontWeight="SemiBold"/>
+                    </Border>
+                    <StackPanel>
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="#14532D" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding SubText}" FontSize="10" Foreground="#475569" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding BadgeText}" FontSize="10" FontWeight="SemiBold" Foreground="#B45309"
+                                   Visibility="{Binding BadgeVisibility}" TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+        </DataTemplate>
+
+        <!-- Column headers above each day's lines -->
+        <DataTemplate x:Key="LineHeaderTemplate">
+            <Grid Margin="3,0,3,2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="8"/>
+                    <ColumnDefinition Width="64"/>
+                    <ColumnDefinition Width="104"/>
+                    <ColumnDefinition Width="180"/>
+                    <ColumnDefinition Width="220"/>
+                    <ColumnDefinition Width="128"/>
+                    <ColumnDefinition Width="112"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="30"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="1" Text="ETD" Style="{StaticResource HeaderText}"/>
+                <TextBlock Grid.Column="2" Text="TYPE" Style="{StaticResource HeaderText}"/>
+                <TextBlock Grid.Column="3" Text="IP" Style="{StaticResource HeaderText}"/>
+                <TextBlock Grid.Column="4" Text="STUDENT" Style="{StaticResource HeaderText}"/>
+                <TextBlock Grid.Column="5" Text="MISSION" Style="{StaticResource HeaderText}"/>
+                <TextBlock Grid.Column="6" Text="CALLSIGN / #" Style="{StaticResource HeaderText}"/>
+                <TextBlock Grid.Column="7" Text="NOTES" Style="{StaticResource HeaderText}"/>
+            </Grid>
+        </DataTemplate>
+
+        <!-- One student in the Line details list: how they would do on the selected line -->
+        <DataTemplate x:Key="CandidateTemplate">
+            <DockPanel Tag="Candidate" Background="Transparent" ToolTip="{Binding ToolTipText}" ToolTipService.ShowDuration="60000">
+                <TextBlock DockPanel.Dock="Left" Text="{Binding Icon}" Foreground="{Binding IconBrush}" FontWeight="Bold" Width="18"/>
+                <TextBlock DockPanel.Dock="Right" Text="{Binding ScoreText}" Foreground="#475569" FontFamily="Consolas" Margin="6,0,0,0"/>
+                <TextBlock DockPanel.Dock="Left" Text="{Binding NameText}" FontWeight="SemiBold" Width="150" TextTrimming="CharacterEllipsis"/>
+                <TextBlock DockPanel.Dock="Left" Text="{Binding MissionText}" Foreground="#1E3A8A" Width="70" TextTrimming="CharacterEllipsis"/>
+                <TextBlock Text="{Binding ReasonText}" Foreground="{Binding ReasonBrush}" TextTrimming="CharacterEllipsis"/>
+            </DockPanel>
+        </DataTemplate>
+
+        <!-- One schedule line (the selected line gets a blue outline) -->
+        <DataTemplate x:Key="LineRowTemplate">
+            <Border Tag="Row" Margin="3,1" Padding="0,1" Background="{Binding RowBackground}" CornerRadius="4"
+                    BorderBrush="{Binding RowBorder}" BorderThickness="1">
+                <Border.ContextMenu>
+                    <ContextMenu/>
+                </Border.ContextMenu>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="8"/>
+                        <ColumnDefinition Width="64"/>
+                        <ColumnDefinition Width="104"/>
+                        <ColumnDefinition Width="180"/>
+                        <ColumnDefinition Width="220"/>
+                        <ColumnDefinition Width="128"/>
+                        <ColumnDefinition Width="112"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="30"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" Background="{Binding StripeBrush}" CornerRadius="3,0,0,3" ToolTip="{Binding SortieType}"/>
+
+                    <TextBox Grid.Column="1" Tag="EtdBox" Style="{StaticResource CellBox}" Text="{Binding EtdText, Mode=OneWay}"
+                             FontFamily="Consolas" FontSize="13" FontWeight="SemiBold" MaxLength="6" HorizontalContentAlignment="Center"
+                             ToolTip="Type 0730, 730 or 7:30 then Enter. Up/Down = 5 min, Shift+Up/Down = 30 min, Esc = undo typing."/>
+
+                    <ComboBox Grid.Column="2" Tag="TypeBox" Margin="2" VerticalContentAlignment="Center"
+                              ItemsSource="{Binding TypeOptions}" SelectedItem="{Binding SortieType, Mode=OneWay}"/>
+
+                    <Border Grid.Column="3" Tag="IPSlot" AllowDrop="True" Focusable="True" Margin="2" MinHeight="26" Padding="9,2"
+                            CornerRadius="13" BorderThickness="1" Background="{Binding IPBackground}" BorderBrush="{Binding IPBorder}"
+                            ToolTip="{Binding IPToolTip}">
+                        <Border.ContextMenu>
+                            <ContextMenu/>
+                        </Border.ContextMenu>
+                        <TextBlock Text="{Binding InstructorText}" Foreground="{Binding IPForeground}" FontStyle="{Binding IPFontStyle}"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                    </Border>
+
+                    <Border Grid.Column="4" Tag="StudentSlot" AllowDrop="{Binding AllowStudentDrop}" Focusable="True" Margin="2" MinHeight="26"
+                            Padding="9,2,15,2" CornerRadius="13" BorderThickness="{Binding StudentBorderThickness}"
+                            Background="{Binding StudentBackground}" BorderBrush="{Binding StudentBorder}"
+                            ToolTip=" " ToolTipService.ShowDuration="60000" ToolTipService.InitialShowDelay="300">
+                        <Border.ContextMenu>
+                            <ContextMenu/>
+                        </Border.ContextMenu>
+                        <Grid>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding StudentText}" Foreground="{Binding StudentForeground}" FontWeight="{Binding StudentWeight}"
+                                           FontStyle="{Binding StudentFontStyle}" TextTrimming="CharacterEllipsis" MaxWidth="150"/>
+                                <TextBlock Text="{Binding StudentSubText}" Foreground="#64748B" FontSize="10" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <Polygon Points="0,0 11,0 11,11" Fill="{Binding MarkerBrush}" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                     Margin="0,-3,-14,0" IsHitTestVisible="False"/>
+                        </Grid>
+                    </Border>
+
+                    <ComboBox Grid.Column="5" Tag="MissionBox" Margin="2" VerticalContentAlignment="Center" IsTextSearchEnabled="False"
+                              ItemsSource="{Binding MissionOptions}" SelectedItem="{Binding MissionSelected, Mode=OneWay}"
+                              IsEnabled="{Binding MissionEnabled}"
+                              ToolTip="(auto) = the best-scoring event that passes the hard rules. Pick one to hardcode it, or Type a mission... for any other."/>
+
+                    <StackPanel Grid.Column="6" Orientation="Horizontal">
+                        <TextBox Tag="CallsignBox" Style="{StaticResource CellBox}" Width="64" Text="{Binding CallsignText, Mode=OneWay}"
+                                 IsReadOnly="{Binding ReadOnlyFields}" ToolTip="{Binding CallsignToolTip}"/>
+                        <TextBox Tag="NumBox" Style="{StaticResource CellBox}" Width="38" Text="{Binding NumText, Mode=OneWay}"
+                                 IsReadOnly="{Binding ReadOnlyFields}"/>
+                    </StackPanel>
+
+                    <TextBox Grid.Column="7" Tag="NotesBox" Style="{StaticResource CellBox}" Text="{Binding NotesText, Mode=OneWay}"
+                             IsReadOnly="{Binding ReadOnlyFields}" TextWrapping="NoWrap" ToolTip="{Binding NotesToolTip}"
+                             Foreground="{Binding NotesForeground}"/>
+
+                    <Button Grid.Column="8" Tag="DeleteLine" Content="&#x2715;" Margin="2" Padding="0" Width="24" Height="24"
+                            Background="Transparent" BorderThickness="0" Foreground="#94A3B8" Cursor="Hand" ToolTip="Delete line (Ctrl+Z undoes)"/>
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid>
+        <DockPanel>
+
+            <!-- Menu bar: every board action in one place, with its shortcut. The Line menu and
+                 Apply template are filled when they open (their placeholder item makes them open). -->
+            <Menu x:Name="MainMenu" DockPanel.Dock="Top" Background="#F8FAFC" Padding="6,2" BorderBrush="#CBD5E1" BorderThickness="0,0,0,1">
+                <MenuItem Header="_File">
+                    <MenuItem x:Name="MenuLoadDay" Header="_Load a day..."/>
+                    <MenuItem x:Name="MenuApplyTemplate" Header="Apply a _template">
+                        <MenuItem Header="(no templates saved)" IsEnabled="False"/>
+                    </MenuItem>
+                    <MenuItem x:Name="MenuSaveTemplate" Header="_Save this day as a template..."/>
+                    <MenuItem x:Name="MenuCopyPrevDay" Header="_Copy the previous day's lines"/>
+                    <Separator/>
+                    <MenuItem x:Name="MenuUpdateSyllabi" Header="_Update Syllabi..."/>
+                    <Separator/>
+                    <MenuItem x:Name="MenuClose" Header="Close the board"/>
+                </MenuItem>
+                <MenuItem Header="_Edit">
+                    <MenuItem x:Name="MenuUndo" Header="_Undo" InputGestureText="Ctrl+Z"/>
+                    <Separator/>
+                    <MenuItem x:Name="MenuTypeLines" Header="_Type lines (Add lines box)" InputGestureText="Ctrl+L"/>
+                    <MenuItem x:Name="MenuBulkLines" Header="Add _bulk lines..."/>
+                    <Separator/>
+                    <MenuItem x:Name="MenuRecheck" Header="_Re-check every hardcoded line" InputGestureText="F5"/>
+                    <MenuItem x:Name="MenuLetGo" Header="_Let go of the puck you are holding" InputGestureText="Esc"/>
+                </MenuItem>
+                <MenuItem x:Name="MenuLine" Header="_Line">
+                    <MenuItem Header="Click a line on the board first" IsEnabled="False"/>
+                </MenuItem>
+                <MenuItem Header="_Day">
+                    <MenuItem x:Name="MenuPrevDay" Header="_Previous day" InputGestureText="Ctrl+PgUp"/>
+                    <MenuItem x:Name="MenuNextDay" Header="_Next day" InputGestureText="Ctrl+PgDn"/>
+                    <Separator/>
+                    <MenuItem x:Name="MenuAddNextDay" Header="Add the next flying day"/>
+                    <MenuItem x:Name="MenuAddPickedDay" Header="Add the day in the date box"/>
+                    <MenuItem x:Name="MenuRemoveDay" Header="_Remove this day..."/>
+                </MenuItem>
+                <MenuItem Header="F_ill">
+                    <MenuItem x:Name="MenuFillDay" Header="Fill _this day" InputGestureText="Ctrl+Shift+Enter"/>
+                    <MenuItem x:Name="MenuFillAll" Header="Fill _all days" InputGestureText="Ctrl+Enter"/>
+                    <Separator/>
+                    <MenuItem x:Name="MenuRefill" Header="_Re-fill"/>
+                    <MenuItem x:Name="MenuBackToEdit" Header="_Back to edit (throw the fill away)"/>
+                    <MenuItem x:Name="MenuExport" Header="_Export to OutputSchedule..."/>
+                </MenuItem>
+                <MenuItem Header="_View">
+                    <MenuItem x:Name="MenuShowDetails" Header="Line _details panel" IsCheckable="True" IsChecked="True"/>
+                    <MenuItem x:Name="MenuColorKey" Header="_Color key..."/>
+                </MenuItem>
+                <MenuItem Header="_Help">
+                    <MenuItem x:Name="MenuHelp" Header="Puck board _help"/>
+                    <MenuItem x:Name="MenuHelpColorKey" Header="What the _colors mean..."/>
+                </MenuItem>
+            </Menu>
+
+            <!-- Top bar: quick entry -->
+            <Border DockPanel.Dock="Top" Background="#0F172A" Padding="12,8">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <Button x:Name="UndoButton" Content="Undo (Ctrl+Z)" Style="{StaticResource BarButton}"/>
+                        <Button x:Name="ColorKeyButton" Content="Colors" Style="{StaticResource BarButton}" Padding="6,1" FontSize="11"
+                                ToolTip="What the colors on the board mean"/>
+                        <Button x:Name="HelpButton" Content="Help" Style="{StaticResource BarButton}"/>
+                    </StackPanel>
+                    <!-- Logo: Modules\BoardLogo.png, loaded by the board code (a XAML string has no base address for a file path) -->
+                    <Image x:Name="LogoImage" Height="38" VerticalAlignment="Center" Margin="0,0,10,0" Stretch="Uniform"
+                           RenderOptions.BitmapScalingMode="HighQuality" ToolTip="FAIP Mafia"/>
+                    <TextBlock Text="FAIS PUCK BOARD" Foreground="White" FontWeight="Bold" FontSize="16" VerticalAlignment="Center" Margin="0,0,18,0"/>
+                    <TextBlock Text="Add lines:" Foreground="#CBD5E1" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <TextBox x:Name="QuickEntryBox" Width="420" FontFamily="Consolas" FontSize="13" Padding="4,3" VerticalContentAlignment="Center"
+                             ToolTip="Examples: 0730 DL | 1015 O&amp;B (return at +3 hr) | 1015 OB 1330 | 1300 OFT x2 | 0800 DL Jones sp:Smith | separate several with commas. Ctrl+L jumps here."/>
+                    <Button x:Name="AddLineButton" Content="Add" Style="{StaticResource BarButton}" FontWeight="SemiBold"/>
+                    <Button x:Name="BulkLinesButton" Content="Add Bulk Lines" Style="{StaticResource BarButton}"
+                            ToolTip="Add a run of lines: a start time, how many, and the minutes between them (3 by default)."/>
+                    <TextBlock x:Name="QuickEntryFeedback" Foreground="#FDE68A" VerticalAlignment="Center" Margin="10,0,0,0" TextTrimming="CharacterEllipsis"/>
+                </DockPanel>
+            </Border>
+
+            <!-- Second bar: templates and days -->
+            <Border DockPanel.Dock="Top" Background="#E2E8F0" Padding="12,5">
+                <WrapPanel VerticalAlignment="Center">
+                    <TextBlock Text="Template:" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    <ComboBox x:Name="TemplateCombo" Width="170" DisplayMemberPath="Name" VerticalAlignment="Center"/>
+                    <Button x:Name="LoadTemplateButton" Content="Load" Style="{StaticResource BarButton}"/>
+                    <Button x:Name="SaveTemplateButton" Content="Save day as template..." Style="{StaticResource BarButton}"/>
+                    <Rectangle Width="1" Height="20" Fill="#94A3B8" Margin="8,0"/>
+                    <Button x:Name="CopyPrevDayButton" Content="Copy previous day's lines" Style="{StaticResource BarButton}"/>
+                    <Button x:Name="LoadDayButton" Content="Load a day..." Style="{StaticResource BarButton}" FontWeight="SemiBold"
+                            ToolTip="Load one day's lines from MasterData's Schedule sheet, or from the schedule you last exported (to change a day already sent out)."/>
+                    <Rectangle Width="1" Height="20" Fill="#94A3B8" Margin="8,0"/>
+                    <Button x:Name="UpdateSyllabiButton" Content="Update Syllabi" Style="{StaticResource BarButton}"
+                            ToolTip="Pick the day's flying schedule or the Big Board: FAIS works out which it is and marks each student's events complete or not complete from it. You see what will change before anything is saved."/>
+                    <Rectangle Width="1" Height="20" Fill="#94A3B8" Margin="8,0"/>
+                    <DatePicker x:Name="AddDayPicker" Width="125" VerticalAlignment="Center"/>
+                    <Button x:Name="AddDayButton" Content="Add day" Style="{StaticResource BarButton}"/>
+                    <Button x:Name="RemoveDayButton" Content="Remove this day" Style="{StaticResource BarButton}"/>
+                </WrapPanel>
+            </Border>
+
+            <!-- Bottom bar: status and fill -->
+            <Border DockPanel.Dock="Bottom" Background="White" Padding="12,7" BorderBrush="#CBD5E1" BorderThickness="0,1,0,0">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <Button x:Name="CancelButton" Content="Close" Style="{StaticResource BarButton}"/>
+                        <Button x:Name="BackToEditButton" Content="Back to edit" Style="{StaticResource BarButton}" Visibility="Collapsed"/>
+                        <Button x:Name="RefillButton" Content="Re-fill" Style="{StaticResource BarButton}" Visibility="Collapsed"/>
+                        <Button x:Name="ExportButton" Content="Export to OutputSchedule" Style="{StaticResource BarButton}" Visibility="Collapsed"
+                                Background="#1D4ED8" Foreground="White" FontWeight="Bold" Padding="16,6"/>
+                        <!-- Fill all days only shows when the board has more than one day -->
+                        <Button x:Name="FillAllButton" Content="Fill all days" Style="{StaticResource BarButton}"
+                                Background="White" Foreground="#15803D" BorderBrush="#16A34A" FontWeight="Bold" Padding="14,6"
+                                ToolTip="Fill the open lines on every day on the board, then review and export them all (Ctrl+Enter)."/>
+                        <Button x:Name="FillDayButton" Content="Fill this day" Style="{StaticResource BarButton}"
+                                Background="#16A34A" Foreground="White" FontWeight="Bold" Padding="16,6"
+                                ToolTip="Fill the open lines on the day you are looking at, then review and export just that day. Days already exported stay as they are (Ctrl+Shift+Enter)."/>
+                    </StackPanel>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="StatusText" Text="Ready" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock x:Name="CountsText" Foreground="#64748B" FontSize="11"/>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <!-- Left: IP pool -->
+            <Border DockPanel.Dock="Left" Width="235" Margin="8,8,4,8" Background="White" CornerRadius="6" Tag="IPPool" AllowDrop="True" Padding="6">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="IP PUCKS" FontWeight="Bold" Foreground="#1E3A8A" Margin="2,0,0,4"/>
+                    <TextBox DockPanel.Dock="Top" x:Name="IPSearchBox" Margin="0,0,0,4" Padding="3" ToolTip="Filter IPs by name or callsign"/>
+                    <TextBlock DockPanel.Dock="Top" Text="Drag onto a line's IP slot, or click to pick up and click the slot. Double-click puts the IP on the selected line. Drop a line's IP here to take it off." FontSize="10"
+                               Foreground="#64748B" TextWrapping="Wrap" Margin="2,0,0,6"/>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="IPPool" ItemTemplate="{StaticResource IPPuckTemplate}"/>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
+            <!-- Right: student pool -->
+            <Border DockPanel.Dock="Right" Width="265" Margin="4,8,8,8" Background="White" CornerRadius="6" Tag="StudentPool" AllowDrop="True" Padding="6">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="STUDENT PUCKS" FontWeight="Bold" Foreground="#14532D" Margin="2,0,0,4"/>
+                    <TextBox DockPanel.Dock="Top" x:Name="StudentSearchBox" Margin="0,0,0,4" Padding="3" ToolTip="Filter students by name"/>
+                    <TextBlock DockPanel.Dock="Top" Text="Drag onto a line to hardcode the student, or click to pick up and click the slot. Double-click puts them on the selected line. Drop a line's student here to take it off." FontSize="10"
+                               Foreground="#64748B" TextWrapping="Wrap" Margin="2,0,0,6"/>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="StudentPool" ItemTemplate="{StaticResource StudentPuckTemplate}"/>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
+            <!-- Center: banners, the days, and the Line details panel under them (drag the bar between to resize) -->
+            <Border Margin="4,8,4,8" Background="White" CornerRadius="6" Padding="6">
+                <Grid x:Name="CenterGrid">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*" MinHeight="140"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="240" MinHeight="0"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel Grid.Row="0">
+                        <Border x:Name="ModeBanner" Background="#FEF3C7" BorderBrush="#F59E0B" BorderThickness="1"
+                                CornerRadius="4" Padding="8,5" Margin="0,0,0,6" Visibility="Collapsed">
+                            <TextBlock x:Name="ModeBannerText" TextWrapping="Wrap" Foreground="#78350F"/>
+                        </Border>
+                        <!-- MasterData's Schedule sheet has lines the board does not (it is re-read whenever MasterData is saved) -->
+                        <Border x:Name="SheetBanner" Background="#EFF6FF" BorderBrush="#60A5FA" BorderThickness="1"
+                                CornerRadius="4" Padding="8,4" Margin="0,0,0,6" Visibility="Collapsed">
+                            <DockPanel>
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                    <Button x:Name="SheetBannerLoadButton" Content="Load" Style="{StaticResource BarButton}" FontWeight="SemiBold"/>
+                                    <Button x:Name="SheetBannerIgnoreButton" Content="Keep the board's lines" Style="{StaticResource BarButton}"/>
+                                </StackPanel>
+                                <TextBlock x:Name="SheetBannerText" TextWrapping="Wrap" Foreground="#1E3A8A" VerticalAlignment="Center"/>
+                            </DockPanel>
+                        </Border>
+                        <!-- A puck picked up with a click: the next slot clicked gets it -->
+                        <Border x:Name="HoldBanner" Background="#1E3A8A" CornerRadius="4" Padding="8,4" Margin="0,0,0,6" Visibility="Collapsed">
+                            <DockPanel>
+                                <Button x:Name="HoldLetGoButton" DockPanel.Dock="Right" Content="Let go (Esc)" Style="{StaticResource BarButton}"/>
+                                <TextBlock x:Name="HoldBannerText" TextWrapping="Wrap" Foreground="White" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            </DockPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <TabControl x:Name="DayTabs" Grid.Row="1" Background="White"/>
+
+                    <GridSplitter x:Name="DetailsSplitter" Grid.Row="2" Height="6" HorizontalAlignment="Stretch" ResizeDirection="Rows"
+                                  ResizeBehavior="PreviousAndNext" Background="#E2E8F0" Margin="0,4,0,0" Cursor="SizeNS"
+                                  ToolTip="Drag to make the Line details panel bigger or smaller"/>
+
+                    <!-- Line details: the selected line's student checked against every rule, and every student ranked for the line -->
+                    <Border x:Name="DetailsPanel" Grid.Row="3" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="4" Background="#F8FAFC">
+                        <DockPanel>
+                            <Border DockPanel.Dock="Top" Background="#E2E8F0" Padding="8,3" CornerRadius="4,4,0,0">
+                                <DockPanel>
+                                    <Button x:Name="DetailsHideButton" DockPanel.Dock="Right" Content="Hide" Padding="8,0" Margin="4,0,0,0" Cursor="Hand"
+                                            ToolTip="Hide the Line details panel (View menu brings it back)"/>
+                                    <TextBlock Text="LINE DETAILS" FontWeight="Bold" Foreground="#334155" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                    <TextBlock x:Name="DetailsTitle" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="#0F172A"/>
+                                </DockPanel>
+                            </Border>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" MinWidth="180"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*" MinWidth="220"/>
+                                </Grid.ColumnDefinitions>
+                                <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                    <StackPanel x:Name="DetailsChecks" Margin="8,4,8,6"/>
+                                </ScrollViewer>
+                                <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="#E2E8F0"/>
+                                <DockPanel Grid.Column="2" Margin="8,4,6,4">
+                                    <DockPanel DockPanel.Dock="Top">
+                                        <Button x:Name="DetailsPlaceButton" DockPanel.Dock="Right" Content="Put on this line" Padding="8,1" Cursor="Hand" IsEnabled="False"
+                                                ToolTip="Hardcode the student picked in the list on the selected line (or double-click them)"/>
+                                        <CheckBox x:Name="DetailsHideHardCheck" DockPanel.Dock="Right" Content="Hide rule breaks" VerticalAlignment="Center" Margin="0,0,8,0"
+                                                  ToolTip="Leave out the students who break a hard rule on this line"/>
+                                        <TextBlock x:Name="DetailsListTitle" Text="Every student on this line" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                    </DockPanel>
+                                    <TextBlock x:Name="DetailsListInfo" DockPanel.Dock="Top" FontSize="11" Foreground="#64748B" TextWrapping="Wrap" Margin="0,2,0,3"/>
+                                    <ListBox x:Name="DetailsList" ItemTemplate="{StaticResource CandidateTemplate}" HorizontalContentAlignment="Stretch"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled" BorderBrush="#CBD5E1"/>
+                                </DockPanel>
+                            </Grid>
+                        </DockPanel>
+                    </Border>
+                </Grid>
+            </Border>
+        </DockPanel>
+
+        <!-- Busy overlay while the scheduler fills -->
+        <Grid x:Name="BusyOverlay" Background="#990F172A" Visibility="Collapsed">
+            <Border Background="White" CornerRadius="8" Padding="24" HorizontalAlignment="Center" VerticalAlignment="Center" Width="440">
+                <StackPanel>
+                    <TextBlock x:Name="BusyText" Text="Filling the schedule..." FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                    <ProgressBar x:Name="BusyProgress" Height="14" Margin="0,12,0,0" Minimum="0" Maximum="100"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- +/- pop-up shown after a student is dropped -->
+        <Popup x:Name="DropPopup" StaysOpen="True" AllowsTransparency="True" Placement="Bottom" PopupAnimation="Fade">
+            <Border Background="White" BorderBrush="#334155" BorderThickness="1" CornerRadius="6" Padding="10" MaxWidth="480">
+                <StackPanel x:Name="DropPopupPanel"/>
+            </Border>
+        </Popup>
+    </Grid>
+</Window>

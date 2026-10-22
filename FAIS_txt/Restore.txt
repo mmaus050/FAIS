@@ -1,0 +1,7 @@
+# Paste this whole file into a PowerShell window after cd-ing to the extracted FAIS_txt folder.
+# It renames every X.ps1.txt / X.psm1.txt / X.xaml.txt / README.md.txt back to X.
+Get-ChildItem -Recurse -File -Filter *.txt |
+  Where-Object { $_.Name -match '\.(ps1|psm1|xaml|md)\.txt$' } |
+  ForEach-Object { Rename-Item $_.FullName ($_.Name -replace '\.txt$','') }
+Get-ChildItem -Recurse -File | Unblock-File
+Write-Host "Done. Run:  powershell.exe -STA -ExecutionPolicy Bypass -File .\FAIS.ps1"
