@@ -2047,6 +2047,18 @@ Describe 'Get-NextFlyingDay' {
     }
 }
 
+Describe 'Set-BoardMission' {
+    It 'saves a change of case (the dropdown shows the line''s own spelling)' {
+        $b = New-TB
+        $l = New-TL -At '2026-10-20 08:00' -Mission 'ft5001'
+        Add-BoardLine -Board $b -Line @($l) -NoUndo
+        $v = $b.Version
+        Set-BoardMission -Board $b -Id $l.Id -Mission 'FT5001'
+        (Get-BoardLine $b $l.Id).Mission | Should -BeExactly 'FT5001'
+        $b.Version | Should -BeGreaterThan $v
+    }
+}
+
 Describe 'New-BulkBoardLines (Add Bulk Lines)' {
     It 'makes the lines that many minutes apart, 3 by default' {
         $r = New-BulkBoardLines -Day $script:D1 -StartTime '0730' -Count '10'

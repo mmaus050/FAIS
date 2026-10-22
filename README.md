@@ -119,11 +119,12 @@ Both files are saved or neither. If they can't be saved (still open), the change
 - **When you drop a student,** a pop-up lists:
   - hard-rule flags (red ✖), for example `Turn time 2.8 hr < 3.25 hr minimum (vs 0730 FT5103)` or `Not opted for FE3102: FT5001 isn't complete yet` (a sim whose prerequisite is the dollar ride);
   - warnings, for example `Less than 3.5 hr TT, Flt/CC Approval Required`;
-  - the **+ / −** score reasons, for example `Continue String +10` or `Exhaustion −6`.
+  - the **+ / −** score reasons, spelled out, for example `3 String +10`, `Breaks 4 String w/ Lee −5` or `2 Flights and 2 Sims in last 5 Days −6`.
 - **Rule breaks are allowed.** The line is hardcoded anyway and marked `OVERRIDE: ...` on the output.
 - **Corner marker** on every hardcoded student: green, amber, red, or grey while checking. Hover for the reasons; right-click for more (explain, take off, *Fly wing to...*, duplicate, delete line).
 - **Mission dropdown:** `(auto)` picks the best-scoring event that passes the rules. Choose an event to hardcode it. After the events the student can fly on the line come the next ones they are **not opted for** yet (marked `(not opted)`), then **Type a mission...** for anything else.
-- **A mission that breaks a rule** (not opted, already flown, not in the syllabus, wrong line type) is explained before it goes on, with the mission the scheduler would put there: **Yes** puts the recommended mission on, **No** keeps yours (the line is flagged `OVERRIDE: Not opted for ...` on the output), **Cancel** changes nothing. You always have the final say.
+- **A mission picked or typed in the dropdown that breaks a rule** (not opted, already flown, not in the syllabus, wrong line type) is explained before it goes on, with the mission the scheduler would put there: **Yes** puts the recommended mission on, **No** keeps yours (the line is flagged `OVERRIDE: Not opted for ...` on the output), **Cancel** changes nothing. You always have the final say. A line typed with `sp:` and `m:` in the Add lines box goes on as typed and opens the rule-check pop-up, so its flags show straight away.
+- **Keyboard:** arrow keys on a mission dropdown open it; move with the arrows and press **Enter** to pick.
 - **IFT / OFT lines** are never wingmen or direct support.
 
 ### Line details
@@ -161,7 +162,7 @@ Click a student in the list to see their full check on the left. **Double-click*
 | Path | What |
 |---|---|
 | `FAIS.ps1` | Entry point and settings (`$BoardSettings`, `$OutputSettings`; the Teams copy is off by default) |
-| `Modules\` | Code: engine (`SchedulingEngine`, `Syllabus`), board (`PuckBoard.xaml/.psm1`, `LoadDayDialog.xaml`, `BulkLinesDialog.xaml`, `ExportResultDialog.xaml`, `BoardModel`, `Assessment`), Excel in/out (`DataDownload`, `DataUpload`, `ExcelFiles`), Update Syllabi (`SyllabusImport`), pre-run pop-ups (`PreRunMenu`), helpers (`DataManipulation`) |
+| `Modules\` | Code: engine (`SchedulingEngine`, `Syllabus`), board (`PuckBoard.xaml/.psm1`, `LoadDayDialog.xaml`, `BulkLinesDialog.xaml`, `ExportResultDialog.xaml`, `BoardLogo.png` (the title-bar logo), `BoardModel`, `Assessment`), Excel in/out (`DataDownload`, `DataUpload`, `ExcelFiles`), Update Syllabi (`SyllabusImport`), pre-run pop-ups (`PreRunMenu`), helpers (`DataManipulation`) |
 | `Boards\` | Autosaved board, one file per day (created on first run) |
 | `Templates\` | Saved wave templates |
 | `OldFunctions.psm1` | Legacy code, kept for reference only; not loaded |
