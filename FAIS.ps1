@@ -4,12 +4,13 @@
 # Run order:
 #   1. Open MasterData / OutputSchedule workbooks are saved in Excel so the latest edits are read
 #   2. Pre-run pop-ups: log hooked (unsat) / incomplete events from the last schedule (saved right away)
-#   3. Puck board: lines come from MasterData's Schedule sheet one day at a time (re-read whenever
-#      MasterData is saved), or are typed; hardcode IPs and students, see the + / - and rule flags
-#   4. "Fill the rest of the lines" (or only this day): the scheduler fills the open lines, you review it
+#   3. Puck board: lines come from MasterData's Schedule sheet, a tab for each day it has lines for
+#      (re-read whenever MasterData is saved), or are typed; hardcode IPs and students, see the + / - and rule flags
+#   4. "Fill this day" or "Fill all days": the scheduler fills the open lines, you review it
 #   5. Export, all or nothing, for the filled days: OutputSchedule.xlsx (MasterSchedule, other exported
 #      days kept, + each student's syllabus tab), SimDebt + cleaned-up unsats to MasterData, and
 #      ATIS.xlsx (one tab per day: flights, then sims). Excel files are saved and closed first.
+#      A window then says what was written (or why nothing was), with buttons to open the files.
 #
 # -Trace prints every scheduling decision to the console.
 param (
@@ -50,9 +51,9 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne [System.Thr
 # ==========================================
 #       CONFIGURATION
 # ==========================================
-$excelInputPath = Join-Path (Split-Path $PSScriptRoot -Parent) "MasterData.xlsx"
+$excelInputPath = Join-Path $PSScriptRoot "MasterData.xlsx"
 $desktopPath = [Environment]::GetFolderPath('Desktop')
-$excelOutputPath = Join-Path -Path $desktopPath -ChildPath "OutputSchedule.xlsx"
+$excelOutputPath = Join-Path -Path $PSScriptRoot -ChildPath "OutputSchedule.xlsx"
 $atisOutputPath = Join-Path -Path $desktopPath -ChildPath "ATIS.xlsx"
 
 # Puck board
@@ -113,7 +114,7 @@ if (-not (Test-Path -LiteralPath $excelInputPath)) {
 }
 # Workbooks open in Excel are saved first, so edits not saved yet are read too
 [void](Close-FaisExcelFiles -Path @($excelInputPath, $excelOutputPath) -SaveOnly)
-$Ingested = IngestData -excelInputPath $excelInputPath -desktopPath $desktopPath -excelOutputPath $excelOutputPath
+$Ingested = IngestData -excelInputPath $excelInputPath -excelOutputPath $excelOutputPath
 if ($Ingested.OutputError) {
     # Carrying on would start every student from the blank syllabus and overwrite their tabs on export
     Write-Host "OutputSchedule.xlsx could not be opened, so the students' progress can't be read: $($Ingested.OutputError)" -ForegroundColor Red
@@ -130,7 +131,7 @@ if ($null -eq $SoftWeights) {
     Write-Host "The SoftWeights sheet could not be read, so nothing can be scored. Fix MasterData.xlsx and run again." -ForegroundColor Red
     return
 }
-Write-Host ("Loaded {0} students, {1} IPs, {2} formation callsigns." -f @($Students).Count, @($Instructors).Count, @($Formations).Count) -ForegroundColor Cyan
+Write-Host ("Loaded {0} students, {1} IPs, {2} formation callsigns from {3}." -f @($Students).Count, @($Instructors).Count, @($Formations).Count, $excelInputPath) -ForegroundColor Cyan
 
 
 # ==========================================
@@ -138,7 +139,7 @@ Write-Host ("Loaded {0} students, {1} IPs, {2} formation callsigns." -f @($Stude
 # ==========================================
 # Brings in the previous schedule (with the complex objects attached) so lines can be
 # marked hooked (unsat) or incomplete before anything is scheduled
-$PrevSchedule = @(DownloadPrevSchedule -Students $Students -Instructors $Instructors -desktopPath $desktopPath -excelOutputPath $excelOutputPath)
+$PrevSchedule = @(DownloadPrevSchedule -Students $Students -Instructors $Instructors -excelOutputPath $excelOutputPath)
 if (-not (Invoke-PreRunMenu -Schedule $PrevSchedule -Students $Students -SoftWeights $SoftWeights -MasterDataPath $excelInputPath -OutputPath $excelOutputPath)) {
     return
 }
@@ -147,7 +148,7 @@ if (-not (Invoke-PreRunMenu -Schedule $PrevSchedule -Students $Students -SoftWei
 # ==========================================
 #      PUCK BOARD
 # ==========================================
-# Build the lines, hardcode anyone, then "Fill the rest of the lines" runs the scheduler
+# Build the lines, hardcode anyone, then "Fill this day" / "Fill all days" runs the scheduler
 # (Invoke-FillSchedule) and shows the result for review
 $BoardData = @{
     Students       = $Students
@@ -188,9 +189,17 @@ $LockedPrompt = {
     return ($answer -eq [System.Windows.MessageBoxResult]::OK)
 }
 
-$Exported = Export-FaisOutput -FillResult $FillResult -OutputPath $excelOutputPath -MasterDataPath $excelInputPath -AtisPath $atisOutputPath -Settings $OutputSettings -LockedPrompt $LockedPrompt -Days @($BoardResult.Days)
+# Unsat flags the export will change (read before it writes them), and its warnings (why it
+# failed, or names MasterData did not have) for the result window
+$UnsatChanges = Get-UnsatFlagUpdates -Students $FillResult.Students
+$ExportWarnings = @()
+$Exported = Export-FaisOutput -FillResult $FillResult -OutputPath $excelOutputPath -MasterDataPath $excelInputPath -AtisPath $atisOutputPath -Settings $OutputSettings -LockedPrompt $LockedPrompt -Days @($BoardResult.Days) -WarningVariable ExportWarnings
+$AtisWritten = if ($OutputSettings.WriteAtis) { $atisOutputPath } else { '' }
+$ExportSummary = Get-FaisExportSummary -Ok ([bool]$Exported) -FillResult $FillResult -Days @($BoardResult.Days) -OutputPath $excelOutputPath -MasterDataPath $excelInputPath `
+    -AtisPath $AtisWritten -UnsatChanges $UnsatChanges -Warnings @($ExportWarnings | ForEach-Object { [string]$_.Message })
 if (-not $Exported) {
     Write-Host "Nothing was written (OutputSchedule, MasterData and ATIS are as they were). Your board is saved; run FAIS again and Export once the files are closed." -ForegroundColor Red
+    try { Show-FaisExportResult -Summary $ExportSummary } catch { Write-Host "Could not show the export result window: $($_.Exception.Message)" -ForegroundColor Yellow }
     return
 }
 
@@ -202,3 +211,6 @@ Write-Host ("  {0} lines: {1} hardcoded, {2} filled by the scheduler, {3} wingme
 foreach ($o in $FillResult.Overrides) {
     Write-Host ("  OVERRIDE {0} {1}: {2}" -f (Format-EtdShort $o.ETD), $o.Student, ($o.Violations -join '; ')) -ForegroundColor Yellow
 }
+# The same in a window, with buttons that open the files
+try { Show-FaisExportResult -Summary $ExportSummary -OutputPath $excelOutputPath -AtisPath $AtisWritten }
+catch { Write-Host "Could not show the export result window: $($_.Exception.Message)" -ForegroundColor Yellow }

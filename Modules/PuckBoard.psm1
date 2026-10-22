@@ -13,10 +13,16 @@
 #    the current WPF event finishes, so rows are never rebuilt inside their own events.
 #  - Pinned students are re-checked in the background after every change (DispatcherTimer),
 #    which keeps the corner markers current without freezing the window.
-#  - MasterData's Schedule sheet is re-read whenever MasterData is saved (another timer watches
-#    the file). Board days nobody has edited since they were loaded update by themselves; for
-#    the rest a banner offers the change. "Load a day..." loads one day from the sheet or from
-#    the last exported schedule.
+#  - MasterData's Schedule sheet gives each day it has lines for (from the board's first day on)
+#    a tab of its own, and is re-read whenever MasterData is saved (another timer watches the
+#    file). New sheet days are added and board days nobody has edited since they were loaded
+#    update by themselves; for the rest a banner offers the change. "Load a day..." loads one
+#    day from the sheet or from the last exported schedule.
+#  - Pucks go on a line by drag and drop, or by click and place: a click picks a puck up
+#    (PB.Held), the next slot clicked gets it, and a double-click puts it on the selected line.
+#  - Clicking a line selects it (PB.SelectedLineId). The Line details panel under the days shows
+#    that line's student against every rule and ranks every student for the line (DetailsTimer).
+#  - The menu bar has every action; the Line menu acts on the selected line.
 
 $script:PB = $null
 $script:PBDlg = $null
@@ -112,14 +118,22 @@ function Initialize-PuckBoardWindow {
                 $controls = @{}
                 foreach ($name in @('UndoButton', 'HelpButton', 'QuickEntryBox', 'AddLineButton', 'QuickEntryFeedback', 'TemplateCombo',
                                 'LoadTemplateButton', 'SaveTemplateButton', 'CopyPrevDayButton', 'LoadDayButton', 'AddDayPicker', 'AddDayButton',
-                                'RemoveDayButton', 'BulkLinesButton', 'UpdateSyllabiButton', 'CancelButton', 'BackToEditButton', 'RefillButton', 'ExportButton', 'FillButton', 'FillDayOnlyCheck', 'StatusText',
+                                'RemoveDayButton', 'BulkLinesButton', 'UpdateSyllabiButton', 'CancelButton', 'BackToEditButton', 'RefillButton', 'ExportButton',
+                                'FillDayButton', 'FillAllButton', 'ColorKeyButton', 'StatusText',
                                 'CountsText', 'IPSearchBox', 'IPPool', 'StudentSearchBox', 'StudentPool', 'ModeBanner', 'ModeBannerText', 'DayTabs',
-                                'SheetBanner', 'SheetBannerText', 'SheetBannerLoadButton', 'SheetBannerIgnoreButton',
+                                'SheetBanner', 'SheetBannerText', 'SheetBannerLoadButton', 'SheetBannerIgnoreButton', 'LogoImage',
+                                'HoldBanner', 'HoldBannerText', 'HoldLetGoButton', 'CenterGrid', 'DetailsSplitter', 'DetailsPanel', 'DetailsHideButton',
+                                'DetailsTitle', 'DetailsChecks', 'DetailsPlaceButton', 'DetailsHideHardCheck', 'DetailsListTitle', 'DetailsListInfo', 'DetailsList',
+                                'MainMenu', 'MenuLoadDay', 'MenuApplyTemplate', 'MenuSaveTemplate', 'MenuCopyPrevDay', 'MenuUpdateSyllabi', 'MenuClose',
+                                'MenuUndo', 'MenuTypeLines', 'MenuBulkLines', 'MenuRecheck', 'MenuLetGo', 'MenuLine', 'MenuPrevDay', 'MenuNextDay',
+                                'MenuAddNextDay', 'MenuAddPickedDay', 'MenuRemoveDay', 'MenuFillDay', 'MenuFillAll', 'MenuRefill', 'MenuBackToEdit',
+                                'MenuExport', 'MenuShowDetails', 'MenuColorKey', 'MenuHelp', 'MenuHelpColorKey',
                                 'BusyOverlay', 'BusyText', 'BusyProgress', 'DropPopup', 'DropPopupPanel')) {
                                 $c = $window.FindName($name)
                                 if ($null -eq $c) { throw "PuckBoard.xaml is missing the element '$name'" }
                                 $controls[$name] = $c
                 }
+                Set-PBLogo -Image $controls.LogoImage -Path (Join-Path $PSScriptRoot 'BoardLogo.png')
 
                 $script:PB = @{
                                 Window      = $window
@@ -153,11 +167,19 @@ function Initialize-PuckBoardWindow {
                                 SheetPending = ''
                                 SheetAutoPending = $false
                                 ImportDir   = ''
+                                SelectedLineId = ''
+                                Held        = $null
+                                Press       = $null
+                                Details     = $null
+                                DetailsVisible = $true
+                                DetailsHeight = 240
+                                ColorKeyWindow = $null
                 }
 
                 Initialize-PBTimers
                 Register-PBHandlers
-                $controls.AddDayPicker.SelectedDate = (Get-NextFlyingDay -From ([datetime]::ParseExact($board.Days[$board.Days.Count - 1], 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)))
+                Register-PBMenuHandlers
+                Initialize-PBDetails
                 Update-PBTemplateList
                 Set-PBMode 'Edit'
                 Update-PBAll
@@ -168,6 +190,8 @@ function Initialize-PuckBoardWindow {
                                 Write-PBLog ("Schedule sheet at start: {0}`n{1}" -f $_.Exception.Message, $_.ScriptStackTrace)
                                 $sheetMsg = "Could not load MasterData's Schedule sheet ($($_.Exception.Message)). Use Load a day... to try again."
                 }
+                # After the sheet has added its days: the date box suggests the flying day after the last one
+                $controls.AddDayPicker.SelectedDate = (Get-NextFlyingDay -From ([datetime]::ParseExact($board.Days[$board.Days.Count - 1], 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)))
                 Start-PBAssessQueue
                 if (-not [string]::IsNullOrWhiteSpace([string]$Data.MasterDataPath)) { $script:PB.SheetTimer.Start() }
 
@@ -179,6 +203,29 @@ function Initialize-PuckBoardWindow {
 }
 
 # Boards / Templates folder next to FAIS.ps1, else %LOCALAPPDATA%\FAIS
+# Shows the logo file in the title bar. A missing or unreadable file just hides the logo.
+# Read through a stream (not a file URI) so a path with '#' or '%' in it still works and the file isn't locked.
+function Set-PBLogo {
+                param ($Image, [string]$Path)
+
+                $Image.Visibility = 'Collapsed'
+                if (-not (Test-Path -LiteralPath $Path)) { return }
+                try {
+                                $stream = [System.IO.File]::OpenRead($Path)
+                                try {
+                                                $bitmap = New-Object System.Windows.Media.Imaging.BitmapImage
+                                                $bitmap.BeginInit()
+                                                $bitmap.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+                                                $bitmap.StreamSource = $stream
+                                                $bitmap.EndInit()
+                                                $bitmap.Freeze()
+                                } finally { $stream.Dispose() }
+                                $Image.Source = $bitmap
+                                $Image.Visibility = 'Visible'
+                }
+                catch { }
+}
+
 function Resolve-PBWritableDir {
                 param ([string]$Preferred, [string]$Leaf)
 
@@ -295,9 +342,10 @@ function Test-PBInsideInput {
 
                 $el = $Element
                 while ($null -ne $el) {
+                                # A menu item counts too: a click on a right-click menu must not pick up or place the slot under it
                                 if ($el -is [System.Windows.Controls.Primitives.TextBoxBase] -or $el -is [System.Windows.Controls.ComboBox] -or
                                                 $el -is [System.Windows.Controls.Primitives.ButtonBase] -or $el -is [System.Windows.Controls.Primitives.ScrollBar] -or
-                                                $el -is [System.Windows.Controls.DatePicker]) { return $true }
+                                                $el -is [System.Windows.Controls.DatePicker] -or $el -is [System.Windows.Controls.MenuItem]) { return $true }
                                 if ($el -is [System.Windows.FrameworkElement] -and $el.Tag -is [string] -and @('IPPuck', 'StudentPuck', 'IPSlot', 'StudentSlot') -contains $el.Tag) { return $false }
                                 $el = Get-PBParent $el
                 }
@@ -369,10 +417,16 @@ function Initialize-PBTimers {
                 $sheet.Add_Tick({ Invoke-PBSafe { Invoke-PBSheetTick } })
                 $script:PB.SheetTimer = $sheet
 
+                # Ranks every student for the selected line, a few at a time
+                $details = New-Object System.Windows.Threading.DispatcherTimer
+                $details.Interval = [TimeSpan]::FromMilliseconds(30)
+                $details.Add_Tick({ Invoke-PBSafe { Invoke-PBDetailsTick } })
+                $script:PB.DetailsTimer = $details
+
                 $w.Add_Closing({
                                 param($s, $e)
                                 Invoke-PBSafe {
-                                                foreach ($t in @($script:PB.AssessTimer, $script:PB.SaveTimer, $script:PB.PopupTimer, $script:PB.HeatTimer, $script:PB.SheetTimer)) { $t.Stop() }
+                                                foreach ($t in @($script:PB.AssessTimer, $script:PB.SaveTimer, $script:PB.PopupTimer, $script:PB.HeatTimer, $script:PB.SheetTimer, $script:PB.DetailsTimer)) { $t.Stop() }
                                                 Save-PBBoard
                                 }
                 })
@@ -384,6 +438,13 @@ function Register-PBHandlers {
 
                 $w.AddHandler([System.Windows.UIElement]::PreviewMouseLeftButtonDownEvent,
                                 [System.Windows.Input.MouseButtonEventHandler]{ param($s, $e) Invoke-PBSafe { Invoke-PBMouseDown $e } }, $true)
+                $w.AddHandler([System.Windows.UIElement]::PreviewMouseLeftButtonUpEvent,
+                                [System.Windows.Input.MouseButtonEventHandler]{ param($s, $e) Invoke-PBSafe { Invoke-PBMouseUp $e } }, $true)
+                # A right-click selects the line too, so the Line menu and its keys act on the line clicked
+                $w.AddHandler([System.Windows.UIElement]::PreviewMouseRightButtonDownEvent,
+                                [System.Windows.Input.MouseButtonEventHandler]{ param($s, $e) Invoke-PBSafe { Select-PBLineAt $e.OriginalSource } }, $true)
+                $w.AddHandler([System.Windows.Input.Keyboard]::GotKeyboardFocusEvent,
+                                [System.Windows.Input.KeyboardFocusChangedEventHandler]{ param($s, $e) Invoke-PBSafe { if (-not $script:PB.Busy) { Select-PBLineAt $e.NewFocus } } }, $true)
                 $w.AddHandler([System.Windows.UIElement]::PreviewMouseMoveEvent,
                                 [System.Windows.Input.MouseEventHandler]{ param($s, $e) Invoke-PBSafe { Invoke-PBMouseMove $e } }, $true)
                 $w.AddHandler([System.Windows.UIElement]::DragEnterEvent,
@@ -409,23 +470,81 @@ function Register-PBHandlers {
                 $C.UpdateSyllabiButton.Add_Click({ Invoke-PBSafe { Invoke-PBUpdateSyllabi } })
                 $C.UndoButton.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'Undo' } } })
                 $C.HelpButton.Add_Click({ Invoke-PBSafe { Show-PBHelp } })
+                $C.ColorKeyButton.Add_Click({ Invoke-PBSafe { Show-PBColorKey } })
+                $C.HoldLetGoButton.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'LetGo' } } })
                 $C.LoadTemplateButton.Add_Click({ Invoke-PBSafe { Invoke-PBLoadTemplate } })
                 $C.SaveTemplateButton.Add_Click({ Invoke-PBSafe { Invoke-PBSaveTemplate } })
                 $C.CopyPrevDayButton.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'CopyPrevDay' } } })
                 $C.LoadDayButton.Add_Click({ Invoke-PBSafe { Invoke-PBLoadDayDialog } })
                 $C.SheetBannerLoadButton.Add_Click({ Invoke-PBSafe { Invoke-PBSheetBannerLoad } })
                 $C.SheetBannerIgnoreButton.Add_Click({ Invoke-PBSafe { Invoke-PBSheetBannerIgnore } })
-                $C.FillDayOnlyCheck.Add_Checked({ Invoke-PBSafe { Update-PBFillScope } })
-                $C.FillDayOnlyCheck.Add_Unchecked({ Invoke-PBSafe { Update-PBFillScope } })
                 $C.AddDayButton.Add_Click({ Invoke-PBSafe { Invoke-PBAddDay } })
                 $C.RemoveDayButton.Add_Click({ Invoke-PBSafe { Invoke-PBRemoveDay } })
-                $C.FillButton.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'Fill' } } })
+                $C.FillDayButton.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'Fill'; Scope = 'Day' } } })
+                $C.FillAllButton.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'Fill'; Scope = 'All' } } })
                 $C.RefillButton.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'Fill'; Refill = $true } } })
-                $C.BackToEditButton.Add_Click({ Invoke-PBSafe { Exit-PBReview; Update-PBAll; Set-PBStatus 'Back to editing. The fill was discarded.' } })
+                $C.BackToEditButton.Add_Click({ Invoke-PBSafe { Invoke-PBBackToEdit } })
                 $C.ExportButton.Add_Click({ Invoke-PBSafe { Invoke-PBExport } })
                 $C.CancelButton.Add_Click({ Invoke-PBSafe { Invoke-PBCancel } })
                 $C.IPSearchBox.Add_TextChanged({ Invoke-PBSafe { Update-PBPools } })
                 $C.StudentSearchBox.Add_TextChanged({ Invoke-PBSafe { Update-PBPools } })
+
+                # Line details panel
+                $C.DetailsHideButton.Add_Click({ Invoke-PBSafe { Show-PBDetailsPanel -Visible $false } })
+                $C.DetailsPlaceButton.Add_Click({ Invoke-PBSafe { Invoke-PBDetailsPlace } })
+                $C.DetailsHideHardCheck.Add_Checked({ Invoke-PBSafe { Update-PBDetailsFilter } })
+                $C.DetailsHideHardCheck.Add_Unchecked({ Invoke-PBSafe { Update-PBDetailsFilter } })
+                $C.DetailsList.Add_SelectionChanged({ Invoke-PBSafe { Invoke-PBDetailsPick } })
+                $C.DetailsList.Add_MouseDoubleClick({
+                                param($s, $e)
+                                Invoke-PBSafe { if ($null -ne (Find-PBTagged $e.OriginalSource @('Candidate'))) { Invoke-PBDetailsPlace } }
+                })
+}
+
+# The menu bar. Each item does what its button, key or right-click item does.
+function Register-PBMenuHandlers {
+                $C = $script:PB.C
+
+                $C.MenuLoadDay.Add_Click({ Invoke-PBSafe { Invoke-PBLoadDayDialog } })
+                $C.MenuSaveTemplate.Add_Click({ Invoke-PBSafe { Invoke-PBSaveTemplate } })
+                $C.MenuCopyPrevDay.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'CopyPrevDay' } } })
+                $C.MenuUpdateSyllabi.Add_Click({ Invoke-PBSafe { Invoke-PBUpdateSyllabi } })
+                $C.MenuClose.Add_Click({ Invoke-PBSafe { Invoke-PBCancel } })
+                $C.MenuUndo.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'Undo' } } })
+                $C.MenuTypeLines.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'FocusQuickEntry' } } })
+                $C.MenuBulkLines.Add_Click({ Invoke-PBSafe { Invoke-PBBulkLines } })
+                $C.MenuRecheck.Add_Click({ Invoke-PBSafe { Invoke-PBRecheck } })
+                $C.MenuLetGo.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'LetGo' } } })
+                $C.MenuPrevDay.Add_Click({ Invoke-PBSafe { Select-PBDayOffset -1 } })
+                $C.MenuNextDay.Add_Click({ Invoke-PBSafe { Select-PBDayOffset 1 } })
+                $C.MenuAddNextDay.Add_Click({ Invoke-PBSafe { Invoke-PBAddDay -AddDate (Get-PBNextBoardDay) } })
+                $C.MenuAddPickedDay.Add_Click({ Invoke-PBSafe { Invoke-PBAddDay } })
+                $C.MenuRemoveDay.Add_Click({ Invoke-PBSafe { Invoke-PBRemoveDay } })
+                $C.MenuFillDay.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'Fill'; Scope = 'Day' } } })
+                $C.MenuFillAll.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'Fill'; Scope = 'All' } } })
+                $C.MenuRefill.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'Fill'; Refill = $true } } })
+                $C.MenuBackToEdit.Add_Click({ Invoke-PBSafe { Invoke-PBBackToEdit } })
+                $C.MenuExport.Add_Click({ Invoke-PBSafe { Invoke-PBExport } })
+                $C.MenuShowDetails.Add_Checked({ Invoke-PBSafe { Show-PBDetailsPanel -Visible $true } })
+                $C.MenuShowDetails.Add_Unchecked({ Invoke-PBSafe { Show-PBDetailsPanel -Visible $false } })
+                $C.MenuColorKey.Add_Click({ Invoke-PBSafe { Show-PBColorKey } })
+                $C.MenuHelpColorKey.Add_Click({ Invoke-PBSafe { Show-PBColorKey } })
+                $C.MenuHelp.Add_Click({ Invoke-PBSafe { Show-PBHelp } })
+
+                # SubmenuOpened bubbles up from nested submenus too ("Fly wing to..."): only rebuild
+                # a menu when it is the one opening, never while one of its own submenus opens
+                $C.MenuLine.Add_SubmenuOpened({
+                                param($s, $e)
+                                Invoke-PBSafe { if ([object]::ReferenceEquals($e.OriginalSource, $script:PB.C.MenuLine)) { Update-PBLineMenu } }
+                })
+                $C.MenuApplyTemplate.Add_SubmenuOpened({
+                                param($s, $e)
+                                Invoke-PBSafe { if ([object]::ReferenceEquals($e.OriginalSource, $script:PB.C.MenuApplyTemplate)) { Update-PBTemplateMenu } }
+                })
+                $C.MainMenu.AddHandler([System.Windows.Controls.MenuItem]::SubmenuOpenedEvent, [System.Windows.RoutedEventHandler]{
+                                param($s, $e)
+                                Invoke-PBSafe { if ($script:PB.C.MainMenu.Items.Contains($e.OriginalSource)) { Update-PBMenuState } }
+                })
 }
 
 # Board changes asked for from inside an element's event run right after that event
@@ -505,11 +624,14 @@ function Update-PBAll {
                 $script:PB.Busy = $true
                 try {
                                 Update-PBTabs
+                                Sync-PBSelection -NoRedraw
                                 foreach ($day in $script:PB.Board.Days) { Update-PBDay $day }
                                 Update-PBPools
                                 Update-PBCounts
                                 Update-PBFillScope
                                 Update-PBSheetBanner
+                                Update-PBDetails
+                                Update-PBHeldHeat
                 } finally { $script:PB.Busy = $false }
 }
 
@@ -598,22 +720,39 @@ function Test-PBAssessmentFresh {
 }
 
 # Missions offered in a pinned line's dropdown: (auto), the events the student can fly here,
-# the next ones they aren't opted for yet (marked), and "Type a mission..."
+# the next ones they aren't opted for yet (tagged), and "Type a mission...". Both lists come
+# from the line's assessment, which sees the student's other lines on the board, so the tags
+# agree with the flags. Until it is in: the events they are opted for in MasterData, no tags.
 function Get-PBMissionChoices {
                 param ($Line)
 
                 $a = Get-PBCurrentAssessment $Line
-                $student = Resolve-StudentByName -Students $script:PB.Data.Students -Name $Line.Student
                 $names = @()
-                if ($null -ne $a -and @($a.EligibleEvents).Count -gt 0) { $names = @($a.EligibleEvents) }
+                $notOpted = @()
+                if ($null -ne $a -and -not $a.Quick) {
+                                $names = @($a.EligibleEvents)
+                                $notOpted = @($a.NotOptedEvents)
+                }
                 else {
+                                $student = Resolve-StudentByName -Students $script:PB.Data.Students -Name $Line.Student
                                 $types = Get-AllowedEventTypes ([string]$Line.SortieType)
                                 if ($null -ne $student -and $null -ne $types) {
                                                 $names = @(Get-OptedEvents -SyllabusData $student.Syllabus | Where-Object { ([string]$_.Type).Trim() -in $types } |
                                                                 Sort-Object -Property { Get-SyllabusSortKey $_ } | ForEach-Object { [string]$_.Mission })
                                 }
                 }
-                return @(Get-MissionChoiceTexts -Student $student -SortieType ([string]$Line.SortieType) -Eligible $names -Current ([string]$Line.Mission))
+                return @(Get-MissionChoiceTexts -Eligible $names -Current ([string]$Line.Mission) -NotOpted $notOpted)
+}
+
+# What picking -Value in a row's mission dropdown asks for: a ChooseMission command, or $null
+# when nothing changes ((auto) on an (auto) line, the line's own mission again, a disabled row)
+function Get-PBMissionCommand {
+                param ($VM, [string]$Value)
+
+                if ($null -eq $VM -or -not $VM.MissionEnabled -or @($VM.MissionOptions) -notcontains $Value) { return $null }
+                $choice = ConvertFrom-MissionChoiceText $Value
+                if ($choice.Kind -ne 'Type' -and $choice.Mission -ceq [string]$VM.MissionRaw) { return $null }
+                return @{ Cmd = 'ChooseMission'; LineId = [string]$VM.LineId; Value = $Value }
 }
 
 # The view model a row's DataTemplate binds to
@@ -713,12 +852,12 @@ function New-PBLineVM {
                 $notes = [string]$Line.Notes
                 $readOnly = $false
                 $notesFg = '#0F172A'
-                $rowBg = '#FFFFFF'
                 $csTip = 'Blank = the IP''s callsign (formations get FormCallsigns)'
                 if ($review -and $null -ne $ov) {
                                 $callsign = $ov.Callsign; $num = $ov.Num; $notes = $ov.Notes; $readOnly = $true
-                                if ($ov.Override) { $notesFg = '#B91C1C'; $rowBg = '#FEF2F2' }
+                                if ($ov.Override) { $notesFg = '#B91C1C' }
                 }
+                $rowColors = Get-PBRowColors -Line $Line -Selected ([string]$Line.Id -eq [string]$script:PB.SelectedLineId)
 
                 return [PSCustomObject]@{
                                 LineId                 = $Line.Id
@@ -755,9 +894,27 @@ function New-PBLineVM {
                                 NotesToolTip           = $(if ([string]::IsNullOrWhiteSpace($notes)) { $null } else { $notes })
                                 ReadOnlyFields         = $readOnly
                                 CallsignToolTip        = $csTip
-                                RowBackground          = $rowBg
+                                RowBackground          = $rowColors.Background
+                                RowBorder              = $rowColors.Border
                                 IsReturn               = $isReturn
                 }
+}
+
+# A row's fill and outline: pink for an OVERRIDE in review, a blue outline (and tint) when selected
+function Get-PBRowColors {
+                param ($Line, [bool]$Selected)
+
+                $bg = '#FFFFFF'
+                $border = '#E2E8F0'
+                if ($script:PB.Mode -eq 'Review' -and $null -ne $script:PB.Overlay) {
+                                $ov = $script:PB.Overlay[$Line.Id]
+                                if ($null -ne $ov -and $ov.Override) { $bg = '#FEF2F2' }
+                }
+                if ($Selected) {
+                                $border = '#2563EB'
+                                if ($bg -eq '#FFFFFF') { $bg = '#EFF6FF' }
+                }
+                return @{ Background = $bg; Border = $border }
 }
 
 function Update-PBPools {
@@ -765,16 +922,22 @@ function Update-PBPools {
                 $board = $script:PB.Board
                 $C = $script:PB.C
 
+                # A puck picked up with a click gets a thick dark outline
+                $held = $script:PB.Held
+                $clickTip = "`nClick to pick up, then click a slot. Double-click puts it on the selected line."
                 $ipFilter = ([string]$C.IPSearchBox.Text).Trim()
                 $ipVMs = foreach ($ip in @($script:PB.Data.Instructors | Sort-Object -Property Name)) {
                                 if ($ipFilter -and ([string]$ip.Name -notlike "*$ipFilter*") -and ([string]$ip.Callsign -notlike "*$ipFilter*")) { continue }
                                 $info = Get-InstructorPuckInfo -Instructor $ip -Board $board -Day $day
+                                $isHeld = ($null -ne $held -and $held.Kind -eq 'IP' -and [string]$held.Name -eq [string]$info.Name)
                                 [PSCustomObject]@{
                                                 Name            = $info.Name
                                                 SubText         = ("{0}  {1}" -f $info.Callsign, ($info.Badges -join ' ')).Trim()
                                                 CountText       = "x$($info.Lines)"
                                                 CountVisibility = $(if ($info.Lines -gt 0) { 'Visible' } else { 'Collapsed' })
-                                                ToolTipText     = $(if ($info.Lines -gt 0) { "On $($info.Lines) line(s) this day: $($info.Times -join ', ')" } else { 'Not on any line this day' })
+                                                ToolTipText     = $(if ($info.Lines -gt 0) { "On $($info.Lines) line(s) this day: $($info.Times -join ', ')" } else { 'Not on any line this day' }) + $clickTip
+                                                BorderBrush     = $(if ($isHeld) { '#1E3A8A' } else { '#93C5FD' })
+                                                PuckBorderThickness = $(if ($isHeld) { '3' } else { '1' })
                                 }
                 }
                 $C.IPPool.ItemsSource = @($ipVMs)
@@ -791,6 +954,9 @@ function Update-PBPools {
                                 $tip = @("Next: $($info.Next)", ("Sim debt: {0:0.##}" -f $info.SimDebt), "Priority: $($s.Priority)")
                                 if ($info.Badges.Count -gt 0) { $tip += "Flags: $($info.Badges -join ', ')" }
                                 foreach ($a in $info.Absences) { $tip += "Absent $a" }
+                                $tip += $clickTip.Trim()
+                                $isHeld = ($null -ne $held -and $held.Kind -eq 'Student' -and [string]$held.Name -eq [string]$info.Name)
+                                if ($isHeld) { $bd = '#1D4ED8' }
                                 [PSCustomObject]@{
                                                 Name            = $info.Name
                                                 SubText         = ("next {0}   debt {1:0.#}" -f $info.Next, $info.SimDebt)
@@ -801,6 +967,7 @@ function Update-PBPools {
                                                 TurnsBrush      = $turnsBrush
                                                 Background      = $bg
                                                 BorderBrush     = $bd
+                                                PuckBorderThickness = $(if ($isHeld) { '3' } else { '1' })
                                                 ToolTipText     = ($tip -join "`n")
                                 }
                 }
@@ -829,8 +996,7 @@ function Set-PBMode {
                 $C = $script:PB.C
                 $script:PB.Mode = $Mode
                 $review = ($Mode -eq 'Review')
-                $C.FillButton.Visibility = if ($review) { 'Collapsed' } else { 'Visible' }
-                $C.FillDayOnlyCheck.Visibility = if ($review) { 'Collapsed' } else { 'Visible' }
+                Update-PBFillScope
                 foreach ($b in @($C.BackToEditButton, $C.RefillButton, $C.ExportButton)) { $b.Visibility = if ($review) { 'Visible' } else { 'Collapsed' } }
                 $C.ModeBanner.Visibility = if ($review) { 'Visible' } else { 'Collapsed' }
                 if ($review) {
@@ -912,13 +1078,20 @@ function Invoke-PBMouseDown {
                 param ($e)
 
                 $script:PB.Drag = $null
+                $script:PB.Press = $null
                 if ($script:PB.Filling) { $e.Handled = $true; return }
                 # The pop-up never blocks the click that dismisses it
                 if ($script:PB.C.DropPopup.IsOpen) { Close-PBPopup }
                 $src = $e.OriginalSource
+                # A click anywhere on a line (its boxes included) selects it for the Line details panel
+                Select-PBLineAt $src
                 if (Test-PBInsideInput $src) { return }
                 $el = Find-PBTagged $src
                 if ($null -eq $el) { return }
+                # A press and release on the same puck or slot without dragging is a click (Invoke-PBMouseUp)
+                if (@('IPPuck', 'StudentPuck', 'IPSlot', 'StudentSlot') -contains [string]$el.Tag) {
+                                $script:PB.Press = @{ Element = $el; Count = $e.ClickCount }
+                }
                 $vm = $el.DataContext
                 $kind = $null; $name = $null; $from = ''
                 switch ([string]$el.Tag) {
@@ -949,7 +1122,11 @@ function Invoke-PBMouseMove {
                                 [math]::Abs($p.Y - $d.Start.Y) -lt [System.Windows.SystemParameters]::MinimumVerticalDragDistance) { return }
 
                 $d.Active = $true
+                $script:PB.Press = $null
                 $script:PB.PendingDrop = $null
+                # Dragging lets go of a puck picked up with a click (after the drag, so nothing moves under it)
+                $letGo = ($null -ne $script:PB.Held)
+                if ($letGo) { Stop-PBHeat }
                 $payload = "{0}|{1}|{2}" -f $d.Kind, $d.Name, $d.From
                 $data = New-Object System.Windows.DataObject('FAIS.Puck', $payload)
                 if ($d.Kind -eq 'Student') { Start-PBHeat $d }
@@ -960,11 +1137,53 @@ function Invoke-PBMouseMove {
                                 Stop-PBHeat
                                 $script:PB.Drag = $null
                 }
+                if ($letGo) { Request-PBCommand @{ Cmd = 'LetGo'; Quiet = $true } }
                 if ($null -ne $script:PB.PendingDrop) {
                                 $drop = $script:PB.PendingDrop
                                 $script:PB.PendingDrop = $null
                                 Request-PBCommand $drop
                 }
+}
+
+# A click (press and release on the same puck or slot, no drag). On a puck: pick it up, or put
+# it down again. Double-click on a puck: put it on the selected line. On a slot while holding a
+# puck: put the puck there (Ctrl keeps holding it, for the next slot).
+function Invoke-PBMouseUp {
+                param ($e)
+
+                $press = $script:PB.Press
+                $script:PB.Press = $null
+                if ($null -eq $press -or $script:PB.Filling) { return }
+                $el = Find-PBTagged $e.OriginalSource @('IPPuck', 'StudentPuck', 'IPSlot', 'StudentSlot')
+                if ($null -eq $el -or -not [object]::ReferenceEquals($el, $press.Element)) { return }
+                $vm = $el.DataContext
+                if ($null -eq $vm) { return }
+                $tag = [string]$el.Tag
+                if ($tag -eq 'IPPuck' -or $tag -eq 'StudentPuck') {
+                                $kind = if ($tag -eq 'IPPuck') { 'IP' } else { 'Student' }
+                                if ($press.Count -ge 2) { Request-PBCommand @{ Cmd = 'PlaceOnSelected'; Kind = $kind; Name = [string]$vm.Name } }
+                                else { Request-PBCommand @{ Cmd = 'Hold'; Kind = $kind; Name = [string]$vm.Name } }
+                                return
+                }
+                $keep = ([System.Windows.Input.Keyboard]::Modifiers -band [System.Windows.Input.ModifierKeys]::Control) -eq [System.Windows.Input.ModifierKeys]::Control
+                [void](Request-PBPlaceOnSlot -Slot $el -Keep:$keep)
+}
+
+# Puts the puck being held on a slot (a click, or Enter on a focused slot). Says so when the
+# slot is the wrong kind for the puck.
+function Request-PBPlaceOnSlot {
+                param ($Slot, [switch]$Keep)
+
+                $held = $script:PB.Held
+                if ($null -eq $held -or $null -eq $Slot -or $null -eq $Slot.DataContext) { return $false }
+                $want = if ([string]$Slot.Tag -eq 'IPSlot') { 'IP' } else { 'Student' }
+                if ($held.Kind -ne $want) {
+                                $hint = if ($held.Kind -eq 'IP') { "$($held.Name) is an IP: click a line's IP slot (left of the student)." } else { "$($held.Name) is a student: click a line's student slot." }
+                                Set-PBStatus $hint 'Warn'
+                                return $false
+                }
+                Request-PBCommand @{ Cmd = 'PlaceHeld'; LineId = [string]$Slot.DataContext.LineId; Keep = [bool]$Keep }
+                return $true
 }
 
 # What would happen if the payload were dropped here: a command, or $null
@@ -1096,6 +1315,15 @@ function Invoke-PBKeyDown {
                 $ctrl = ($mods -band [System.Windows.Input.ModifierKeys]::Control) -eq [System.Windows.Input.ModifierKeys]::Control
                 $shift = ($mods -band [System.Windows.Input.ModifierKeys]::Shift) -eq [System.Windows.Input.ModifierKeys]::Shift
                 $KeyT = [System.Windows.Input.Key]
+                # An open menu handles its own keys
+                if ($src -is [System.Windows.Controls.MenuItem]) { return }
+
+                # Ctrl+PgUp / Ctrl+PgDn change day from anywhere, a box being typed in included
+                if ($ctrl -and ($key -eq $KeyT::PageUp -or $key -eq $KeyT::PageDown)) {
+                                Select-PBDayOffset $(if ($key -eq $KeyT::PageUp) { -1 } else { 1 })
+                                $e.Handled = $true
+                                return
+                }
 
                 if ([object]::ReferenceEquals($src, $C.QuickEntryBox) -and $key -eq $KeyT::Enter) {
                                 Invoke-PBQuickEntry
@@ -1121,18 +1349,30 @@ function Invoke-PBKeyDown {
                                 if ($key -eq $KeyT::Escape) { Reset-PBCell $tb; $e.Handled = $true; return }
                                 return
                 }
+                if ($key -eq $KeyT::Escape -and $null -ne $script:PB.Held) { Request-PBCommand @{ Cmd = 'LetGo' }; $e.Handled = $true; return }
                 if ($src -is [System.Windows.Controls.Primitives.TextBoxBase]) { return }
 
-                if ($ctrl -and $key -eq $KeyT::Z) { Request-PBCommand @{ Cmd = 'Undo' }; $e.Handled = $true; return }
-                if ($ctrl -and $key -eq $KeyT::L) { [void]$C.QuickEntryBox.Focus(); $C.QuickEntryBox.SelectAll(); $e.Handled = $true; return }
-                if ($ctrl -and $key -eq $KeyT::Enter) { Request-PBCommand @{ Cmd = 'Fill' }; $e.Handled = $true; return }
-                if ($key -eq $KeyT::F5) {
-                                $script:PB.Assess = @{}
-                                Clear-AssessmentCache
-                                Start-PBAssessQueue
-                                Set-PBStatus 'Re-checking every hardcoded line...'
+                # Arrow keys on a closed mission dropdown open it rather than step through it: moving in the
+                # open list picks nothing until Enter or a click (a pick can ask about a rule break)
+                $combo = $src -as [System.Windows.Controls.ComboBox]
+                if ($null -ne $combo -and [string]$combo.Tag -eq 'MissionBox' -and -not $combo.IsDropDownOpen -and
+                                @($KeyT::Up, $KeyT::Down, $KeyT::Left, $KeyT::Right, $KeyT::Home, $KeyT::End, $KeyT::PageUp, $KeyT::PageDown) -contains $key) {
+                                $combo.IsDropDownOpen = $true
                                 $e.Handled = $true
                                 return
+                }
+
+                $selected = [string]$script:PB.SelectedLineId
+                if ($ctrl -and $key -eq $KeyT::Z) { Request-PBCommand @{ Cmd = 'Undo' }; $e.Handled = $true; return }
+                if ($ctrl -and $key -eq $KeyT::L) { [void]$C.QuickEntryBox.Focus(); $C.QuickEntryBox.SelectAll(); $e.Handled = $true; return }
+                # Ctrl+Enter fills every day, Ctrl+Shift+Enter only the day on screen
+                if ($ctrl -and $key -eq $KeyT::Enter) { Request-PBCommand @{ Cmd = 'Fill'; Scope = $(if ($shift) { 'Day' } else { 'All' }) }; $e.Handled = $true; return }
+                if ($ctrl -and $key -eq $KeyT::D -and $selected) { Request-PBCommand @{ Cmd = 'DuplicateLine'; LineId = $selected }; $e.Handled = $true; return }
+                if ($ctrl -and $key -eq $KeyT::Delete -and $selected) { Request-PBCommand @{ Cmd = 'DeleteLine'; LineId = $selected }; $e.Handled = $true; return }
+                if ($key -eq $KeyT::F5) { Invoke-PBRecheck; $e.Handled = $true; return }
+                if ($key -eq $KeyT::Enter -and $null -ne $script:PB.Held) {
+                                $slot = Find-PBTagged ([System.Windows.Input.Keyboard]::FocusedElement) @('IPSlot', 'StudentSlot')
+                                if ($null -ne $slot) { [void](Request-PBPlaceOnSlot -Slot $slot -Keep:$ctrl); $e.Handled = $true; return }
                 }
                 if ($key -eq $KeyT::Delete) {
                                 $slot = Find-PBTagged ([System.Windows.Input.Keyboard]::FocusedElement) @('IPSlot', 'StudentSlot')
@@ -1205,10 +1445,13 @@ function Invoke-PBSelectionChanged {
                 if ([object]::ReferenceEquals($src, $script:PB.C.DayTabs)) {
                                 Close-PBPopup
                                 $script:PB.LastFocusDay = Get-PBActiveDay
+                                Sync-PBSelection
                                 Update-PBPools
                                 Update-PBCounts
                                 Update-PBFillScope
                                 Update-PBSheetBanner
+                                Update-PBDetails
+                                Update-PBHeldHeat
                                 return
                 }
                 $cb = $src -as [System.Windows.Controls.ComboBox]
@@ -1221,10 +1464,9 @@ function Invoke-PBSelectionChanged {
                                                 if ($value -and $value -ne $vm.SortieType) { Request-PBCommand @{ Cmd = 'SetType'; LineId = $vm.LineId; Value = $value } }
                                 }
                                 'MissionBox' {
-                                                if (@($vm.MissionOptions) -notcontains $value -or -not $vm.MissionEnabled) { return }
                                                 # Checked (and typed, for "Type a mission...") after this event, not inside it
-                                                $choice = ConvertFrom-MissionChoiceText $value
-                                                if ($choice.Kind -eq 'Type' -or $choice.Mission -ne $vm.MissionRaw) { Request-PBCommand @{ Cmd = 'ChooseMission'; LineId = $vm.LineId; Value = $value } }
+                                                $cmd = Get-PBMissionCommand -VM $vm -Value $value
+                                                if ($null -ne $cmd) { Request-PBCommand $cmd }
                                 }
                 }
 }
@@ -1395,10 +1637,11 @@ function Show-PBPlacementPopup {
 }
 
 function New-PBMenuItem {
-                param ([string]$Header, [hashtable]$Command)
+                param ([string]$Header, [hashtable]$Command, [string]$Gesture = '')
 
                 $mi = New-Object System.Windows.Controls.MenuItem
                 $mi.Header = $Header
+                if ($Gesture) { $mi.InputGestureText = $Gesture }
                 if ($null -ne $Command) {
                                 $mi.Tag = $Command
                                 $mi.Add_Click({ param($s, $a) Invoke-PBSafe { Request-PBCommand $s.Tag } })
@@ -1421,6 +1664,8 @@ function Invoke-PBContextMenuOpening {
 }
 
 # Fills a slot's / row's right-click menu
+# -Tag Line is the menu bar's Line menu: everything for the student and the IP, with the keys
+# that act on the selected line
 function Set-PBMenuItems {
                 param ($Menu, [string]$Tag, $Line)
 
@@ -1428,8 +1673,19 @@ function Set-PBMenuItems {
                 $id = $Line.Id
                 $review = ($script:PB.Mode -eq 'Review')
                 $canFormate = Test-IsWingCapableType ([string]$Line.SortieType)
+                $isReturn = Test-IsReturnSortieType ([string]$Line.SortieType)
+                $forStudent = ($Tag -eq 'StudentSlot' -or $Tag -eq 'Line')
+                $forIP = ($Tag -eq 'IPSlot' -or $Tag -eq 'Line')
 
-                if ($Tag -eq 'StudentSlot') {
+                [void]$Menu.Items.Add((New-PBMenuItem 'Show in Line details' @{ Cmd = 'ShowDetails'; LineId = $id }))
+                # The puck picked up with a click can go here too
+                $held = $script:PB.Held
+                if ($null -ne $held -and -not $isReturn -and (($held.Kind -eq 'Student' -and ($forStudent -or $Tag -eq 'Row')) -or ($held.Kind -eq 'IP' -and ($forIP -or $Tag -eq 'Row')))) {
+                                [void]$Menu.Items.Add((New-PBMenuItem "Put $($held.Name) on this line" @{ Cmd = 'PlaceHeld'; LineId = $id }))
+                }
+                [void]$Menu.Items.Add((New-Object System.Windows.Controls.Separator))
+
+                if ($forStudent) {
                                 if ($Line.Student) {
                                                 [void]$Menu.Items.Add((New-PBMenuItem "Explain $($Line.Student) on this line" @{ Cmd = 'Explain'; LineId = $id }))
                                                 [void]$Menu.Items.Add((New-PBMenuItem 'Take student off this line' @{ Cmd = 'RemoveStudent'; LineId = $id }))
@@ -1452,13 +1708,14 @@ function Set-PBMenuItems {
                                                 [void]$Menu.Items.Add((New-PBMenuItem "Hardcode $($ov.Student) on $($ov.Mission) here" @{ Cmd = 'PinStudent'; LineId = $id; Name = $ov.Student; Mission = $ov.Mission }))
                                 }
                 }
-                if ($Tag -eq 'IPSlot' -and $Line.Instructor) {
+                if ($forIP -and $Line.Instructor) {
                                 [void]$Menu.Items.Add((New-PBMenuItem "Take $($Line.Instructor) off this line" @{ Cmd = 'RemoveIP'; LineId = $id }))
                 }
-                if ($Menu.Items.Count -gt 0) { [void]$Menu.Items.Add((New-Object System.Windows.Controls.Separator)) }
-                [void]$Menu.Items.Add((New-PBMenuItem 'Duplicate line' @{ Cmd = 'DuplicateLine'; LineId = $id }))
+                if ($Menu.Items[$Menu.Items.Count - 1] -isnot [System.Windows.Controls.Separator]) { [void]$Menu.Items.Add((New-Object System.Windows.Controls.Separator)) }
+                $keys = ($Tag -eq 'Line')
+                [void]$Menu.Items.Add((New-PBMenuItem 'Duplicate line' @{ Cmd = 'DuplicateLine'; LineId = $id } -Gesture $(if ($keys) { 'Ctrl+D' } else { '' })))
                 if ($Line.LinkedLineId) { [void]$Menu.Items.Add((New-PBMenuItem 'Unlink O&B / return' @{ Cmd = 'Unlink'; LineId = $id })) }
-                [void]$Menu.Items.Add((New-PBMenuItem 'Delete line' @{ Cmd = 'DeleteLine'; LineId = $id }))
+                [void]$Menu.Items.Add((New-PBMenuItem 'Delete line' @{ Cmd = 'DeleteLine'; LineId = $id } -Gesture $(if ($keys) { 'Ctrl+Delete' } else { '' })))
 }
 
 
@@ -1522,6 +1779,9 @@ function Invoke-PBCommand {
                                                 $lines = @($Cmd.Lines)
                                                 $links = if ($Cmd.ContainsKey('Links')) { @($Cmd.Links) } else { @() }
                                                 Invoke-PBChange { Add-BoardLine -Board $board -Line $lines -Link $links } -Status $Cmd.Status
+                                                # A student typed with a mission (sp: m:): show the rule check, like a pick in the dropdown
+                                                $typed = @($lines | Where-Object { $null -ne $_ -and $_.Student -and $_.Mission } | Select-Object -First 1)
+                                                if ($typed.Count -gt 0) { Show-PBPlacementPopup ([string]$typed[0].Id) }
                                 }
                                 'Undo' {
                                                 $wasReview = ($script:PB.Mode -eq 'Review')
@@ -1536,8 +1796,849 @@ function Invoke-PBCommand {
                                                 }
                                 }
                                 'CopyPrevDay' { Invoke-PBCopyPrevDay }
-                                'Fill' { Invoke-PBFill -Refill:([bool]$Cmd.Refill) }
+                                'Fill' { Invoke-PBFill -Refill:([bool]$Cmd.Refill) -Scope $(if ($Cmd.Scope -eq 'Day') { 'Day' } else { 'All' }) }
+                                # Click and place
+                                'Hold' { Set-PBHeld -Kind $Cmd.Kind -Name $Cmd.Name }
+                                'LetGo' { Clear-PBHeld -Quiet:([bool]$Cmd.Quiet) }
+                                'PlaceHeld' {
+                                                $held = $script:PB.Held
+                                                if ($null -ne $held) { Invoke-PBPlace -Kind $held.Kind -Name $held.Name -LineId $id -KeepHolding:([bool]$Cmd.Keep) }
+                                }
+                                'PlaceOnSelected' {
+                                                $sel = [string]$script:PB.SelectedLineId
+                                                if (-not $sel -or $null -eq (Get-BoardLine $board $sel)) {
+                                                                Set-PBStatus "Click a line first, then double-click $($Cmd.Name) to put them on it (or click a slot while holding $($Cmd.Name))." 'Warn'
+                                                }
+                                                else { Invoke-PBPlace -Kind $Cmd.Kind -Name $Cmd.Name -LineId $sel }
+                                }
+                                'PlaceOnLine' { Invoke-PBPlace -Kind $Cmd.Kind -Name $Cmd.Name -LineId $id }
+                                'ShowDetails' {
+                                                Select-PBLine $id
+                                                Show-PBDetailsPanel -Visible $true
+                                }
+                                'FocusQuickEntry' { [void]$script:PB.C.QuickEntryBox.Focus(); $script:PB.C.QuickEntryBox.SelectAll() }
                 }
+}
+
+
+# =================================================================================
+#  CLICK AND PLACE
+#  A click on a puck picks it up (PB.Held): its outline goes thick, the banner says so and, for
+#  a student, the slots turn green / amber / red like a drag. The next slot clicked gets it.
+#  A double-click on a puck puts it straight on the selected line. Esc lets go.
+# =================================================================================
+
+# Picks a puck up, or lets go of it when it is the one already held
+function Set-PBHeld {
+                param ([string]$Kind, [string]$Name)
+
+                $held = $script:PB.Held
+                if ($null -ne $held -and $held.Kind -eq $Kind -and $held.Name -eq $Name) { Clear-PBHeld; return }
+                Stop-PBHeat
+                $script:PB.Held = @{ Kind = $Kind; Name = $Name }
+                Update-PBPools
+                Update-PBHoldBanner
+                Update-PBHeldHeat
+                $where = if ($Kind -eq 'Student') { 'a student slot' } else { "a line's IP slot" }
+                Set-PBStatus "Holding $Name. Click $where to put them there, or press Esc to let go."
+}
+
+function Clear-PBHeld {
+                param ([switch]$Quiet)
+
+                $held = $script:PB.Held
+                if ($null -eq $held) { return }
+                $script:PB.Held = $null
+                Stop-PBHeat
+                Update-PBPools
+                Update-PBHoldBanner
+                if (-not $Quiet) { Set-PBStatus "Let go of $($held.Name)." }
+}
+
+function Update-PBHoldBanner {
+                $C = $script:PB.C
+                $held = $script:PB.Held
+                if ($null -eq $held) { $C.HoldBanner.Visibility = 'Collapsed'; return }
+                $C.HoldBannerText.Text = if ($held.Kind -eq 'Student') {
+                                "Holding $($held.Name): click a student slot to put them there (green fits, amber needs a look, red breaks a rule). Hold Ctrl as you click to keep holding them for another line."
+                }
+                else {
+                                "Holding $($held.Name): click a line's IP slot to put them there. Hold Ctrl as you click to keep holding them for another line."
+                }
+                $C.HoldBanner.Visibility = 'Visible'
+}
+
+# Colors the slots for a student being held (again after the rows are redrawn)
+function Update-PBHeldHeat {
+                $held = $script:PB.Held
+                if ($null -eq $held -or $held.Kind -ne 'Student') { return }
+                if ($null -ne $script:PB.Drag -and $script:PB.Drag.Active) { return }
+                Stop-PBHeat
+                $script:PB.Window.UpdateLayout()
+                Start-PBHeat @{ Name = [string]$held.Name; From = '' }
+}
+
+# Puts an IP or a student on a line: click and place, a double-click, or the Line details list.
+# The puck held is let go of unless -KeepHolding.
+function Invoke-PBPlace {
+                param ([string]$Kind, [string]$Name, [string]$LineId, [switch]$KeepHolding)
+
+                $line = Get-BoardLine $script:PB.Board $LineId
+                if ($null -eq $line -or [string]::IsNullOrWhiteSpace($Name)) { return }
+                if (Test-IsReturnSortieType ([string]$line.SortieType)) {
+                                Set-PBStatus "$(Format-BoardTime $line.ETD) $($line.SortieType) follows its O&B: put $Name on the O&B line instead." 'Warn'
+                                return
+                }
+                if (-not $KeepHolding -and $null -ne $script:PB.Held) {
+                                # Let go first, so the redraw that follows the change shows the puck put down
+                                $script:PB.Held = $null
+                                Stop-PBHeat
+                                Update-PBHoldBanner
+                }
+                if ($Kind -eq 'IP') { Invoke-PBCommand @{ Cmd = 'SetIP'; LineId = $LineId; Name = $Name } }
+                else {
+                                if ($null -ne $script:PB.Details) { $script:PB.Details.Focus = '' }
+                                Invoke-PBCommand @{ Cmd = 'PinStudent'; LineId = $LineId; Name = $Name }
+                }
+}
+
+
+# =================================================================================
+#  THE SELECTED LINE AND THE LINE DETAILS PANEL
+#  Clicking a line (or right-clicking it, or tabbing into it) selects it: a blue outline, and
+#  the panel under the days shows
+#    - left: the line's student (or the one picked in the list) against the hard rules, the
+#      warnings and the soft-rule score: the same check as the pop-up after a drop;
+#    - right: every student ranked for the line, best first, checked a few at a time
+#      (DetailsTimer). Double-click one, or Put on this line, to hardcode them there.
+# =================================================================================
+
+# Selects the line an element belongs to
+function Select-PBLineAt {
+                param ($Element)
+
+                if ($null -eq $Element) { return }
+                $row = Find-PBTagged $Element @('Row')
+                if ($null -eq $row -or $null -eq $row.DataContext -or $null -eq $row.DataContext.PSObject.Properties['LineId']) { return }
+                Select-PBLine ([string]$row.DataContext.LineId)
+}
+
+function Select-PBLine {
+                param ([string]$LineId)
+
+                $old = [string]$script:PB.SelectedLineId
+                if ($old -eq $LineId) { return }
+                $script:PB.SelectedLineId = $LineId
+                foreach ($id in @($old, $LineId)) { if ($id) { Set-PBRowHighlight -LineId $id } }
+                Update-PBDetails
+}
+
+# Recolors one row for the selection without rebuilding it (a rebuild inside the click that
+# selected it would swallow the click)
+function Set-PBRowHighlight {
+                param ([string]$LineId)
+
+                $line = Get-BoardLine $script:PB.Board $LineId
+                if ($null -eq $line) { return }
+                $el = Get-PBSlotElement -LineId $LineId -Tag 'Row'
+                if ($null -eq $el) { return }
+                $colors = Get-PBRowColors -Line $line -Selected ($LineId -eq [string]$script:PB.SelectedLineId)
+                $el.SetCurrentValue([System.Windows.Controls.Border]::BackgroundProperty, (Get-PBBrush $colors.Background))
+                $el.SetCurrentValue([System.Windows.Controls.Border]::BorderBrushProperty, (Get-PBBrush $colors.Border))
+}
+
+# Drops the selection when its line is gone or is not on the day on screen.
+# -NoRedraw: the caller redraws every row anyway.
+function Sync-PBSelection {
+                param ([switch]$NoRedraw)
+
+                $id = [string]$script:PB.SelectedLineId
+                if (-not $id) { return }
+                $line = Get-BoardLine $script:PB.Board $id
+                if ($null -ne $line -and $line.Day -eq (Get-PBActiveDay)) { return }
+                $script:PB.SelectedLineId = ''
+                if ($null -ne $line -and -not $NoRedraw) {
+                                $script:PB.Busy = $true
+                                try { Update-PBDay $line.Day } finally { $script:PB.Busy = $false }
+                }
+}
+
+# "0730 Day Local  |  IP Jones, Bob  |  Adams, Al on FT5001"
+function Get-PBLineCaption {
+                param ($Line)
+
+                $isSim = Test-IsSimSortieType ([string]$Line.SortieType)
+                $ip = if ($Line.Instructor) { "IP $($Line.Instructor)" } elseif ($isSim) { 'SIM IP' } else { 'no IP yet' }
+                $who = 'no student yet'
+                if ($Line.Student) {
+                                $who = [string]$Line.Student
+                                if ($Line.Mission) { $who += " on $($Line.Mission)" }
+                }
+                elseif (Test-IsReturnSortieType ([string]$Line.SortieType)) { $who = 'flies with its O&B' }
+                elseif ($script:PB.Mode -eq 'Review' -and $null -ne $script:PB.Overlay -and $null -ne $script:PB.Overlay[$Line.Id] -and $script:PB.Overlay[$Line.Id].Student) {
+                                $ov = $script:PB.Overlay[$Line.Id]
+                                $who = ("{0} {1}" -f $ov.Student, $ov.Mission).Trim() + ' (filled by the scheduler)'
+                }
+                return ("{0} {1}   |   {2}   |   {3}" -f (Format-BoardTime $Line.ETD), $Line.SortieType, $ip, $who)
+}
+
+function Initialize-PBDetails {
+                $script:PB.Details = @{
+                                Key           = ''
+                                LineId        = ''
+                                Focus         = ''
+                                Queue         = (New-Object System.Collections.Generic.List[string])
+                                All           = (New-Object System.Collections.Generic.List[object])
+                                Items         = (New-Object 'System.Collections.ObjectModel.ObservableCollection[object]')
+                                Total         = 0
+                                ChecksPending = $false
+                }
+                $script:PB.C.DetailsList.ItemsSource = $script:PB.Details.Items
+}
+
+# Shows or hides the panel (the Hide button, View > Line details panel). Its height is kept.
+function Show-PBDetailsPanel {
+                param ([bool]$Visible)
+
+                $C = $script:PB.C
+                if ([bool]$script:PB.DetailsVisible -eq $Visible) { return }
+                $script:PB.DetailsVisible = $Visible
+                $row = $C.CenterGrid.RowDefinitions[3]
+                if ($Visible) {
+                                $row.Height = New-Object System.Windows.GridLength([double]$script:PB.DetailsHeight)
+                                $C.DetailsPanel.Visibility = 'Visible'
+                                $C.DetailsSplitter.Visibility = 'Visible'
+                }
+                else {
+                                if ($row.ActualHeight -gt 60) { $script:PB.DetailsHeight = [double]$row.ActualHeight }
+                                $row.Height = New-Object System.Windows.GridLength(0)
+                                $C.DetailsPanel.Visibility = 'Collapsed'
+                                $C.DetailsSplitter.Visibility = 'Collapsed'
+                }
+                if ([bool]$C.MenuShowDetails.IsChecked -ne $Visible) { $C.MenuShowDetails.IsChecked = $Visible }
+                Update-PBDetails -Force
+}
+
+# Starts the panel over for the selected line, unless it already shows this line as the board
+# is now. -Force starts over anyway.
+function Update-PBDetails {
+                param ([switch]$Force)
+
+                $d = $script:PB.Details
+                if ($null -eq $d) { return }
+                $C = $script:PB.C
+                $id = [string]$script:PB.SelectedLineId
+                $line = if ($id) { Get-BoardLine $script:PB.Board $id } else { $null }
+                $key = if ($null -ne $line -and $script:PB.DetailsVisible) { '{0}|{1}|{2}' -f $id, $script:PB.Board.Version, $script:PB.Mode } else { '' }
+                if (-not $Force -and $key -eq $d.Key) { return }
+                # The student picked in the list stays picked while the same line is shown
+                if ($id -ne $d.LineId) { $d.Focus = '' }
+                $d.Key = $key
+                $d.LineId = $id
+                $d.Queue.Clear()
+                $d.All.Clear()
+                $d.Items.Clear()
+                $d.Total = 0
+                $d.ChecksPending = $false
+                $script:PB.DetailsTimer.Stop()
+                $C.DetailsPlaceButton.IsEnabled = $false
+                if (-not $script:PB.DetailsVisible) { return }
+
+                if ($null -eq $line) {
+                                $C.DetailsTitle.Text = 'Click a line to see who fits it and why.'
+                                Set-PBDetailsChecks @(New-PBDetailsText 'Click anywhere on a line to see its student checked against every hard rule, warning and soft rule, and every student ranked for that line.' -Kind 'Info')
+                                $C.DetailsListInfo.Text = ''
+                                return
+                }
+                $C.DetailsTitle.Text = Get-PBLineCaption $line
+                if (Test-IsReturnSortieType ([string]$line.SortieType)) {
+                                Update-PBDetailsChecks
+                                $C.DetailsListInfo.Text = "Return lines fly with their O&B's student, so nobody is put on them directly."
+                                return
+                }
+                foreach ($s in @($script:PB.Data.Students | Sort-Object -Property Name)) {
+                                if (-not [string]::IsNullOrWhiteSpace([string]$s.Name)) { $d.Queue.Add([string]$s.Name) }
+                }
+                $d.Total = $d.Queue.Count
+                $d.ChecksPending = $true
+                Set-PBDetailsChecks @(New-PBDetailsText 'Checking...' -Kind 'Info')
+                Update-PBDetailsListInfo
+                $script:PB.DetailsTimer.Start()
+}
+
+# Every 30 ms: the left side first, then as many students as fit in 30 ms
+function Invoke-PBDetailsTick {
+                if ($script:PB.Busy -or $script:PB.Draining -or $script:PB.Filling) { return }
+                if ($null -ne $script:PB.Drag -and $script:PB.Drag.Active) { return }
+                $d = $script:PB.Details
+                $line = if ($null -ne $d -and $d.LineId) { Get-BoardLine $script:PB.Board $d.LineId } else { $null }
+                if ($null -eq $line) { $script:PB.DetailsTimer.Stop(); return }
+                # A change the panel was not told about (a note, a callsign): start over
+                if ($d.Key -ne ('{0}|{1}|{2}' -f $d.LineId, $script:PB.Board.Version, $script:PB.Mode)) { Update-PBDetails; return }
+                if ($d.ChecksPending) {
+                                $d.ChecksPending = $false
+                                Update-PBDetailsChecks
+                                return
+                }
+                $sw = [System.Diagnostics.Stopwatch]::StartNew()
+                while ($d.Queue.Count -gt 0 -and $sw.ElapsedMilliseconds -lt 30) {
+                                $name = $d.Queue[0]
+                                $d.Queue.RemoveAt(0)
+                                Add-PBCandidate (New-PBCandidateVM -Line $line -Name $name -Assessment (Get-PBCandidateAssessment -Line $line -Name $name))
+                }
+                Update-PBDetailsListInfo
+                if ($d.Queue.Count -eq 0) { $script:PB.DetailsTimer.Stop() }
+}
+
+# One student on the line: the line's own student with its mission, anyone else on (auto)
+function Get-PBCandidateAssessment {
+                param ($Line, [string]$Name, [string]$Mission = '')
+
+                if (-not $Mission -and $Name -ieq [string]$Line.Student) { $Mission = [string]$Line.Mission }
+                return Get-PlacementAssessment -Board $script:PB.Board -LineId $Line.Id -StudentName $Name -MissionName $Mission -Data $script:PB.Data
+}
+
+function Get-PBCandidateRank {
+                param ([string]$Status)
+
+                switch ($Status) {
+                                'Clean' { return 0 }
+                                'Warn' { return 1 }
+                                'Hard' { return 2 }
+                }
+                return 3
+}
+
+# The biggest + / - score reasons, e.g. "Continue String +10, Exhaustion -6"
+function Get-PBTopScoreReason {
+                param ($Assessment)
+
+                $chosen = $Assessment.EventDetails | Where-Object { $_.Mission -eq $Assessment.Mission } | Select-Object -First 1
+                if ($null -eq $chosen) { return 'Fits' }
+                $top = @($chosen.Breakdown | Where-Object { $_.Points -ne 0 } | Sort-Object -Property { [math]::Abs($_.Points) } -Descending | Select-Object -First 2)
+                if ($top.Count -eq 0) { return 'Fits' }
+                return (@($top | ForEach-Object { '{0} {1:+0.#;-0.#}' -f $_.Label, $_.Points }) -join ', ')
+}
+
+# A row of the "Every student on this line" list
+function New-PBCandidateVM {
+                param ($Line, [string]$Name, $Assessment)
+
+                $a = $Assessment
+                $hard = @($a.Violations | Where-Object { $_.Severity -eq 'Hard' })
+                $soft = @($a.Violations | Where-Object { $_.Severity -ne 'Hard' })
+                $reasonFg = '#475569'
+                if ($hard.Count -gt 0) {
+                                $reason = [string]$hard[0].Message
+                                if ($hard.Count -gt 1) { $reason += " (and $($hard.Count - 1) more)" }
+                                $reasonFg = '#B91C1C'
+                }
+                elseif ($a.Status -eq 'Hard') { $reason = 'No event they can fly fits this line'; $reasonFg = '#B91C1C' }
+                elseif ($soft.Count -gt 0) { $reason = [string]$soft[0].Message; $reasonFg = '#B45309' }
+                elseif (@($a.Notes).Count -gt 0) { $reason = [string]@($a.Notes)[0]; $reasonFg = '#B45309' }
+                else { $reason = Get-PBTopScoreReason $a; $reasonFg = '#15803D' }
+
+                $where = ''
+                $ov = $null
+                if ($script:PB.Mode -eq 'Review' -and $null -ne $script:PB.Overlay) { $ov = $script:PB.Overlay[$Line.Id] }
+                if ($Name -ieq [string]$Line.Student) { $where = '  (on this line)' }
+                elseif ($null -ne $ov -and [string]$ov.Student -ieq $Name) { $where = '  (scheduler''s pick)' }
+                $icon = '!'
+                $iconFg = '#D97706'
+                if ($a.Status -eq 'Clean') { $icon = [string][char]0x2714; $iconFg = '#16A34A' }
+                elseif ($a.Status -ne 'Warn') { $icon = [string][char]0x2716; $iconFg = '#DC2626' }
+                $tip = @(Get-AssessmentLines $a | Where-Object { $_.Kind -ne 'Info' } | ForEach-Object { $_.Text }) -join "`n"
+
+                return [PSCustomObject]@{
+                                StudentName = $Name
+                                NameText    = "$Name$where"
+                                Icon        = $icon
+                                IconBrush   = $iconFg
+                                MissionText = $(if ($a.Mission) { [string]$a.Mission } else { '-' })
+                                ScoreText   = $(if ($null -ne $a.Score) { '{0:+0.0;-0.0;0.0}' -f [double]$a.Score } else { '' })
+                                ReasonText  = $reason
+                                ReasonBrush = $reasonFg
+                                ToolTipText = "$tip`nDouble-click to hardcode $Name on this line."
+                                Rank        = (Get-PBCandidateRank ([string]$a.Status))
+                                SortScore   = $(if ($null -ne $a.Score) { [double]$a.Score } else { [double]::MinValue })
+                                Status      = [string]$a.Status
+                }
+}
+
+# True when -A goes above -B: fits, then warnings, then rule breaks; best score first; then by name
+function Test-PBCandidateBefore {
+                param ($A, $B)
+
+                if ($A.Rank -ne $B.Rank) { return ($A.Rank -lt $B.Rank) }
+                if ($A.SortScore -ne $B.SortScore) { return ($A.SortScore -gt $B.SortScore) }
+                return ([string]::Compare([string]$A.StudentName, [string]$B.StudentName, $true) -lt 0)
+}
+
+# "Hide rule breaks" leaves out the students who break a hard rule
+function Test-PBCandidateShown {
+                param ($Candidate)
+
+                return -not ([bool]$script:PB.C.DetailsHideHardCheck.IsChecked -and $Candidate.Rank -ge 2)
+}
+
+# Puts a student into the list in order, keeping the student picked in it picked
+function Add-PBCandidate {
+                param ($Candidate)
+
+                $d = $script:PB.Details
+                $at = 0
+                while ($at -lt $d.All.Count -and -not (Test-PBCandidateBefore $Candidate $d.All[$at])) { $at++ }
+                $d.All.Insert($at, $Candidate)
+                if (-not (Test-PBCandidateShown $Candidate)) { return }
+                $pos = 0
+                for ($i = 0; $i -lt $at; $i++) { if (Test-PBCandidateShown $d.All[$i]) { $pos++ } }
+                $d.Items.Insert($pos, $Candidate)
+                if ($d.Focus -and $Candidate.StudentName -eq $d.Focus -and $null -eq $script:PB.C.DetailsList.SelectedItem) { $script:PB.C.DetailsList.SelectedItem = $Candidate }
+}
+
+function Update-PBDetailsFilter {
+                $d = $script:PB.Details
+                if ($null -eq $d) { return }
+                $d.Items.Clear()
+                foreach ($cand in $d.All) {
+                                if (-not (Test-PBCandidateShown $cand)) { continue }
+                                $d.Items.Add($cand)
+                                if ($d.Focus -and $cand.StudentName -eq $d.Focus) { $script:PB.C.DetailsList.SelectedItem = $cand }
+                }
+                Update-PBDetailsListInfo
+}
+
+# "Checking 30 of 98 students... 4 fit, 6 with warnings, 20 break a hard rule"
+function Update-PBDetailsListInfo {
+                $d = $script:PB.Details
+                $fit = 0; $warn = 0; $hard = 0
+                foreach ($cand in $d.All) {
+                                if ($cand.Rank -eq 0) { $fit++ } elseif ($cand.Rank -eq 1) { $warn++ } else { $hard++ }
+                }
+                $text = '{0} fit, {1} with warnings, {2} break a hard rule' -f $fit, $warn, $hard
+                if ($d.Queue.Count -gt 0) { $text = "Checking $($d.All.Count) of $($d.Total) students... $text" }
+                else { $text = "$($d.Total) students: $text." }
+                $hidden = $d.All.Count - $d.Items.Count
+                if ($hidden -gt 0) { $text += " ($hidden hidden)" }
+                if ($d.Queue.Count -eq 0) { $text += ' Double-click a student, or pick one and press Put on this line, to hardcode them here.' }
+                $script:PB.C.DetailsListInfo.Text = $text
+}
+
+# A student picked in the list: their check goes on the left
+function Invoke-PBDetailsPick {
+                $d = $script:PB.Details
+                if ($null -eq $d) { return }
+                $item = $script:PB.C.DetailsList.SelectedItem
+                $line = if ($d.LineId) { Get-BoardLine $script:PB.Board $d.LineId } else { $null }
+                $script:PB.C.DetailsPlaceButton.IsEnabled = ($null -ne $item -and $null -ne $line -and -not (Test-IsReturnSortieType ([string]$line.SortieType)) -and
+                                [string]$item.StudentName -ine [string]$line.Student)
+                # The list emptying while it is rebuilt keeps the pick
+                if ($null -eq $item -or [string]$item.StudentName -eq $d.Focus) { return }
+                $d.Focus = [string]$item.StudentName
+                Update-PBDetailsChecks
+}
+
+# Put on this line, or a double-click in the list
+function Invoke-PBDetailsPlace {
+                $item = $script:PB.C.DetailsList.SelectedItem
+                $id = if ($null -ne $script:PB.Details) { [string]$script:PB.Details.LineId } else { '' }
+                if ($null -eq $item -or -not $id) { return }
+                Request-PBCommand @{ Cmd = 'PlaceOnLine'; Kind = 'Student'; Name = [string]$item.StudentName; LineId = $id }
+}
+
+# The left side: who is on the line (or picked in the list) and how they do against every rule
+function Update-PBDetailsChecks {
+                $d = $script:PB.Details
+                $line = if ($d.LineId) { Get-BoardLine $script:PB.Board $d.LineId } else { $null }
+                if ($null -eq $line) { return }
+                $parts = New-Object System.Collections.Generic.List[object]
+
+                if (Test-IsReturnSortieType ([string]$line.SortieType)) {
+                                $ob = if ($line.LinkedLineId) { Get-BoardLine $script:PB.Board $line.LinkedLineId } else { $null }
+                                $parts.Add((New-PBDetailsText 'O&B Return line' -Kind 'Head'))
+                                if ($null -eq $ob) { $parts.Add((New-PBDetailsText 'Not linked to an O&B, so nobody will fly it. Delete it, or type the return again with RTN after its O&B.' -Kind 'Warn')) }
+                                else {
+                                                $who = if ($ob.Student) { "$($ob.Student) is hardcoded on it, so they fly this return too." } else { 'Whoever is put on the O&B flies this return too.' }
+                                                $parts.Add((New-PBDetailsText ("Flies with the {0} O&B. {1}" -f (Format-BoardTime $ob.ETD), $who)))
+                                }
+                                Set-PBDetailsChecks $parts.ToArray()
+                                return
+                }
+
+                $pinned = [string]$line.Student
+                $ov = $null
+                if ($script:PB.Mode -eq 'Review' -and $null -ne $script:PB.Overlay) { $ov = $script:PB.Overlay[$line.Id] }
+                $fromFill = ($null -ne $ov -and -not $pinned -and $ov.Student -and @('Engine', 'Wing', 'DS') -contains [string]$ov.FilledBy)
+                $name = [string]$d.Focus
+                if (-not $name) { $name = $pinned }
+                if (-not $name -and $fromFill) { $name = [string]$ov.Student }
+                if (-not $name) {
+                                if ($null -ne $ov -and [string]$ov.FilledBy -eq 'ForSale') {
+                                                $parts.Add((New-PBDetailsText 'For Sale' -Kind 'Head'))
+                                                $parts.Add((New-PBDetailsText 'No student could fly this line when it was filled. The list on the right shows why each one can''t.'))
+                                }
+                                else {
+                                                $parts.Add((New-PBDetailsText 'Nobody is on this line yet' -Kind 'Head'))
+                                                $parts.Add((New-PBDetailsText 'The scheduler fills it when you press Fill. To hardcode someone, pick a student in the list to see how they would do here, then double-click them (or press Put on this line).'))
+                                }
+                                Set-PBDetailsChecks $parts.ToArray()
+                                return
+                }
+
+                $mission = ''
+                $how = 'if they flew this line'
+                if ($name -ieq $pinned) { $how = 'hardcoded on this line' }
+                elseif ($fromFill -and [string]$ov.Student -ieq $name) { $how = 'picked by the scheduler'; $mission = [string]$ov.Mission }
+                $a = Get-PBCandidateAssessment -Line $line -Name $name -Mission $mission
+                $parts.Add((New-PBDetailsText "$name, $how" -Kind 'Head'))
+                foreach ($p in @(New-PBDetailsSections $a)) { $parts.Add($p) }
+                if ($pinned -and $name -ine $pinned) { $parts.Add((New-PBDetailsText "$pinned is on this line now: pick them in the list to see theirs." -Kind 'Info')) }
+                Set-PBDetailsChecks $parts.ToArray()
+}
+
+# An assessment as headed sections: the verdict, HARD RULES, WARNINGS, SOFT RULES (the score)
+function New-PBDetailsSections {
+                param ($Assessment)
+
+                $a = $Assessment
+                $out = New-Object System.Collections.Generic.List[object]
+                $lines = @(Get-AssessmentLines $a)
+                $hardLines = @($lines | Where-Object { $_.Kind -eq 'Hard' })
+                $warnLines = @($lines | Where-Object { $_.Kind -eq 'Warn' -or $_.Kind -eq 'Note' })
+                $softLines = @($lines | Where-Object { $_.Kind -eq 'Plus' -or $_.Kind -eq 'Minus' })
+                $infoLines = @($lines | Where-Object { $_.Kind -eq 'Info' })
+                $tick = [string][char]0x2714
+                $cross = [string][char]0x2716
+
+                if ($a.Status -eq 'Clean') { $out.Add((New-PBDetailsText "$tick  Passes every hard rule." -Kind 'Good')) }
+                elseif ($a.Status -eq 'Warn') { $out.Add((New-PBDetailsText "$tick  Passes the hard rules, with warnings worth a look." -Kind 'Warn')) }
+                else { $out.Add((New-PBDetailsText "$cross  Breaks a hard rule. Allowed if you hardcode it, but the line is flagged OVERRIDE on the output." -Kind 'Hard')) }
+                $scoreText = if ($null -ne $a.Score) { '{0:+0.0;-0.0;0.0}' -f [double]$a.Score } else { '' }
+                $mission = if ($a.Mission) { [string]$a.Mission } else { 'no event' }
+                $how = if ($a.RequestedMission) { 'hardcoded' } else { 'the best-scoring event that passes, as (auto) picks' }
+                $out.Add((New-PBDetailsText ("Mission {0} ({1}){2}" -f $mission, $how, $(if ($scoreText) { ", score $scoreText" } else { '' }))))
+
+                $out.Add((New-PBDetailsText 'HARD RULES' -Kind 'Section'))
+                if ($hardLines.Count -eq 0 -and $a.Status -eq 'Hard') { $out.Add((New-PBDetailsText "$cross  No event they can fly fits this line" -Kind 'Hard')) }
+                elseif ($hardLines.Count -eq 0) { $out.Add((New-PBDetailsText "$tick  None broken" -Kind 'Good')) }
+                foreach ($ln in $hardLines) { $out.Add((New-PBDetailsText "$cross  $($ln.Text)" -Kind 'Hard')) }
+
+                $out.Add((New-PBDetailsText 'WARNINGS' -Kind 'Section'))
+                if ($warnLines.Count -eq 0) { $out.Add((New-PBDetailsText 'None' -Kind 'Muted')) }
+                foreach ($ln in $warnLines) {
+                                $mark = if ($ln.Kind -eq 'Warn') { [string][char]0x26A0 } else { [string][char]0x2022 }
+                                $out.Add((New-PBDetailsText "$mark  $($ln.Text)" -Kind 'Warn'))
+                }
+
+                $out.Add((New-PBDetailsText ('SOFT RULES' + $(if ($scoreText) { " (SCORE $scoreText)" } else { '' })) -Kind 'Section'))
+                if ($softLines.Count -eq 0) { $out.Add((New-PBDetailsText 'No score reasons' -Kind 'Muted')) }
+                foreach ($ln in $softLines) {
+                                if ($ln.Kind -eq 'Plus') { $out.Add((New-PBDetailsText "+  $($ln.Text)" -Kind 'Good')) }
+                                else { $out.Add((New-PBDetailsText "$([char]0x2212)  $($ln.Text)" -Kind 'Hard')) }
+                }
+                foreach ($ln in $infoLines) { $out.Add((New-PBDetailsText $ln.Text -Kind 'Info')) }
+                return $out.ToArray()
+}
+
+# One line of text in the panel. -Kind: Head, Section, Text, Good, Warn, Hard, Muted, Info
+function New-PBDetailsText {
+                param ([string]$Text, [string]$Kind = 'Text')
+
+                $tb = New-Object System.Windows.Controls.TextBlock
+                $tb.Text = $Text
+                $tb.TextWrapping = [System.Windows.TextWrapping]::Wrap
+                $tb.Margin = New-Object System.Windows.Thickness(0, 1, 0, 1)
+                switch ($Kind) {
+                                'Head' { $tb.FontWeight = [System.Windows.FontWeights]::Bold; $tb.FontSize = 13; $tb.Margin = New-Object System.Windows.Thickness(0, 0, 0, 3) }
+                                'Section' { $tb.FontWeight = [System.Windows.FontWeights]::SemiBold; $tb.FontSize = 10; $tb.Foreground = Get-PBBrush '#64748B'; $tb.Margin = New-Object System.Windows.Thickness(0, 7, 0, 1) }
+                                'Good' { $tb.Foreground = Get-PBBrush '#15803D' }
+                                'Warn' { $tb.Foreground = Get-PBBrush '#B45309' }
+                                'Hard' { $tb.Foreground = Get-PBBrush '#B91C1C'; $tb.FontWeight = [System.Windows.FontWeights]::SemiBold }
+                                'Muted' { $tb.Foreground = Get-PBBrush '#94A3B8'; $tb.FontStyle = [System.Windows.FontStyles]::Italic }
+                                'Info' { $tb.Foreground = Get-PBBrush '#64748B'; $tb.FontStyle = [System.Windows.FontStyles]::Italic; $tb.FontSize = 11 }
+                }
+                return $tb
+}
+
+function Set-PBDetailsChecks {
+                param ([array]$Parts)
+
+                $panel = $script:PB.C.DetailsChecks
+                $panel.Children.Clear()
+                foreach ($p in $Parts) { [void]$panel.Children.Add($p) }
+}
+
+
+# =================================================================================
+#  MENU BAR
+#  The items are wired in Register-PBMenuHandlers. A top menu brings its items up to date as
+#  it opens: what can't be done now is greyed out, and the Day and Fill items name their day.
+# =================================================================================
+
+function Update-PBMenuState {
+                $C = $script:PB.C
+                $review = ($script:PB.Mode -eq 'Review')
+                $active = Get-PBActiveDay
+                $tabs = $C.DayTabs
+                $C.MenuUndo.IsEnabled = ($script:PB.Board.Undo.Count -gt 0)
+                $C.MenuLetGo.IsEnabled = ($null -ne $script:PB.Held)
+                $C.MenuPrevDay.IsEnabled = ($tabs.SelectedIndex -gt 0)
+                $C.MenuNextDay.IsEnabled = ($tabs.SelectedIndex -ge 0 -and $tabs.SelectedIndex -lt $tabs.Items.Count - 1)
+                $C.MenuAddNextDay.Header = "Add the next flying day ($(Format-BoardDayLabel ((Get-PBNextBoardDay).ToString('yyyy-MM-dd'))))"
+                $picked = $C.AddDayPicker.SelectedDate
+                $C.MenuAddPickedDay.IsEnabled = ($null -ne $picked)
+                $C.MenuAddPickedDay.Header = if ($null -ne $picked) { "Add the day in the date box ($(Format-BoardDayLabel (([datetime]$picked).ToString('yyyy-MM-dd'))))" } else { 'Add the day in the date box' }
+                $C.MenuRemoveDay.IsEnabled = ($null -ne $active)
+                $C.MenuApplyTemplate.IsEnabled = ($null -ne $active)
+                $label = if ($active) { Format-BoardDayLabel $active } else { 'this day' }
+                $C.MenuFillDay.Header = "Fill _this day ($label)"
+                $C.MenuFillAll.Header = "Fill _all days ($($script:PB.Board.Days.Count))"
+                $C.MenuFillDay.IsEnabled = (-not $review -and $null -ne $active)
+                $C.MenuFillAll.IsEnabled = (-not $review)
+                foreach ($mi in @($C.MenuRefill, $C.MenuBackToEdit, $C.MenuExport)) { $mi.IsEnabled = $review }
+                $C.MenuShowDetails.IsChecked = [bool]$script:PB.DetailsVisible
+}
+
+# The Line menu: the selected line's right-click menu, with the keys that act on it
+function Update-PBLineMenu {
+                $menu = $script:PB.C.MenuLine
+                $id = [string]$script:PB.SelectedLineId
+                $line = if ($id) { Get-BoardLine $script:PB.Board $id } else { $null }
+                if ($null -eq $line) {
+                                $menu.Items.Clear()
+                                $none = New-PBMenuItem 'Click a line on the board first' $null
+                                $none.IsEnabled = $false
+                                [void]$menu.Items.Add($none)
+                                return
+                }
+                Set-PBMenuItems -Menu $menu -Tag 'Line' -Line $line
+                $head = New-PBMenuItem (Get-PBLineCaption $line) $null
+                $head.IsEnabled = $false
+                $menu.Items.Insert(0, $head)
+}
+
+# File > Apply a template: one item per saved template
+function Update-PBTemplateMenu {
+                $menu = $script:PB.C.MenuApplyTemplate
+                $menu.Items.Clear()
+                $list = @(Get-BoardTemplateList -Dir $script:PB.Settings.TemplateDir)
+                if ($list.Count -eq 0) {
+                                $none = New-PBMenuItem '(no templates saved yet: File > Save this day as a template)' $null
+                                $none.IsEnabled = $false
+                                [void]$menu.Items.Add($none)
+                                return
+                }
+                foreach ($t in $list) {
+                                # A single _ in a menu header would be read as an access key
+                                $mi = New-PBMenuItem (([string]$t.Name) -replace '_', '__') $null
+                                $mi.Tag = $t
+                                $mi.Add_Click({ param($s, $a) Invoke-PBSafe { Invoke-PBLoadTemplate -Template $s.Tag } })
+                                [void]$menu.Items.Add($mi)
+                }
+}
+
+# The next flying day after the board's last day
+function Get-PBNextBoardDay {
+                $days = $script:PB.Board.Days
+                if ($days.Count -eq 0) { return (Get-NextFlyingDay) }
+                return (Get-NextFlyingDay -From (ConvertTo-PBDayDate ([string]$days[$days.Count - 1])))
+}
+
+# The day tab -Offset tabs along (Ctrl+PgUp / Ctrl+PgDn, Day menu)
+function Select-PBDayOffset {
+                param ([int]$Offset)
+
+                $tabs = $script:PB.C.DayTabs
+                if ($tabs.Items.Count -eq 0) { return }
+                $i = [math]::Max(0, [math]::Min($tabs.Items.Count - 1, $tabs.SelectedIndex + $Offset))
+                if ($i -ne $tabs.SelectedIndex) { $tabs.SelectedIndex = $i }
+}
+
+# F5 / Edit > Re-check every hardcoded line
+function Invoke-PBRecheck {
+                $script:PB.Assess = @{}
+                Clear-AssessmentCache
+                Start-PBAssessQueue
+                Update-PBDetails -Force
+                Set-PBStatus 'Re-checking every hardcoded line...'
+}
+
+function Invoke-PBBackToEdit {
+                Exit-PBReview
+                Update-PBAll
+                Set-PBStatus 'Back to editing. The fill was discarded.'
+}
+
+
+# =================================================================================
+#  COLOR KEY (the Colors button, View or Help menu)
+#  A small window that stays open beside the board.
+# =================================================================================
+
+# Every color on the board: sections of { Title; Items = @{ Swatch; Fill; Border; Thick; Label; Text } }.
+# Swatch: Stripe (a line's left edge), Marker (a hardcoded slot's corner), Pill (a slot or puck),
+# Badge (a count on a puck), Row (a whole line), None (text only).
+function Get-PBColorKey {
+                $K = $script:PBColors
+                $item = {
+                                param ([string]$Swatch, [string]$Fill, [string]$Text, [string]$Border = '', [int]$Thick = 1, [string]$Label = '')
+                                @{ Swatch = $Swatch; Fill = $Fill; Text = $Text; Border = $Border; Thick = $Thick; Label = $Label }
+                }
+                return @(
+                                @{ Title = 'Line type (the stripe at the left of a line)'; Items = @(
+                                                (& $item 'Stripe' $K.StripeDayLocal 'Day Local')
+                                                (& $item 'Stripe' $K.StripeOB 'O&B')
+                                                (& $item 'Stripe' $K.StripeReturn 'O&B Return (flies with its O&B''s student)')
+                                                (& $item 'Stripe' $K.StripeSim 'OFT / IFT')
+                                                (& $item 'Stripe' $K.StripeOther 'Any other type')) }
+                                @{ Title = 'Corner marker on a hardcoded student (hover it for the reasons)'; Items = @(
+                                                (& $item 'Marker' $K.MarkerClean 'Passes every hard rule')
+                                                (& $item 'Marker' $K.MarkerWarn 'Passes, with warnings worth a look')
+                                                (& $item 'Marker' $K.MarkerHard 'Breaks a hard rule: allowed, but flagged OVERRIDE on the output')
+                                                (& $item 'Marker' $K.MarkerPending 'Still being checked')) }
+                                @{ Title = 'Student slots while you drag or hold a student'; Items = @(
+                                                (& $item 'Pill' $K.HeatClean 'Fits' '#CBD5E1')
+                                                (& $item 'Pill' $K.HeatWarn 'Fits, with warnings' '#CBD5E1')
+                                                (& $item 'Pill' $K.HeatHard 'Breaks a hard rule' '#CBD5E1')) }
+                                @{ Title = 'Student slot on a line'; Items = @(
+                                                (& $item 'Pill' '#DCFCE7' 'Hardcoded student' '#22C55E' 2)
+                                                (& $item 'Pill' '#F8FAFC' 'Open: the scheduler fills it' '#CBD5E1')
+                                                (& $item 'Pill' '#F5F3FF' 'Return leg: follows its O&B' '#DDD6FE')) }
+                                @{ Title = 'After a fill, while you review it'; Items = @(
+                                                (& $item 'Pill' '#EFF6FF' 'Picked by the scheduler (AUTO), or its wingman (WING), in italics' '#60A5FA')
+                                                (& $item 'Pill' '#FEF3C7' 'Direct support for a formation' '#F59E0B')
+                                                (& $item 'Pill' '#FEE2E2' 'For Sale: no student could fly the line' '#FCA5A5')
+                                                (& $item 'Row' '#FEF2F2' 'Pink line, red notes: OVERRIDE (hardcoded against a rule)' '#E2E8F0')) }
+                                @{ Title = 'Student pucks (right)'; Items = @(
+                                                (& $item 'Pill' '#DCFCE7' 'Available' '#86EFAC')
+                                                (& $item 'Pill' '#FEF3C7' 'Has an unsat (U-SIM, U-FLT) or is absent part of the day (ABS)' '#FCD34D')
+                                                (& $item 'Pill' '#E5E7EB' 'On hold (HOLD)' '#9CA3AF')
+                                                (& $item 'Badge' '#16A34A' '1 turn that day' '' 1 '1 turn')
+                                                (& $item 'Badge' '#D97706' '2 turns that day' '' 1 '2 turns')
+                                                (& $item 'Badge' '#DC2626' '3 or more turns that day' '' 1 '3 turns')
+                                                (& $item 'None' '' 'CAP: one flight a day, no O&Bs, needs an experienced IP. INTL: international, needs an experienced IP. U-SIM / U-FLT: unsat sim / flight. ABS: absent at those times.')) }
+                                @{ Title = 'IP pucks (left)'; Items = @(
+                                                (& $item 'Pill' '#DBEAFE' 'IP' '#93C5FD')
+                                                (& $item 'Badge' '#1D4ED8' 'Lines that IP has that day' '' 1 'x2')
+                                                (& $item 'None' '' 'EXP: experienced IP. CHK: check IP. NC: non-counter.')) }
+                                @{ Title = 'Picking and holding'; Items = @(
+                                                (& $item 'Row' '#EFF6FF' 'The selected line (Line details shows it)' '#2563EB')
+                                                (& $item 'Pill' '#DCFCE7' 'A puck you are holding: click a slot to put it there' '#1D4ED8' 3)) }
+                )
+}
+
+function Show-PBColorKey {
+                $win = $script:PB.ColorKeyWindow
+                if ($null -ne $win -and $win.IsVisible) { [void]$win.Activate(); return }
+                $win = New-PBColorKeyWindow
+                $script:PB.ColorKeyWindow = $win
+                try { if ($script:PB.Window.IsVisible) { $win.Owner = $script:PB.Window } } catch { }
+                $win.Show()
+}
+
+function New-PBColorKeyWindow {
+                $win = New-Object System.Windows.Window
+                $win.Title = 'FAIS color key'
+                $win.Width = 470
+                $win.Height = 640
+                $win.ShowInTaskbar = $false
+                $win.WindowStartupLocation = [System.Windows.WindowStartupLocation]::CenterOwner
+                $win.Background = Get-PBBrush '#F8FAFC'
+                $win.FontFamily = New-Object System.Windows.Media.FontFamily('Segoe UI')
+                $win.FontSize = 12
+
+                $panel = New-Object System.Windows.Controls.StackPanel
+                $panel.Margin = New-Object System.Windows.Thickness(14)
+                $title = New-Object System.Windows.Controls.TextBlock
+                $title.Text = 'What the colors mean'
+                $title.FontSize = 15
+                $title.FontWeight = [System.Windows.FontWeights]::Bold
+                [void]$panel.Children.Add($title)
+                foreach ($section in @(Get-PBColorKey)) {
+                                $head = New-Object System.Windows.Controls.TextBlock
+                                $head.Text = $section.Title
+                                $head.FontWeight = [System.Windows.FontWeights]::SemiBold
+                                $head.Foreground = Get-PBBrush '#334155'
+                                $head.Margin = New-Object System.Windows.Thickness(0, 10, 0, 3)
+                                [void]$panel.Children.Add($head)
+                                foreach ($it in $section.Items) {
+                                                $rowPanel = New-Object System.Windows.Controls.DockPanel
+                                                $rowPanel.Margin = New-Object System.Windows.Thickness(0, 1, 0, 1)
+                                                if ($it.Swatch -ne 'None') {
+                                                                $swatch = New-PBColorSwatch $it
+                                                                [System.Windows.Controls.DockPanel]::SetDock($swatch, [System.Windows.Controls.Dock]::Left)
+                                                                [void]$rowPanel.Children.Add($swatch)
+                                                }
+                                                $text = New-Object System.Windows.Controls.TextBlock
+                                                $text.Text = $it.Text
+                                                $text.TextWrapping = [System.Windows.TextWrapping]::Wrap
+                                                $text.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+                                                if ($it.Swatch -eq 'None') { $text.Foreground = Get-PBBrush '#475569'; $text.FontSize = 11 }
+                                                [void]$rowPanel.Children.Add($text)
+                                                [void]$panel.Children.Add($rowPanel)
+                                }
+                }
+                $scroll = New-Object System.Windows.Controls.ScrollViewer
+                $scroll.VerticalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
+                $scroll.Content = $panel
+                $win.Content = $scroll
+                return $win
+}
+
+# A small sample of one color, drawn the way the board draws it
+function New-PBColorSwatch {
+                param ($Item)
+
+                $box = New-Object System.Windows.Controls.Grid
+                $box.Width = 52
+                $box.Height = 20
+                $box.Margin = New-Object System.Windows.Thickness(0, 1, 10, 1)
+                $shape = New-Object System.Windows.Controls.Border
+                $shape.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Left
+                $shape.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+                switch ($Item.Swatch) {
+                                'Stripe' {
+                                                $shape.Width = 8; $shape.Height = 18
+                                                $shape.CornerRadius = New-Object System.Windows.CornerRadius(2)
+                                                $shape.Background = Get-PBBrush $Item.Fill
+                                }
+                                'Marker' {
+                                                # A hardcoded slot with its corner triangle
+                                                $shape.Width = 44; $shape.Height = 18
+                                                $shape.CornerRadius = New-Object System.Windows.CornerRadius(9)
+                                                $shape.Background = Get-PBBrush '#DCFCE7'
+                                                $shape.BorderBrush = Get-PBBrush '#22C55E'
+                                                $shape.BorderThickness = New-Object System.Windows.Thickness(2)
+                                                $tri = New-Object System.Windows.Shapes.Polygon
+                                                $tri.Points = [System.Windows.Media.PointCollection]::Parse('0,0 10,0 10,10')
+                                                $tri.Fill = Get-PBBrush $Item.Fill
+                                                $tri.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Right
+                                                $tri.VerticalAlignment = [System.Windows.VerticalAlignment]::Top
+                                                $tri.Margin = New-Object System.Windows.Thickness(0, 0, 4, 0)
+                                                $shape.Child = $tri
+                                }
+                                'Badge' {
+                                                $shape.CornerRadius = New-Object System.Windows.CornerRadius(8)
+                                                $shape.Padding = New-Object System.Windows.Thickness(6, 0, 6, 0)
+                                                $shape.Background = Get-PBBrush $Item.Fill
+                                                $label = New-Object System.Windows.Controls.TextBlock
+                                                $label.Text = $Item.Label
+                                                $label.Foreground = Get-PBBrush '#FFFFFF'
+                                                $label.FontSize = 10
+                                                $label.FontWeight = [System.Windows.FontWeights]::SemiBold
+                                                $shape.Child = $label
+                                }
+                                default {
+                                                # Pill (a slot or puck) or Row (a whole line)
+                                                $shape.Width = 44; $shape.Height = 18
+                                                $shape.CornerRadius = New-Object System.Windows.CornerRadius($(if ($Item.Swatch -eq 'Row') { 3 } else { 9 }))
+                                                $shape.Background = Get-PBBrush $Item.Fill
+                                                if ($Item.Border) { $shape.BorderBrush = Get-PBBrush $Item.Border }
+                                                $shape.BorderThickness = New-Object System.Windows.Thickness([double]$Item.Thick)
+                                }
+                }
+                [void]$box.Children.Add($shape)
+                return $box
 }
 
 
@@ -1577,8 +2678,9 @@ function Invoke-PBChooseMission {
 
                 $status = if ($mission -eq '') { 'Mission set to (auto).' } elseif ($override) { "$mission kept - it is flagged OVERRIDE on the output." } else { "Mission set to $mission." }
                 Invoke-PBChange { Set-BoardMission -Board $board -Id $LineId -Mission $mission } -Status $status
-                if ($override) { Set-PBStatus $status 'Warn' }
                 Show-PBPlacementPopup $LineId
+                # The popup puts the line's summary on the status bar; a kept rule break says so instead
+                if ($override) { Set-PBStatus $status 'Warn' }
 }
 
 # The rule check for a mission picked by hand (Get-MissionAdvice with both assessments)
@@ -1911,8 +3013,11 @@ function Update-PBTemplateList {
                 $script:PB.C.TemplateCombo.ItemsSource = @(Get-BoardTemplateList -Dir $script:PB.Settings.TemplateDir)
 }
 
+# -Template: one from Get-BoardTemplateList (the File menu); else the one picked in the toolbar
 function Invoke-PBLoadTemplate {
-                $t = $script:PB.C.TemplateCombo.SelectedItem
+                param ($Template)
+
+                $t = if ($null -ne $Template) { $Template } else { $script:PB.C.TemplateCombo.SelectedItem }
                 if ($null -eq $t) { Set-PBStatus 'Pick a template first.' 'Warn'; return }
                 $day = Get-PBActiveDay
                 $hasLines = @($script:PB.Board.Lines | Where-Object { $_.Day -eq $day }).Count -gt 0
@@ -1950,8 +3055,11 @@ function Invoke-PBCopyPrevDay {
                 else { Set-PBStatus "Copied $($res.Count) line(s) from $($res.Source). Students were not copied." 'Good' }
 }
 
+# -AddDate: the day to add (the Day menu); else the one in the toolbar's date box
 function Invoke-PBAddDay {
-                $date = $script:PB.C.AddDayPicker.SelectedDate
+                param ($AddDate)
+
+                $date = if ($null -ne $AddDate) { $AddDate } else { $script:PB.C.AddDayPicker.SelectedDate }
                 if ($null -eq $date) { Set-PBStatus 'Pick a date first.' 'Warn'; return }
                 $day = ([datetime]$date).ToString('yyyy-MM-dd')
                 Invoke-PBChange { [void](Add-BoardDay -Board $script:PB.Board -Day $day) }
@@ -1987,8 +3095,19 @@ function Invoke-PBRemoveDay {
                 $n = @($script:PB.Board.Lines | Where-Object { $_.Day -eq $day }).Count
                 $ans = [System.Windows.MessageBox]::Show("Remove $day and its $n line(s) from the board?", 'Remove day', [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Warning)
                 if ($ans -ne [System.Windows.MessageBoxResult]::Yes) { return }
-                Invoke-PBChange { Remove-BoardDay -Board $script:PB.Board -Day $day } -Status "$day removed (Ctrl+Z to undo)."
-                $file = Join-Path $script:PB.Settings.BoardDir "$day.json"
+                Remove-PBDay $day
+}
+
+# Takes a day and its lines off the board (one undo step) and deletes its autosave file
+function Remove-PBDay {
+                param ([Parameter(Mandatory)] [string]$Day)
+
+                # A day the Schedule sheet has lines for is not put back by the next MasterData save,
+                # unless the sheet's lines for it change
+                $fp = Get-ScheduleDayFingerprint -Rows @(Get-PBSheetRows) -Day $Day
+                if ($fp -ne '') { $script:PB.SheetIgnore.Add("$Day|$fp") }
+                Invoke-PBChange { Remove-BoardDay -Board $script:PB.Board -Day $Day } -Status "$Day removed (Ctrl+Z to undo)."
+                $file = Join-Path $script:PB.Settings.BoardDir "$Day.json"
                 if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue }
 }
 
@@ -2006,17 +3125,17 @@ function Hide-BusyOverlay {
                 $script:PB.C.BusyOverlay.Visibility = 'Collapsed'
 }
 
-# "Fill the rest of the lines": runs the scheduler on a copy of the students and shows
+# "Fill this day" / "Fill all days": runs the scheduler on a copy of the students and shows
 # the result on the board for review. Nothing is written until Export.
-# With "Only this day" ticked only the day on screen is filled (and later exported). Days
-# already exported that are not being filled go in as fixed context, so nobody is
+# -Scope Day fills only the day on screen (and later exports only it). Days already
+# exported that are not being filled go in as fixed context, so nobody is
 # double-booked and their events stay in order. -Refill repeats the last fill's days.
 function Invoke-PBFill {
-                param ([switch]$Refill)
+                param ([switch]$Refill, [ValidateSet('All', 'Day')] [string]$Scope = 'All')
 
                 $board = $script:PB.Board
                 if ($board.Lines.Count -eq 0) { Set-PBStatus 'There are no lines to fill. Type some in the Add lines box, or use Load a day...' 'Warn'; return }
-                $days = @(Get-PBFillScope)
+                $days = @(Get-PBFillScope -Scope $Scope)
                 if ($Refill -and @($script:PB.FillDays).Count -gt 0) {
                                 $again = @($script:PB.FillDays | Where-Object { $board.Days.Contains([string]$_) })
                                 if ($again.Count -gt 0) { $days = $again }
@@ -2027,7 +3146,7 @@ function Invoke-PBFill {
                                 $shown = @($warnings | Select-Object -First 15)
                                 $more = if ($warnings.Count -gt 15) { "`n...and $($warnings.Count - 15) more" } else { '' }
                                 $ans = [System.Windows.MessageBox]::Show(("Before filling:`n`n- " + ($shown -join "`n- ") + $more + "`n`nFill anyway?"),
-                                                'Fill the rest of the lines', [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Warning)
+                                                "Fill $(Format-PBDays $days)", [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Warning)
                                 if ($ans -ne [System.Windows.MessageBoxResult]::Yes) { return }
                 }
 
@@ -2099,20 +3218,35 @@ ADDING LINES (box at the top, press Enter)
 Templates save a day's times; "Copy previous day's lines" copies the last flying day.
 
 ONE DAY AT A TIME
+  Schedule sheet:         when the board opens, each day MasterData's Schedule sheet has lines
+                          for (from the board's first day on) gets a tab with those lines.
+                          Days before it are not loaded; if that is all the sheet has, the
+                          blue banner says so and can put them on the first day.
   Load a day...           Loads one day from MasterData's Schedule sheet, or from the schedule
                           you last exported (to change a day already sent out: everyone stays
                           where they were, so a fill only changes the lines you open up).
-  MasterData is watched:  save the Schedule sheet in Excel and the board follows: a day you have
-                          not edited since it was loaded (or that is still empty) updates by
-                          itself; for a day you have edited, the blue banner offers the change.
-  Only this day           Tick it to fill and export just the day on screen. Days already
-                          exported stay exactly as they were.
+  MasterData is watched:  save the Schedule sheet in Excel and the board follows: a new day on
+                          the sheet gets its own tab, and a day you have not edited since it was
+                          loaded (or that is still empty) updates by itself; for a day you have
+                          edited, the blue banner offers the change.
+  Fill this day           Fills and exports just the day on screen (Ctrl+Shift+Enter). Days
+                          already exported stay exactly as they were.
 
-PUCKS
+PUCKS (drag and drop, or click and place)
   Drag an IP puck onto a line's IP slot, a student puck onto a line's student slot.
+  Or click a puck to pick it up (thick outline, dark banner), then click the slot to put it
+  there (hold Ctrl as you click to keep holding it for another line). Esc lets go.
+  Double-click a puck to put it straight on the selected line.
   Drag between lines to move (hold Ctrl to copy). Drop back on a pool to take it off.
-  While dragging a student, slots turn green (ok), amber (needs a look), red (breaks a rule).
-  Rule breaks are allowed - the line is flagged OVERRIDE on the output.
+  While dragging or holding a student, slots turn green (ok), amber (needs a look), red
+  (breaks a rule). Rule breaks are allowed - the line is flagged OVERRIDE on the output.
+
+LINE DETAILS (the panel under the days)
+  Click anywhere on a line to select it (blue outline). The panel shows its student against
+  every HARD RULE, WARNING and SOFT RULE (the + / - score), and ranks every student for the
+  line: fits first, then warnings, then rule breaks, best score first. Click a student in the
+  list to see their check; double-click (or Put on this line) to hardcode them there.
+  Drag the bar above the panel to resize it; Hide (or View menu) to close it.
 
 MISSIONS
   A hardcoded student's mission dropdown lists (auto), the events they can fly on the line,
@@ -2120,6 +3254,7 @@ MISSIONS
   A mission that breaks a rule (not opted - e.g. a sim before the dollar ride - not in the
   syllabus, or the wrong line type) is explained first, with the scheduler's pick offered:
   Yes = use the recommended mission, No = keep yours (flagged OVERRIDE), Cancel = no change.
+  A line typed with sp: and m: goes on as typed and its rule check pops up.
 
 MARKERS
   The corner triangle on a hardcoded student: green clean, amber warnings, red rule broken,
@@ -2128,13 +3263,20 @@ MARKERS
 TIMES
   Click an ETD, type a new time, Enter. Up/Down = 5 min, Shift = 30 min, Esc cancels.
 
+MENUS
+  Every action is in the menu bar; the Line menu acts on the selected line (the same as its
+  right-click menu). Help > What the colors mean (or the Colors button) explains every color.
+
 KEYS
-  Ctrl+L quick entry   Ctrl+Z undo   Delete clears the selected slot
-  F5 re-check everything   Ctrl+Enter fill
+  Ctrl+L quick entry   Ctrl+Z undo   Delete clears the selected slot   Esc lets go of a puck
+  Ctrl+D duplicate the selected line   Ctrl+Delete delete it   Ctrl+PgUp / PgDn change day
+  F5 re-check everything   Ctrl+Enter fill all days   Ctrl+Shift+Enter fill this day
 
 FILL
-  "Fill the rest of the lines" schedules every open line like before. Review the result,
-  then Export (writes OutputSchedule.xlsx), Re-fill, or go Back to edit.
+  "Fill <day>" schedules the open lines on the day on screen; "Fill all N days" (shown when
+  the board has more than one day) schedules every day. Review the result, then Export
+  (writes OutputSchedule.xlsx), Re-fill, or go Back to edit. A window then says what was
+  written, or why nothing was, with buttons to open the files.
   Excel files FAIS writes are saved and closed for you first, and opened again afterwards.
 
 UPDATE SYLLABI
@@ -2153,8 +3295,9 @@ UPDATE SYLLABI
 # =================================================================================
 #  ONE DAY AT A TIME
 #  "Load a day..." puts one day on the board from MasterData's Schedule sheet or from the
-#  last exported schedule. The sheet is re-read whenever MasterData is saved, and the
-#  banner offers any day the board is behind on. "Only this day" fills and exports one day.
+#  last exported schedule. The sheet is re-read whenever MasterData is saved: its new days
+#  get their own tabs, and the banner offers any day the board is behind on.
+#  "Fill this day" fills and exports one day.
 # =================================================================================
 
 function Select-PBDay {
@@ -2173,18 +3316,26 @@ function Format-PBDays {
                 return ("{0} - {1} ({2} days)" -f (Format-BoardDayLabel $list[0]), (Format-BoardDayLabel $list[-1]), $list.Count)
 }
 
-# The days a fill covers: the day on screen with "Only this day" ticked, else every board day
+# The days a fill covers: -Scope Day is the day on screen ("Fill this day"), All every board day
 function Get-PBFillScope {
+                param ([ValidateSet('All', 'Day')] [string]$Scope = 'All')
+
                 $active = Get-PBActiveDay
-                if ([bool]$script:PB.C.FillDayOnlyCheck.IsChecked -and $active) { return @([string]$active) }
+                if ($Scope -eq 'Day' -and $active) { return @([string]$active) }
                 return @($script:PB.Board.Days)
 }
 
+# The two fill buttons: "Fill Tue 20 Oct" (the day on screen) and "Fill all 3 days" (only when
+# the board has more than one day). Both are hidden while a fill is being reviewed.
 function Update-PBFillScope {
                 $C = $script:PB.C
                 $active = Get-PBActiveDay
-                $C.FillDayOnlyCheck.Content = if ($active) { "Only $(Format-BoardDayLabel $active)" } else { 'Only this day' }
-                $C.FillButton.Content = if ([bool]$C.FillDayOnlyCheck.IsChecked) { 'Fill this day' } else { 'Fill the rest of the lines' }
+                $n = $script:PB.Board.Days.Count
+                $review = ($script:PB.Mode -eq 'Review')
+                $C.FillDayButton.Content = if ($active) { "Fill $(Format-BoardDayLabel $active)" } else { 'Fill this day' }
+                $C.FillAllButton.Content = "Fill all $n days"
+                $C.FillDayButton.Visibility = if ($review) { 'Collapsed' } else { 'Visible' }
+                $C.FillAllButton.Visibility = if ($review -or $n -lt 2) { 'Collapsed' } else { 'Visible' }
 }
 
 function Get-PBFileStamp {
@@ -2232,13 +3383,15 @@ function Update-PBPublishedRead {
 }
 
 # Loads the sheet onto the board days that can take it without losing anything: days still
-# empty, and days nobody has edited since they were loaded. Returns 'Tue 20 Oct (14 line(s))'
-# for each day loaded.
+# empty, days nobody has edited since they were loaded, and each day the sheet has lines for
+# (from the board's first day on) that is not on the board yet, as a tab of its own.
+# Returns 'Tue 20 Oct (14 line(s))' for each day loaded.
 function Invoke-PBSheetAutoUpdate {
                 $done = New-Object System.Collections.Generic.List[string]
                 $rows = @(Get-PBSheetRows)
                 if ($rows.Count -eq 0) { return @() }
-                foreach ($day in @($script:PB.Board.Days)) {
+                $newDays = @(Get-SheetDaysToAdd -Board $script:PB.Board -SheetRows $rows -Ignore $script:PB.SheetIgnore.ToArray() | ForEach-Object { $_.Day })
+                foreach ($day in @(@($script:PB.Board.Days) + $newDays)) {
                                 $st = Get-BoardSheetState -Board $script:PB.Board -SheetRows $rows -Day $day
                                 if ($st.State -ne 'EmptyDay' -and $st.State -ne 'Outdated') { continue }
                                 $res = Invoke-PBLoadDay -Source 'Sheet' -SourceDay $day -TargetDay $day -Replace -KeepStudents -Quiet -StayOnDay
@@ -2303,26 +3456,27 @@ function Update-PBSheetBanner {
                 if ($null -eq $info) { $C.SheetBanner.Visibility = 'Collapsed'; return }
                 $C.SheetBannerText.Text = $info.Text
                 $C.SheetBannerLoadButton.Content = $info.ActionText
-                $C.SheetBannerIgnoreButton.Content = if ($info.State -eq 'OtherDay') { 'Not now' } else { "Keep the board's lines" }
+                $C.SheetBannerIgnoreButton.Content = if (@('OtherDay', 'PastDay') -contains $info.State) { 'Not now' } else { "Keep the board's lines" }
                 $C.SheetBanner.Visibility = 'Visible'
 }
 
 function Invoke-PBSheetBannerLoad {
                 $info = $script:PB.SheetBannerInfo
                 if ($null -eq $info) { return }
-                [void](Invoke-PBLoadDay -Source 'Sheet' -SourceDay $info.Day -TargetDay $info.Day -Replace -KeepStudents)
+                [void](Invoke-PBLoadDay -Source 'Sheet' -SourceDay $info.Day -TargetDay $info.TargetDay -Replace -KeepStudents)
 }
 
 function Invoke-PBSheetBannerIgnore {
                 $info = $script:PB.SheetBannerInfo
                 if ($null -eq $info) { return }
-                if ($info.State -eq 'OtherDay') { $script:PB.SheetIgnore.Add("$($info.Day)|$($info.Fingerprint)") }
+                if (@('OtherDay', 'PastDay') -contains $info.State) { $script:PB.SheetIgnore.Add("$($info.Day)|$($info.Fingerprint)") }
                 else {
                                 Set-BoardSheetSync -Board $script:PB.Board -Day $info.Day -Entry (New-SheetSyncEntry -Fingerprint $info.Fingerprint -Action 'Ignored')
                                 Request-PBAutosave
                 }
                 Update-PBSheetBanner
-                Set-PBStatus "Kept the board's lines for $(Format-BoardDayLabel $info.Day). You will be asked again if the Schedule sheet changes."
+                $what = if (@('OtherDay', 'PastDay') -contains $info.State) { "Left the sheet's $(Format-BoardDayLabel $info.Day) off the board" } else { "Kept the board's lines for $(Format-BoardDayLabel $info.Day)" }
+                Set-PBStatus "$what. You will be asked again if the Schedule sheet changes."
 }
 
 # Puts one day's lines on the board (one undo step) from MasterData's Schedule sheet
@@ -2532,6 +3686,157 @@ function Submit-PBDialog {
 
 
 # =================================================================================
+#  EXPORT RESULT
+#  After Export (FAIS.ps1) a window says what was written, or why nothing was, with
+#  buttons that open the files. The same text still goes to the console.
+# =================================================================================
+
+# What the export result window says: {Ok; Title; Subtitle; Lines = @({Kind; Text})}.
+# Kind: Head, Text, Path, Good, Warn, Hard.
+#   -UnsatChanges: Get-UnsatFlagUpdates from before the export (name -> @{ UnsatSim; UnsatFlight })
+#   -Warnings: the export's warning messages (why it failed, or names MasterData didn't have)
+function Get-FaisExportSummary {
+                param (
+                                [bool]$Ok,
+                                $FillResult,
+                                [string[]]$Days = @(),
+                                [string]$OutputPath = '',
+                                [string]$MasterDataPath = '',
+                                [string]$AtisPath = '',
+                                [hashtable]$UnsatChanges = @{},
+                                [string[]]$Warnings = @()
+                )
+
+                $lines = New-Object System.Collections.Generic.List[object]
+                $add = { param([string]$Kind, [string]$Text) $lines.Add([PSCustomObject]@{ Kind = $Kind; Text = $Text }) }
+                $dayText = Format-PBDays $Days
+                $warnText = @($Warnings | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+
+                if (-not $Ok) {
+                                & $add 'Head' 'What went wrong'
+                                if ($warnText.Count -eq 0) { & $add 'Hard' 'The files could not be written. The PowerShell window has the details.' }
+                                foreach ($w in $warnText) { & $add 'Hard' $w }
+                                & $add 'Head' 'What to do'
+                                & $add 'Text' 'Close OutputSchedule, MasterData and ATIS if they are open somewhere FAIS cannot reach (another computer, or a cell still being edited), then run FAIS again and Export. Your board is saved, so the lines are still there.'
+                                return [PSCustomObject]@{
+                                                Ok       = $false
+                                                Title    = 'Export failed: nothing was written'
+                                                Subtitle = "OutputSchedule, MasterData and ATIS are exactly as they were ($dayText was not exported)."
+                                                Lines    = $lines.ToArray()
+                                }
+                }
+
+                $st = $FillResult.Stats
+                & $add 'Head' 'What was scheduled'
+                & $add 'Text' ("{0} lines: {1} hardcoded, {2} filled by the scheduler, {3} wingmen, {4} return legs, {5} direct support, {6} for sale" -f `
+                                $st.Lines, $st.Pinned, $st.Filled, $st.Wing, $st.Return, $st.DS, $st.ForSale)
+                if ([int]$st.ForSale -gt 0) { & $add 'Warn' "$($st.ForSale) line(s) are For Sale: no student could fly them." }
+
+                & $add 'Head' 'Files written'
+                & $add 'Text' "OutputSchedule: the MasterSchedule tab for $dayText (other days already exported are kept), and each student's syllabus tab"
+                & $add 'Path' $OutputPath
+                $unsatCount = @($UnsatChanges.Keys).Count
+                & $add 'Text' $(if ($unsatCount -gt 0) { "MasterData: SimDebt, and the unsat flags of $unsatCount student(s)" } else { 'MasterData: SimDebt' })
+                & $add 'Path' $MasterDataPath
+                if ($AtisPath) {
+                                & $add 'Text' "ATIS: one tab per day for $dayText, flights then sims"
+                                & $add 'Path' $AtisPath
+                }
+
+                if ($unsatCount -gt 0) {
+                                & $add 'Head' 'Unsats'
+                                foreach ($name in @($UnsatChanges.Keys | Sort-Object)) {
+                                                $flags = $UnsatChanges[$name]
+                                                foreach ($key in @($flags.Keys | Sort-Object)) {
+                                                                if ($flags[$key]) { & $add 'Warn' "$key set for $name" }
+                                                                else { & $add 'Good' "$key cleared for $name (cleaned up on this schedule)" }
+                                                }
+                                }
+                }
+
+                $overrides = @($FillResult.Overrides)
+                if ($overrides.Count -gt 0) {
+                                & $add 'Head' 'Hardcoded against a rule (marked OVERRIDE on the output)'
+                                foreach ($o in $overrides) { & $add 'Hard' ("{0} {1}: {2}" -f (Format-EtdShort $o.ETD), $o.Student, (@($o.Violations) -join '; ')) }
+                }
+                if ($warnText.Count -gt 0) {
+                                & $add 'Head' 'Heads up'
+                                foreach ($w in $warnText) { & $add 'Warn' $w }
+                }
+                return [PSCustomObject]@{
+                                Ok       = $true
+                                Title    = "Schedule exported: $dayText"
+                                Subtitle = 'Everything below was written. Run FAIS again to change a day or build the next one.'
+                                Lines    = $lines.ToArray()
+                }
+}
+
+# Shows the export result (a Get-FaisExportSummary) until it is closed
+function Show-FaisExportResult {
+                param ([Parameter(Mandatory)] $Summary, [string]$OutputPath = '', [string]$AtisPath = '')
+
+                $win = Initialize-FaisExportResultWindow -Summary $Summary -OutputPath $OutputPath -AtisPath $AtisPath
+                [void]$win.ShowDialog()
+}
+
+# Builds the export result window without showing it
+function Initialize-FaisExportResultWindow {
+                param ([Parameter(Mandatory)] $Summary, [string]$OutputPath = '', [string]$AtisPath = '')
+
+                Initialize-PuckBoardAssemblies
+                [xml]$xaml = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'ExportResultDialog.xaml') -Raw -Encoding UTF8
+                $win = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
+                $ui = @{}
+                foreach ($part in @('ResultBadge', 'ResultIcon', 'ResultTitle', 'ResultSubtitle', 'ResultLines', 'OpenOutputButton', 'OpenAtisButton', 'CloseResultButton')) {
+                                $found = $win.FindName($part)
+                                if ($null -eq $found) { throw "ExportResultDialog.xaml is missing the element '$part'" }
+                                $ui[$part] = $found
+                }
+
+                $ok = [bool]$Summary.Ok
+                $win.Title = if ($ok) { 'FAIS: schedule exported' } else { 'FAIS: export failed' }
+                $ui.ResultBadge.Background = Get-PBBrush $(if ($ok) { '#16A34A' } else { '#DC2626' })
+                $ui.ResultIcon.Text = if ($ok) { [string][char]0x2714 } else { [string][char]0x2716 }
+                $ui.ResultTitle.Text = [string]$Summary.Title
+                $ui.ResultTitle.Foreground = Get-PBBrush $(if ($ok) { '#14532D' } else { '#991B1B' })
+                $ui.ResultSubtitle.Text = [string]$Summary.Subtitle
+                $first = $true
+                foreach ($ln in @($Summary.Lines)) {
+                                $tb = New-Object System.Windows.Controls.TextBlock
+                                $tb.Text = [string]$ln.Text
+                                $tb.TextWrapping = [System.Windows.TextWrapping]::Wrap
+                                $tb.Margin = New-Object System.Windows.Thickness(0, 1, 0, 1)
+                                switch ([string]$ln.Kind) {
+                                                'Head' {
+                                                                $tb.FontWeight = [System.Windows.FontWeights]::SemiBold
+                                                                $tb.Foreground = Get-PBBrush '#334155'
+                                                                $tb.Margin = New-Object System.Windows.Thickness(0, $(if ($first) { 0 } else { 10 }), 0, 2)
+                                                }
+                                                'Path' { $tb.Foreground = Get-PBBrush '#64748B'; $tb.FontSize = 11; $tb.Margin = New-Object System.Windows.Thickness(12, 0, 0, 3) }
+                                                'Good' { $tb.Foreground = Get-PBBrush '#15803D' }
+                                                'Warn' { $tb.Foreground = Get-PBBrush '#B45309' }
+                                                'Hard' { $tb.Foreground = Get-PBBrush '#B91C1C' }
+                                }
+                                $first = $false
+                                [void]$ui.ResultLines.Children.Add($tb)
+                }
+
+                # The buttons carry their file, so their handlers need nothing from this function
+                $ui.OpenOutputButton.Tag = $OutputPath
+                $ui.OpenAtisButton.Tag = $AtisPath
+                $ui.OpenOutputButton.Visibility = if ($ok -and $OutputPath -and (Test-Path -LiteralPath $OutputPath)) { 'Visible' } else { 'Collapsed' }
+                $ui.OpenAtisButton.Visibility = if ($ok -and $AtisPath -and (Test-Path -LiteralPath $AtisPath)) { 'Visible' } else { 'Collapsed' }
+                foreach ($b in @($ui.OpenOutputButton, $ui.OpenAtisButton)) {
+                                $b.Add_Click({ param($s, $a) try { Open-FaisWorkbooks -Path @([string]$s.Tag) } catch { Write-Host "Could not open $($s.Tag): $($_.Exception.Message)" -ForegroundColor Yellow } })
+                }
+                # The board has just closed: come to the front once, without staying on top of Excel
+                $win.Topmost = $true
+                $win.Add_ContentRendered({ param($s, $a) try { $s.Topmost = $false; [void]$s.Activate() } catch { } })
+                return $win
+}
+
+
+# =================================================================================
 #  WINDOWS SELF-TEST
 #  Builds the real window off-screen, drives it through the same commands the mouse
 #  and keyboard use, fills, and reports problems plus any WPF binding errors.
@@ -2571,6 +3876,7 @@ function Test-PuckBoardWindow {
                                 $w.Show()
                                 Invoke-PBDoEvents
                                 & $check ($script:PB.C.DayTabs.Items.Count -eq 1) 'one day tab'
+                                & $check ($null -ne $script:PB.C.LogoImage.Source -and $script:PB.C.LogoImage.Visibility -eq 'Visible') 'logo shown in the title bar'
 
                                 $step = 'quick entry'
                                 $ip1 = Get-NormalizedLastName ([string]$Data.Instructors[0].Name)
@@ -2607,8 +3913,15 @@ function Test-PuckBoardWindow {
                                 Invoke-PBCommand @{ Cmd = 'Undo' }
                                 & $check ($script:PB.Board.Lines.Count -eq 5) 'undo removed the return line'
                                 $choices = @(Get-PBMissionChoices (Get-BoardLine $script:PB.Board $lines[0].Id))
-                                & $check ($choices.Count -ge 2) 'mission dropdown has events'
-                                if ($choices.Count -ge 2) { Invoke-PBCommand @{ Cmd = 'SetMission'; LineId = $lines[0].Id; Value = $choices[1] } }
+                                $events = @($choices | Where-Object { (ConvertFrom-MissionChoiceText $_).Kind -eq 'Mission' -and $_ -notlike '* (not opted)' })
+                                & $check ($events.Count -ge 1) 'mission dropdown has events'
+                                if ($events.Count -ge 1) {
+                                                # The real pick path, unless this event would ask about a rule break (a message box would stop the test)
+                                                $advice = Get-PBMissionAdvice -Line (Get-BoardLine $script:PB.Board $lines[0].Id) -Mission $events[0]
+                                                $pickCmd = if ($advice.NeedsConfirm) { 'SetMission' } else { 'ChooseMission' }
+                                                Invoke-PBCommand @{ Cmd = $pickCmd; LineId = $lines[0].Id; Value = $events[0] }
+                                                & $check ((Get-BoardLine $script:PB.Board $lines[0].Id).Mission -eq $events[0]) 'mission picked from the dropdown'
+                                }
                                 Invoke-PBCommand @{ Cmd = 'SetField'; LineId = $lines[0].Id; Field = 'Notes'; Value = 'self-test note' }
                                 Invoke-PBDoEvents
 
@@ -2731,17 +4044,66 @@ function Test-PuckBoardWindow {
                                                 & $check (@(Get-BoardDayLines -Board $script:PB.Board -Day $day2).Count -eq $before) 'one undo takes them all off'
                                 }
 
+                                $step = 'menu bar'
+                                Select-PBDay $day2
+                                Invoke-PBDoEvents
+                                Update-PBMenuState
+                                & $check ($script:PB.C.MainMenu.Items.Count -ge 7) 'menu bar has its menus'
+                                & $check ([string]$script:PB.C.MenuFillDay.Header -like "*$(Format-BoardDayLabel $day2)*") 'Fill menu names the day on screen'
+                                Update-PBTemplateMenu
+                                & $check ($script:PB.C.MenuApplyTemplate.Items.Count -ge 1 -and $script:PB.C.MenuApplyTemplate.Items[0].IsEnabled) 'Apply a template lists the saved template'
+
+                                $step = 'select a line and its details'
+                                $open = @(Get-BoardDayLines -Board $script:PB.Board -Day $day2 | Where-Object { -not $_.Student -and -not (Test-IsReturnSortieType ([string]$_.SortieType)) })[0]
+                                Select-PBLine $open.Id
+                                & $check ($script:PB.SelectedLineId -eq $open.Id) 'line selected'
+                                $n = 0
+                                while (($script:PB.Details.ChecksPending -or $script:PB.Details.Queue.Count -gt 0) -and $n -lt 1000) { Invoke-PBDetailsTick; $n++ }
+                                $named = @($Data.Students | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Name) }).Count
+                                & $check ($script:PB.Details.Items.Count -eq $named) 'details list ranks every student'
+                                & $check ($script:PB.C.DetailsChecks.Children.Count -ge 1) 'details left side filled'
+                                Update-PBLineMenu
+                                & $check ($script:PB.C.MenuLine.Items.Count -ge 4) 'Line menu lists the selected line''s actions'
+                                $top = $script:PB.Details.Items[0]
+                                $script:PB.C.DetailsList.SelectedItem = $top
+                                & $check ([string]$script:PB.Details.Focus -eq [string]$top.StudentName) 'picking a student in the list shows their check'
+                                & $check ($script:PB.C.DetailsChecks.Children.Count -ge 6) 'their check has the rule sections'
+                                & $check ([bool]$script:PB.C.DetailsPlaceButton.IsEnabled) 'Put on this line is ready'
+
+                                $step = 'click and place'
+                                $holdName = [string]$Data.Students[1].Name
+                                Invoke-PBCommand @{ Cmd = 'Hold'; Kind = 'Student'; Name = $holdName }
+                                Invoke-PBDoEvents
+                                & $check ($null -ne $script:PB.Held -and $script:PB.C.HoldBanner.Visibility -eq 'Visible') 'clicking a puck picks it up'
+                                Invoke-PBCommand @{ Cmd = 'PlaceHeld'; LineId = $open.Id }
+                                Invoke-PBDoEvents
+                                & $check ((Get-BoardLine $script:PB.Board $open.Id).Student -eq $holdName -and $null -eq $script:PB.Held) 'clicking a slot puts the held student there'
+                                & $check ($script:PB.C.HoldBanner.Visibility -ne 'Visible') 'the banner goes once the student is placed'
+                                Invoke-PBCommand @{ Cmd = 'Undo' }
+                                Invoke-PBCommand @{ Cmd = 'PlaceOnSelected'; Kind = 'IP'; Name = $ipName }
+                                & $check ((Get-BoardLine $script:PB.Board $open.Id).Instructor -eq $ipName) 'double-clicking an IP puts them on the selected line'
+                                Invoke-PBCommand @{ Cmd = 'Undo' }
+                                Close-PBPopup
+
+                                $step = 'color key and export result windows'
+                                $key = New-PBColorKeyWindow
+                                & $check ($null -ne $key.Content) 'color key window builds'
+                                $stats = [PSCustomObject]@{ Lines = 2; Pinned = 1; Filled = 1; Wing = 0; Return = 0; DS = 0; ForSale = 0 }
+                                $summary = Get-FaisExportSummary -Ok $true -FillResult ([PSCustomObject]@{ Stats = $stats; Overrides = @() }) -Days @($day2) -OutputPath 'x.xlsx' -MasterDataPath 'y.xlsx'
+                                $resultWin = Initialize-FaisExportResultWindow -Summary $summary
+                                & $check ($resultWin.FindName('ResultLines').Children.Count -ge 4) 'export result window lists what was written'
+
                                 $step = 'fill only this day'
                                 Select-PBDay $day2
-                                $script:PB.C.FillDayOnlyCheck.IsChecked = $true
                                 Invoke-PBDoEvents
-                                & $check ([string]$script:PB.C.FillButton.Content -eq 'Fill this day') 'fill button says it fills this day'
-                                Invoke-PBFill
+                                & $check ([string]$script:PB.C.FillDayButton.Content -eq "Fill $(Format-BoardDayLabel $day2)") 'fill button names the day on screen'
+                                & $check ($script:PB.C.FillAllButton.Visibility -eq 'Visible') 'Fill all days shows with two days on the board'
+                                Invoke-PBFill -Scope Day
                                 Invoke-PBDoEvents
                                 & $check ($script:PB.Mode -eq 'Review' -and (@($script:PB.FillDays) -join ',') -eq $day2) 'fill covered only the day on screen'
                                 & $check (@($script:PB.FillResult.Schedule | Where-Object { (Parse-ETD $_.ETD).ToString('yyyy-MM-dd') -ne $day2 }).Count -eq 0) 'fill result holds only that day'
+                                & $check ($script:PB.C.FillDayButton.Visibility -ne 'Visible') 'fill buttons hide while reviewing'
                                 Exit-PBReview
-                                $script:PB.C.FillDayOnlyCheck.IsChecked = $false
                                 Update-PBAll
 
                                 $step = 'export'

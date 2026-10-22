@@ -627,6 +627,25 @@ Describe 'Invoke-FillSchedule' {
                                                 $students[0].Reservations | Should -BeNullOrEmpty
                                 }
 
+                                It "a pinned O&B with a typed mission that isn't in the syllabus still flies its return leg" {
+                                                $students = @(New-TestStudent -Name 'Able, Amy' -Done @('FI3101|2026-10-15 08:00', 'FE3102|2026-10-15 13:00', 'FT5001|2026-10-16 08:00|Lee, Ann'))
+                                                $rows = @(
+                                                                New-TestRow -ETD '2026-10-20 08:00' -SortieType 'O&B' -Instructor 'Jones, Bob' -Id 'OB1' -LinkedLineId 'RT1' -Student 'Able, Amy' -Mission 'XX1234'
+                                                                New-TestRow -ETD '2026-10-20 11:00' -SortieType 'O&B Return' -Instructor 'Jones, Bob' -Id 'RT1'
+                                                )
+                                                $r = Invoke-TFill -Schedule $rows -Students $students
+
+                                                $ob = Get-TRow $r 'OB1'
+                                                $ob.FilledBy | Should -Be 'Pin'
+                                                Get-NameText $ob.Mission | Should -Be 'XX1234'
+                                                @(Get-TNotes $ob) | Should -Contain "OVERRIDE: XX1234 isn't in Able, Amy's syllabus"
+                                                $rt = Get-TRow $r 'RT1'
+                                                $rt.FilledBy | Should -Be 'Return' -Because 'the student is on the O&B, so the return is theirs, not For Sale'
+                                                Get-NameText $rt.Student | Should -Be 'Able, Amy'
+                                                Get-NameText $rt.Mission | Should -Be 'FT5102'
+                                                (@($students[0].Reservations | ForEach-Object { [string]$_.LineId }) -join ',') | Should -Be 'OB1' -Because 'only the O&B is still held; the return is flown'
+                                }
+
                                 It 'finds the return by the legacy same-day same-IP lookup for IngestData rows with no board ids' {
                                                 $students = @(New-TestStudent -Name 'Able, Amy' -Done @('FI3101|2026-10-15 08:00'))
                                                 $ob = [PSCustomObject]@{ ETD = '2026-10-20 08:00:00'; Instructor = 'Jones, Bob'; SortieType = 'O&B'; Student = $null; Mission = $null; Callsign = $null; Num = $null; Notes = $null }
