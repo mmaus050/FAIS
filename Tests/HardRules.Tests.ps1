@@ -1449,6 +1449,13 @@ Describe 'SoftRules -Detailed' {
                                 $r.Reasons[$Label] | Should -Be $Reason
                 }
 
+                It 'Sim Debt text shows one decimal, like the points beside it' {
+                                $s = New-TestStudent -Name 'A' -SimDebt 2.33
+                                (Get-Soft -Student $s -Mission 'FT5102').Reasons['Sim Debt (flight)'] | Should -Be 'Sim Debt 2.3, flight adds to it'
+                                $s = New-TestStudent -Name 'B' -SimDebt -0.25
+                                (Get-Soft -Student $s -SortieType 'OFT' -Mission 'FE3102').Reasons['Sim Debt (sim)'] | Should -Be 'Sim credit 0.2, sim adds to it'
+                }
+
                 Context 'strings and counters' {
                                 It 'Continue String (+ Counter Continuity) when the last IP flies again' {
                                                 $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Lee, Ann', 'FT5102|2026-02-26 08:00|Jones, Bob'
@@ -1523,6 +1530,23 @@ Describe 'SoftRules -Detailed' {
                                                 $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5104'
                                                 $r.Breakdown['Break String'] | Should -Be -5
                                                 $r.Reasons['Break String'] | Should -Be 'Breaks 3 String w/ Lee'
+                                }
+
+                                It 'String texts count the rides in a row, not every ride with that IP' {
+                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-23 08:00|Jones, Bob', 'FT5102|2026-02-24 08:00|Lee, Ann', 'FT5103|2026-02-25 08:00|Jones, Bob'
+                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5104'
+                                                $r.Reasons['Continue String'] | Should -Be '2 String'
+                                                $r.Reasons['Counter Continuity'] | Should -Be 'Jones already flew 2 of 3 rides'
+
+                                                $s = New-TestStudent -Name 'B' -Done 'FT5001|2026-02-23 08:00|Lee, Ann', 'FT5102|2026-02-24 08:00|Jones, Bob', 'FT5103|2026-02-25 08:00|Lee, Ann', 'FT5104|2026-02-26 08:00|Lee, Ann'
+                                                $r = Get-Soft -Student $s -Instructor 'Ortiz, Sam' -Mission 'FT5190'
+                                                $r.Reasons['Break String'] | Should -Be 'Breaks 2 String w/ Lee'
+                                }
+
+                                It 'Get-ShortIPName keeps the last name and drops [tags]' {
+                                                Get-ShortIPName 'Jones, Bob [EXP]' | Should -Be 'Jones'
+                                                Get-ShortIPName 'Smith [EXP]' | Should -Be 'Smith'
+                                                Get-ShortIPName 'Lee, Ann' | Should -Be 'Lee'
                                 }
 
                                 It 'Counter Continuity for an IP who flew the student before (older than the zipper)' {

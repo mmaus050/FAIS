@@ -709,8 +709,10 @@ function SoftRules {
                 ###############################################################
                 $simDebt = 0.0
                 if ($null -ne $Student.SimDebt -and [string]$Student.SimDebt -ne '') { $simDebt = [double]$Student.SimDebt }
-                # A negative SimDebt means the student is ahead on sims
-                $debtText = if ($simDebt -lt 0) { "Sim credit $(Format-Number (-$simDebt))" } else { "Sim Debt $(Format-Number $simDebt)" }
+                # A negative SimDebt means the student is ahead on sims. One decimal, like the points
+                # the board shows next to it.
+                $debtShown = [math]::Round([math]::Abs($simDebt), 1)
+                $debtText = if ($simDebt -lt 0) { "Sim credit $(Format-Number $debtShown)" } else { "Sim Debt $(Format-Number $debtShown)" }
                 if ($missionName -like '*FT5*' -or $missionName -like '*FF5*' -or $missionName -like '*AA5*') {
                                 $pts = -$simDebt
                                 $Score += $pts
