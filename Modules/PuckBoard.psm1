@@ -114,12 +114,13 @@ function Initialize-PuckBoardWindow {
                                 'LoadTemplateButton', 'SaveTemplateButton', 'CopyPrevDayButton', 'LoadDayButton', 'AddDayPicker', 'AddDayButton',
                                 'RemoveDayButton', 'BulkLinesButton', 'UpdateSyllabiButton', 'CancelButton', 'BackToEditButton', 'RefillButton', 'ExportButton', 'FillButton', 'FillDayOnlyCheck', 'StatusText',
                                 'CountsText', 'IPSearchBox', 'IPPool', 'StudentSearchBox', 'StudentPool', 'ModeBanner', 'ModeBannerText', 'DayTabs',
-                                'SheetBanner', 'SheetBannerText', 'SheetBannerLoadButton', 'SheetBannerIgnoreButton',
+                                'SheetBanner', 'SheetBannerText', 'SheetBannerLoadButton', 'SheetBannerIgnoreButton', 'LogoImage',
                                 'BusyOverlay', 'BusyText', 'BusyProgress', 'DropPopup', 'DropPopupPanel')) {
                                 $c = $window.FindName($name)
                                 if ($null -eq $c) { throw "PuckBoard.xaml is missing the element '$name'" }
                                 $controls[$name] = $c
                 }
+                Set-PBLogo -Image $controls.LogoImage -Path (Join-Path $PSScriptRoot 'BoardLogo.png')
 
                 $script:PB = @{
                                 Window      = $window
@@ -179,6 +180,29 @@ function Initialize-PuckBoardWindow {
 }
 
 # Boards / Templates folder next to FAIS.ps1, else %LOCALAPPDATA%\FAIS
+# Shows the logo file in the title bar. A missing or unreadable file just hides the logo.
+# Read through a stream (not a file URI) so a path with '#' or '%' in it still works and the file isn't locked.
+function Set-PBLogo {
+                param ($Image, [string]$Path)
+
+                $Image.Visibility = 'Collapsed'
+                if (-not (Test-Path -LiteralPath $Path)) { return }
+                try {
+                                $stream = [System.IO.File]::OpenRead($Path)
+                                try {
+                                                $bitmap = New-Object System.Windows.Media.Imaging.BitmapImage
+                                                $bitmap.BeginInit()
+                                                $bitmap.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+                                                $bitmap.StreamSource = $stream
+                                                $bitmap.EndInit()
+                                                $bitmap.Freeze()
+                                } finally { $stream.Dispose() }
+                                $Image.Source = $bitmap
+                                $Image.Visibility = 'Visible'
+                }
+                catch { }
+}
+
 function Resolve-PBWritableDir {
                 param ([string]$Preferred, [string]$Leaf)
 
@@ -598,22 +622,39 @@ function Test-PBAssessmentFresh {
 }
 
 # Missions offered in a pinned line's dropdown: (auto), the events the student can fly here,
-# the next ones they aren't opted for yet (marked), and "Type a mission..."
+# the next ones they aren't opted for yet (tagged), and "Type a mission...". Both lists come
+# from the line's assessment, which sees the student's other lines on the board, so the tags
+# agree with the flags. Until it is in: the events they are opted for in MasterData, no tags.
 function Get-PBMissionChoices {
                 param ($Line)
 
                 $a = Get-PBCurrentAssessment $Line
-                $student = Resolve-StudentByName -Students $script:PB.Data.Students -Name $Line.Student
                 $names = @()
-                if ($null -ne $a -and @($a.EligibleEvents).Count -gt 0) { $names = @($a.EligibleEvents) }
+                $notOpted = @()
+                if ($null -ne $a -and -not $a.Quick) {
+                                $names = @($a.EligibleEvents)
+                                $notOpted = @($a.NotOptedEvents)
+                }
                 else {
+                                $student = Resolve-StudentByName -Students $script:PB.Data.Students -Name $Line.Student
                                 $types = Get-AllowedEventTypes ([string]$Line.SortieType)
                                 if ($null -ne $student -and $null -ne $types) {
                                                 $names = @(Get-OptedEvents -SyllabusData $student.Syllabus | Where-Object { ([string]$_.Type).Trim() -in $types } |
                                                                 Sort-Object -Property { Get-SyllabusSortKey $_ } | ForEach-Object { [string]$_.Mission })
                                 }
                 }
-                return @(Get-MissionChoiceTexts -Student $student -SortieType ([string]$Line.SortieType) -Eligible $names -Current ([string]$Line.Mission))
+                return @(Get-MissionChoiceTexts -Eligible $names -Current ([string]$Line.Mission) -NotOpted $notOpted)
+}
+
+# What picking -Value in a row's mission dropdown asks for: a ChooseMission command, or $null
+# when nothing changes ((auto) on an (auto) line, the line's own mission again, a disabled row)
+function Get-PBMissionCommand {
+                param ($VM, [string]$Value)
+
+                if ($null -eq $VM -or -not $VM.MissionEnabled -or @($VM.MissionOptions) -notcontains $Value) { return $null }
+                $choice = ConvertFrom-MissionChoiceText $Value
+                if ($choice.Kind -ne 'Type' -and $choice.Mission -ceq [string]$VM.MissionRaw) { return $null }
+                return @{ Cmd = 'ChooseMission'; LineId = [string]$VM.LineId; Value = $Value }
 }
 
 # The view model a row's DataTemplate binds to
@@ -1123,6 +1164,16 @@ function Invoke-PBKeyDown {
                 }
                 if ($src -is [System.Windows.Controls.Primitives.TextBoxBase]) { return }
 
+                # Arrow keys on a closed mission dropdown open it rather than step through it: moving in the
+                # open list picks nothing until Enter or a click (a pick can ask about a rule break)
+                $combo = $src -as [System.Windows.Controls.ComboBox]
+                if ($null -ne $combo -and [string]$combo.Tag -eq 'MissionBox' -and -not $combo.IsDropDownOpen -and
+                                @($KeyT::Up, $KeyT::Down, $KeyT::Left, $KeyT::Right, $KeyT::Home, $KeyT::End, $KeyT::PageUp, $KeyT::PageDown) -contains $key) {
+                                $combo.IsDropDownOpen = $true
+                                $e.Handled = $true
+                                return
+                }
+
                 if ($ctrl -and $key -eq $KeyT::Z) { Request-PBCommand @{ Cmd = 'Undo' }; $e.Handled = $true; return }
                 if ($ctrl -and $key -eq $KeyT::L) { [void]$C.QuickEntryBox.Focus(); $C.QuickEntryBox.SelectAll(); $e.Handled = $true; return }
                 if ($ctrl -and $key -eq $KeyT::Enter) { Request-PBCommand @{ Cmd = 'Fill' }; $e.Handled = $true; return }
@@ -1221,10 +1272,9 @@ function Invoke-PBSelectionChanged {
                                                 if ($value -and $value -ne $vm.SortieType) { Request-PBCommand @{ Cmd = 'SetType'; LineId = $vm.LineId; Value = $value } }
                                 }
                                 'MissionBox' {
-                                                if (@($vm.MissionOptions) -notcontains $value -or -not $vm.MissionEnabled) { return }
                                                 # Checked (and typed, for "Type a mission...") after this event, not inside it
-                                                $choice = ConvertFrom-MissionChoiceText $value
-                                                if ($choice.Kind -eq 'Type' -or $choice.Mission -ne $vm.MissionRaw) { Request-PBCommand @{ Cmd = 'ChooseMission'; LineId = $vm.LineId; Value = $value } }
+                                                $cmd = Get-PBMissionCommand -VM $vm -Value $value
+                                                if ($null -ne $cmd) { Request-PBCommand $cmd }
                                 }
                 }
 }
@@ -1522,6 +1572,9 @@ function Invoke-PBCommand {
                                                 $lines = @($Cmd.Lines)
                                                 $links = if ($Cmd.ContainsKey('Links')) { @($Cmd.Links) } else { @() }
                                                 Invoke-PBChange { Add-BoardLine -Board $board -Line $lines -Link $links } -Status $Cmd.Status
+                                                # A student typed with a mission (sp: m:): show the rule check, like a pick in the dropdown
+                                                $typed = @($lines | Where-Object { $null -ne $_ -and $_.Student -and $_.Mission } | Select-Object -First 1)
+                                                if ($typed.Count -gt 0) { Show-PBPlacementPopup ([string]$typed[0].Id) }
                                 }
                                 'Undo' {
                                                 $wasReview = ($script:PB.Mode -eq 'Review')
@@ -1577,8 +1630,9 @@ function Invoke-PBChooseMission {
 
                 $status = if ($mission -eq '') { 'Mission set to (auto).' } elseif ($override) { "$mission kept - it is flagged OVERRIDE on the output." } else { "Mission set to $mission." }
                 Invoke-PBChange { Set-BoardMission -Board $board -Id $LineId -Mission $mission } -Status $status
-                if ($override) { Set-PBStatus $status 'Warn' }
                 Show-PBPlacementPopup $LineId
+                # The popup puts the line's summary on the status bar; a kept rule break says so instead
+                if ($override) { Set-PBStatus $status 'Warn' }
 }
 
 # The rule check for a mission picked by hand (Get-MissionAdvice with both assessments)
@@ -2120,6 +2174,7 @@ MISSIONS
   A mission that breaks a rule (not opted - e.g. a sim before the dollar ride - not in the
   syllabus, or the wrong line type) is explained first, with the scheduler's pick offered:
   Yes = use the recommended mission, No = keep yours (flagged OVERRIDE), Cancel = no change.
+  A line typed with sp: and m: goes on as typed and its rule check pops up.
 
 MARKERS
   The corner triangle on a hardcoded student: green clean, amber warnings, red rule broken,
@@ -2571,6 +2626,7 @@ function Test-PuckBoardWindow {
                                 $w.Show()
                                 Invoke-PBDoEvents
                                 & $check ($script:PB.C.DayTabs.Items.Count -eq 1) 'one day tab'
+                                & $check ($null -ne $script:PB.C.LogoImage.Source -and $script:PB.C.LogoImage.Visibility -eq 'Visible') 'logo shown in the title bar'
 
                                 $step = 'quick entry'
                                 $ip1 = Get-NormalizedLastName ([string]$Data.Instructors[0].Name)
@@ -2607,8 +2663,15 @@ function Test-PuckBoardWindow {
                                 Invoke-PBCommand @{ Cmd = 'Undo' }
                                 & $check ($script:PB.Board.Lines.Count -eq 5) 'undo removed the return line'
                                 $choices = @(Get-PBMissionChoices (Get-BoardLine $script:PB.Board $lines[0].Id))
-                                & $check ($choices.Count -ge 2) 'mission dropdown has events'
-                                if ($choices.Count -ge 2) { Invoke-PBCommand @{ Cmd = 'SetMission'; LineId = $lines[0].Id; Value = $choices[1] } }
+                                $events = @($choices | Where-Object { (ConvertFrom-MissionChoiceText $_).Kind -eq 'Mission' -and $_ -notlike '* (not opted)' })
+                                & $check ($events.Count -ge 1) 'mission dropdown has events'
+                                if ($events.Count -ge 1) {
+                                                # The real pick path, unless this event would ask about a rule break (a message box would stop the test)
+                                                $advice = Get-PBMissionAdvice -Line (Get-BoardLine $script:PB.Board $lines[0].Id) -Mission $events[0]
+                                                $pickCmd = if ($advice.NeedsConfirm) { 'SetMission' } else { 'ChooseMission' }
+                                                Invoke-PBCommand @{ Cmd = $pickCmd; LineId = $lines[0].Id; Value = $events[0] }
+                                                & $check ((Get-BoardLine $script:PB.Board $lines[0].Id).Mission -eq $events[0]) 'mission picked from the dropdown'
+                                }
                                 Invoke-PBCommand @{ Cmd = 'SetField'; LineId = $lines[0].Id; Field = 'Notes'; Value = 'self-test note' }
                                 Invoke-PBDoEvents
 

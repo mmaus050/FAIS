@@ -615,16 +615,25 @@ function Get-NoEligibleMessage {
                 return "No eligible $label events (next: $nextList)"
 }
 
+# Mission name (upper case) -> complete, for a student's whole syllabus
+function Get-MissionDoneMap {
+                param ($Student)
+
+                $done = @{}
+                foreach ($m in @($Student.Syllabus)) { if ($null -ne $m) { $done[([string]$m.Mission).Trim().ToUpperInvariant()] = (Test-MissionComplete $m) } }
+                return $done
+}
+
 # Why a student isn't opted for an event ('' when they are): it is already complete, or a
-# prereq isn't complete yet (e.g. a sim whose prereq is the dollar ride)
+# prereq isn't complete yet (e.g. a sim whose prereq is the dollar ride).
+# -DoneMap: a Get-MissionDoneMap result, when checking many events of one student.
 function Get-NotOptedReason {
-                param ($Student, $Mission)
+                param ($Student, $Mission, [hashtable]$DoneMap)
 
                 if (Test-MissionComplete $Mission) { return 'already complete' }
                 $prereqText = [string]$Mission.Prereqs
                 if ($prereqText.Trim() -eq '0' -or [string]::IsNullOrWhiteSpace($prereqText)) { return '' }
-                $done = @{}
-                foreach ($m in @($Student.Syllabus)) { if ($null -ne $m) { $done[([string]$m.Mission).Trim().ToUpperInvariant()] = (Test-MissionComplete $m) } }
+                $done = if ($null -ne $DoneMap) { $DoneMap } else { Get-MissionDoneMap $Student }
                 $missing = @($prereqText -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' -and -not $done[$_.ToUpperInvariant()] })
                 if ($missing.Count -eq 0) { return '' }
                 $verb = if ($missing.Count -eq 1) { "isn't" } else { "aren't" }
@@ -1440,7 +1449,15 @@ function Invoke-PinnedLine {
 
                 $FormIndex = Process-HardcodedSortie -Sortie $Sortie -Student $Student -Mission $mission -Schedule $Rows -Students $Students `
                                 -Instructors $Instructors -SoftWeights $SoftWeights -Formations $Formations -FormIndex $FormIndex
-                if ($null -eq $mission -and $explicitName -ne '') { $Sortie.Mission = $explicitName }
+                if ($null -eq $mission -and $explicitName -ne '') {
+                                # A typed mission that isn't in the syllabus: kept as typed. The student still flies an O&B's
+                                # return leg (the next event they can fly home, or a note that there is none).
+                                $Sortie.Mission = $explicitName
+                                if (Test-IsOBSortieType ([string]$Sortie.SortieType)) {
+                                                Schedule-ReturnLeg -Sortie $Sortie -Student $Student -Schedule $Rows -Instructors $Instructors -SoftWeights $SoftWeights
+                                                $release = @([string]$Sortie.BoardLineId)
+                                }
+                }
                 if ($null -eq $mission) {
                                 # Nothing was marked complete, so keep holding the student's time on this line (and its return)
                                 # or later lines could double- or triple-book them
