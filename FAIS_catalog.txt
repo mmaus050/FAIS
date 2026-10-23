@@ -7,8 +7,8 @@ FAIS CATALOG - every source file in one text file
 # Run order:
 #   1. Open MasterData / OutputSchedule workbooks are saved in Excel so the latest edits are read
 #   2. Pre-run pop-ups: log hooked (unsat) / incomplete events from the last schedule (saved right away)
-#   3. Puck board: lines come from MasterData's Schedule sheet one day at a time (re-read whenever
-#      MasterData is saved), or are typed; hardcode IPs and students, see the + / - and rule flags
+#   3. Puck board: lines come from MasterData's Schedule sheet, a tab for each day it has lines for
+#      (re-read whenever MasterData is saved), or are typed; hardcode IPs and students, see the + / - and rule flags
 #   4. "Fill this day" or "Fill all days": the scheduler fills the open lines, you review it
 #   5. Export, all or nothing, for the filled days: OutputSchedule.xlsx (MasterSchedule, other exported
 #      days kept, + each student's syllabus tab), SimDebt + cleaned-up unsats to MasterData, and
@@ -54,9 +54,9 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne [System.Thr
 # ==========================================
 #       CONFIGURATION
 # ==========================================
-$excelInputPath = Join-Path (Split-Path $PSScriptRoot -Parent) "MasterData.xlsx"
+$excelInputPath = Join-Path $PSScriptRoot "MasterData.xlsx"
 $desktopPath = [Environment]::GetFolderPath('Desktop')
-$excelOutputPath = Join-Path -Path $desktopPath -ChildPath "OutputSchedule.xlsx"
+$excelOutputPath = Join-Path -Path $PSScriptRoot -ChildPath "OutputSchedule.xlsx"
 $atisOutputPath = Join-Path -Path $desktopPath -ChildPath "ATIS.xlsx"
 
 # Puck board
@@ -117,7 +117,7 @@ if (-not (Test-Path -LiteralPath $excelInputPath)) {
 }
 # Workbooks open in Excel are saved first, so edits not saved yet are read too
 [void](Close-FaisExcelFiles -Path @($excelInputPath, $excelOutputPath) -SaveOnly)
-$Ingested = IngestData -excelInputPath $excelInputPath -desktopPath $desktopPath -excelOutputPath $excelOutputPath
+$Ingested = IngestData -excelInputPath $excelInputPath -excelOutputPath $excelOutputPath
 if ($Ingested.OutputError) {
     # Carrying on would start every student from the blank syllabus and overwrite their tabs on export
     Write-Host "OutputSchedule.xlsx could not be opened, so the students' progress can't be read: $($Ingested.OutputError)" -ForegroundColor Red
@@ -134,7 +134,7 @@ if ($null -eq $SoftWeights) {
     Write-Host "The SoftWeights sheet could not be read, so nothing can be scored. Fix MasterData.xlsx and run again." -ForegroundColor Red
     return
 }
-Write-Host ("Loaded {0} students, {1} IPs, {2} formation callsigns." -f @($Students).Count, @($Instructors).Count, @($Formations).Count) -ForegroundColor Cyan
+Write-Host ("Loaded {0} students, {1} IPs, {2} formation callsigns from {3}." -f @($Students).Count, @($Instructors).Count, @($Formations).Count, $excelInputPath) -ForegroundColor Cyan
 
 
 # ==========================================
@@ -142,7 +142,7 @@ Write-Host ("Loaded {0} students, {1} IPs, {2} formation callsigns." -f @($Stude
 # ==========================================
 # Brings in the previous schedule (with the complex objects attached) so lines can be
 # marked hooked (unsat) or incomplete before anything is scheduled
-$PrevSchedule = @(DownloadPrevSchedule -Students $Students -Instructors $Instructors -desktopPath $desktopPath -excelOutputPath $excelOutputPath)
+$PrevSchedule = @(DownloadPrevSchedule -Students $Students -Instructors $Instructors -excelOutputPath $excelOutputPath)
 if (-not (Invoke-PreRunMenu -Schedule $PrevSchedule -Students $Students -SoftWeights $SoftWeights -MasterDataPath $excelInputPath -OutputPath $excelOutputPath)) {
     return
 }
@@ -743,7 +743,7 @@ function Get-InstructorPuckInfo {
 # Typing: ConvertTo-BoardTime / Format-BoardTime / ConvertTo-BoardSortieType / ConvertFrom-QuickEntry
 #         New-BulkBoardLines (Add Bulk Lines)
 # Engine: ConvertTo-ScheduleRows / ConvertFrom-ScheduleRows / Get-FillOverlay / Test-BoardReadyToFill
-# One day at a time: Resolve-SheetRowDays / ConvertFrom-SheetRows / Import-BoardDayLines / Get-BoardSheetState / Get-SheetBannerInfo
+# One day at a time: Resolve-SheetRowDays / ConvertFrom-SheetRows / Import-BoardDayLines / Get-BoardSheetState / Get-SheetBannerInfo / Get-SheetDaysToAdd
 #         Set-BoardSheetSync / ConvertFrom-PublishedRows / Get-PublishedContextRows / Split-FillResult
 # Files:  Save-BoardState / Open-BoardState / Get-SavedBoardDays
 #         Save-BoardTemplate / Get-BoardTemplateList / Import-BoardTemplate / Copy-BoardPreviousDay
@@ -1817,9 +1817,10 @@ function Get-BoardSheetState {
 
 # The one thing about the Schedule sheet worth telling the user, or $null. First a board day
 # (the active one first) whose sheet lines changed or were never loaded, else a later day the
-# sheet has lines for that is not on the board yet. -Ignore holds 'day|fingerprint' keys of
-# later days the user already waved off.
-# Returns {Day; State; Count; Fingerprint; Text; ActionText}
+# sheet has lines for that is not on the board yet, else (PastDay) why an empty board got
+# nothing: the sheet only has days before the board's first day. -Ignore holds
+# 'day|fingerprint' keys of days the user already waved off.
+# Returns {Day; TargetDay (where loading puts it); State; Count; Fingerprint; Text; ActionText}
 function Get-SheetBannerInfo {
                 param ($Board, [array]$SheetRows = @(), [string]$ActiveDay = '', [string[]]$Ignore = @())
 
@@ -1837,25 +1838,59 @@ function Get-SheetBannerInfo {
                                                 'EmptyDay' { $text = "MasterData's Schedule sheet has $($st.SheetCount) line(s) for $label."; $action = "Load $label" }
                                 }
                                 if ($null -ne $text) {
-                                                return [PSCustomObject]@{ Day = $d; State = $st.State; Count = $st.SheetCount; Fingerprint = $st.Fingerprint; Text = $text; ActionText = $action }
+                                                return [PSCustomObject]@{ Day = $d; TargetDay = $d; State = $st.State; Count = $st.SheetCount; Fingerprint = $st.Fingerprint; Text = $text; ActionText = $action }
                                 }
                 }
-                $first = if ($Board.Days.Count -gt 0) { [string]$Board.Days[0] } else { '' }
-                foreach ($g in @(Get-ScheduleSheetDays -Rows $SheetRows)) {
-                                if ($g.Day -eq '' -or $Board.Days.Contains($g.Day) -or ($first -ne '' -and $g.Day -lt $first)) { continue }
-                                $fp = Get-ScheduleDayFingerprint -Rows $SheetRows -Day $g.Day
-                                if ($Ignore -contains "$($g.Day)|$fp") { continue }
+                $later = @(Get-SheetDaysToAdd -Board $Board -SheetRows $SheetRows -Ignore $Ignore)
+                foreach ($g in $later) {
                                 $label = Format-BoardDayLabel $g.Day
                                 return [PSCustomObject]@{
                                                 Day         = $g.Day
+                                                TargetDay   = $g.Day
                                                 State       = 'OtherDay'
                                                 Count       = $g.Count
-                                                Fingerprint = $fp
+                                                Fingerprint = $g.Fingerprint
                                                 Text        = "MasterData's Schedule sheet also has $($g.Count) line(s) for $label."
                                                 ActionText  = "Add $label to the board"
                                 }
                 }
-                return $null
+                # A sheet with lines only for days before the board's first day loads nothing by itself,
+                # so while that first day is empty say why, and offer the latest of those days for it
+                $first = if ($Board.Days.Count -gt 0) { [string]$Board.Days[0] } else { '' }
+                if ($first -eq '' -or @(Get-BoardDayLines -Board $Board -Day $first).Count -gt 0) { return $null }
+                $sheetDays = @(Get-ScheduleSheetDays -Rows $SheetRows | Where-Object { $_.Day -ne '' })
+                if (@($sheetDays | Where-Object { $_.Day -ge $first }).Count -gt 0) { return $null }
+                $past = @($sheetDays | Where-Object { $_.Day -lt $first })
+                if ($past.Count -eq 0) { return $null }
+                $g = $past[-1]
+                $fp = Get-ScheduleDayFingerprint -Rows $SheetRows -Day $g.Day
+                if ($Ignore -contains "$($g.Day)|$fp") { return $null }
+                $label = Format-BoardDayLabel $g.Day
+                $firstLabel = Format-BoardDayLabel $first
+                return [PSCustomObject]@{
+                                Day         = $g.Day
+                                TargetDay   = $first
+                                State       = 'PastDay'
+                                Count       = $g.Count
+                                Fingerprint = $fp
+                                Text        = "MasterData's Schedule sheet only has lines for days before $firstLabel (the board's first day): $($g.Count) line(s) for $label. They were not loaded."
+                                ActionText  = "Put them on $firstLabel"
+                }
+}
+
+# The days MasterData's Schedule sheet has lines for that are not on the board yet: from the
+# board's first day on (earlier days are not offered), and not waved off. -Ignore holds
+# 'day|fingerprint' keys. In date order, each {Day; Count; Fingerprint}.
+function Get-SheetDaysToAdd {
+                param ($Board, [array]$SheetRows = @(), [string[]]$Ignore = @())
+
+                $first = if ($Board.Days.Count -gt 0) { [string]$Board.Days[0] } else { '' }
+                return @(foreach ($g in @(Get-ScheduleSheetDays -Rows $SheetRows)) {
+                                if ($g.Day -eq '' -or $Board.Days.Contains($g.Day) -or ($first -ne '' -and $g.Day -lt $first)) { continue }
+                                $fp = Get-ScheduleDayFingerprint -Rows $SheetRows -Day $g.Day
+                                if ($Ignore -contains "$($g.Day)|$fp") { continue }
+                                [PSCustomObject]@{ Day = $g.Day; Count = $g.Count; Fingerprint = $fp }
+                })
 }
 
 # Days the last exported MasterSchedule has lines for, in order
@@ -2325,14 +2360,13 @@ function Get-NextFlyingDay {
 function IngestData {
                 param (
                                 [string]$excelInputPath,
-                                [string]$desktopPath,
                                 [string]$excelOutputPath,
                                 [int]$MaxStudents = 100
                 )
 
-                # Build the output path from the Desktop folder when it was not passed in
-                if ([string]::IsNullOrWhiteSpace($excelOutputPath) -and -not [string]::IsNullOrWhiteSpace($desktopPath)) {
-                                $excelOutputPath = Join-Path $desktopPath "OutputSchedule.xlsx"
+                # Default to OutputSchedule.xlsx in the FAIS folder when no path was passed in
+                if ([string]::IsNullOrWhiteSpace($excelOutputPath)) {
+                                $excelOutputPath = Join-Path (Split-Path $PSScriptRoot -Parent) "OutputSchedule.xlsx"
                 }
 
                 # ------------------------------------------------------------------
@@ -2454,6 +2488,8 @@ function IngestData {
                                 $dayText = @(Get-ScheduleSheetDays -Rows $ScheduleSheet.Rows | ForEach-Object { "$($_.Label) ($($_.Count))" }) -join ', '
                                 Write-Host "Schedule sheet: $(@($ScheduleSheet.Rows).Count) line(s): $dayText" -ForegroundColor Cyan
                 }
+                elseif ($ScheduleSheet.Found) { Write-Host "Schedule sheet: no lines" -ForegroundColor Yellow }
+                else { Write-Host "Schedule sheet: MasterData has no sheet named 'Schedule'" -ForegroundColor Yellow }
                 foreach ($skip in @($ScheduleSheet.Skipped)) { Write-Host "  Schedule sheet $skip" -ForegroundColor Yellow }
                 $Schedule = @($ScheduleSheet.Rows | Where-Object { $_.ETD } | Sort-Object -Property ETD)
 
@@ -2885,14 +2921,12 @@ function DownloadPrevSchedule {
                 param (
                                 $Students,
                                 $Instructors,
-                                $desktopPath,
                                 $excelOutputPath
                 )
 
                 $filePath = $excelOutputPath
                 if ([string]::IsNullOrWhiteSpace($filePath)) {
-                                if ([string]::IsNullOrWhiteSpace($desktopPath)) { $desktopPath = [Environment]::GetFolderPath('Desktop') }
-                                $filePath = Join-Path $desktopPath "OutputSchedule.xlsx"
+                                $filePath = Join-Path (Split-Path $PSScriptRoot -Parent) "OutputSchedule.xlsx"
                 }
 
                 if (-not (Test-Path $filePath)) {
@@ -2937,7 +2971,7 @@ function DownloadPrevSchedule {
 function Import-MasterSchedule {
     [CmdletBinding()]
     param(
-        [string]$WorkbookPath = (Join-Path $env:USERPROFILE 'Desktop\OutputSchedule.xlsx'),
+        [string]$WorkbookPath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'OutputSchedule.xlsx'),
 
         [string]$WorksheetName = 'MasterSchedule',
 
@@ -2963,10 +2997,10 @@ function Import-MasterSchedule {
     try {
         # Locate OutputSchedule if the supplied default path does not exist.
         if (-not (Test-Path -LiteralPath $WorkbookPath)) {
-            $desktop = Join-Path $env:USERPROFILE 'Desktop'
+            $faisDir = Split-Path $PSScriptRoot -Parent
 
             $matches = @(
-                Get-ChildItem -Path $desktop -File -ErrorAction SilentlyContinue |
+                Get-ChildItem -Path $faisDir -File -ErrorAction SilentlyContinue |
                     Where-Object {
                         $_.BaseName -eq 'OutputSchedule' -and
                         $_.Extension -in '.xlsx', '.xlsm', '.xls'
@@ -2974,12 +3008,12 @@ function Import-MasterSchedule {
             )
 
             if ($matches.Count -eq 0) {
-                Write-Warning "OutputSchedule workbook was not found on the Desktop. Continuing with an empty schedule."
+                Write-Warning "OutputSchedule workbook was not found in the FAIS folder. Continuing with an empty schedule."
                 return $emptySchedule
             }
 
             if ($matches.Count -gt 1) {
-                Write-Warning "Multiple OutputSchedule workbooks were found on the Desktop. Continuing with an empty schedule. Specify -WorkbookPath explicitly."
+                Write-Warning "Multiple OutputSchedule workbooks were found in the FAIS folder. Continuing with an empty schedule. Specify -WorkbookPath explicitly."
                 return $emptySchedule
             }
 
@@ -5219,10 +5253,11 @@ function Invoke-PreRunMenu {
 #    the current WPF event finishes, so rows are never rebuilt inside their own events.
 #  - Pinned students are re-checked in the background after every change (DispatcherTimer),
 #    which keeps the corner markers current without freezing the window.
-#  - MasterData's Schedule sheet is re-read whenever MasterData is saved (another timer watches
-#    the file). Board days nobody has edited since they were loaded update by themselves; for
-#    the rest a banner offers the change. "Load a day..." loads one day from the sheet or from
-#    the last exported schedule.
+#  - MasterData's Schedule sheet gives each day it has lines for (from the board's first day on)
+#    a tab of its own, and is re-read whenever MasterData is saved (another timer watches the
+#    file). New sheet days are added and board days nobody has edited since they were loaded
+#    update by themselves; for the rest a banner offers the change. "Load a day..." loads one
+#    day from the sheet or from the last exported schedule.
 #  - Pucks go on a line by drag and drop, or by click and place: a click picks a puck up
 #    (PB.Held), the next slot clicked gets it, and a double-click puts it on the selected line.
 #  - Clicking a line selects it (PB.SelectedLineId). The Line details panel under the days shows
@@ -5385,7 +5420,6 @@ function Initialize-PuckBoardWindow {
                 Register-PBHandlers
                 Register-PBMenuHandlers
                 Initialize-PBDetails
-                $controls.AddDayPicker.SelectedDate = (Get-NextFlyingDay -From ([datetime]::ParseExact($board.Days[$board.Days.Count - 1], 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)))
                 Update-PBTemplateList
                 Set-PBMode 'Edit'
                 Update-PBAll
@@ -5396,6 +5430,8 @@ function Initialize-PuckBoardWindow {
                                 Write-PBLog ("Schedule sheet at start: {0}`n{1}" -f $_.Exception.Message, $_.ScriptStackTrace)
                                 $sheetMsg = "Could not load MasterData's Schedule sheet ($($_.Exception.Message)). Use Load a day... to try again."
                 }
+                # After the sheet has added its days: the date box suggests the flying day after the last one
+                $controls.AddDayPicker.SelectedDate = (Get-NextFlyingDay -From ([datetime]::ParseExact($board.Days[$board.Days.Count - 1], 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)))
                 Start-PBAssessQueue
                 if (-not [string]::IsNullOrWhiteSpace([string]$Data.MasterDataPath)) { $script:PB.SheetTimer.Start() }
 
@@ -8299,8 +8335,19 @@ function Invoke-PBRemoveDay {
                 $n = @($script:PB.Board.Lines | Where-Object { $_.Day -eq $day }).Count
                 $ans = [System.Windows.MessageBox]::Show("Remove $day and its $n line(s) from the board?", 'Remove day', [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Warning)
                 if ($ans -ne [System.Windows.MessageBoxResult]::Yes) { return }
-                Invoke-PBChange { Remove-BoardDay -Board $script:PB.Board -Day $day } -Status "$day removed (Ctrl+Z to undo)."
-                $file = Join-Path $script:PB.Settings.BoardDir "$day.json"
+                Remove-PBDay $day
+}
+
+# Takes a day and its lines off the board (one undo step) and deletes its autosave file
+function Remove-PBDay {
+                param ([Parameter(Mandatory)] [string]$Day)
+
+                # A day the Schedule sheet has lines for is not put back by the next MasterData save,
+                # unless the sheet's lines for it change
+                $fp = Get-ScheduleDayFingerprint -Rows @(Get-PBSheetRows) -Day $Day
+                if ($fp -ne '') { $script:PB.SheetIgnore.Add("$Day|$fp") }
+                Invoke-PBChange { Remove-BoardDay -Board $script:PB.Board -Day $Day } -Status "$Day removed (Ctrl+Z to undo)."
+                $file = Join-Path $script:PB.Settings.BoardDir "$Day.json"
                 if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue }
 }
 
@@ -8411,12 +8458,17 @@ ADDING LINES (box at the top, press Enter)
 Templates save a day's times; "Copy previous day's lines" copies the last flying day.
 
 ONE DAY AT A TIME
+  Schedule sheet:         when the board opens, each day MasterData's Schedule sheet has lines
+                          for (from the board's first day on) gets a tab with those lines.
+                          Days before it are not loaded; if that is all the sheet has, the
+                          blue banner says so and can put them on the first day.
   Load a day...           Loads one day from MasterData's Schedule sheet, or from the schedule
                           you last exported (to change a day already sent out: everyone stays
                           where they were, so a fill only changes the lines you open up).
-  MasterData is watched:  save the Schedule sheet in Excel and the board follows: a day you have
-                          not edited since it was loaded (or that is still empty) updates by
-                          itself; for a day you have edited, the blue banner offers the change.
+  MasterData is watched:  save the Schedule sheet in Excel and the board follows: a new day on
+                          the sheet gets its own tab, and a day you have not edited since it was
+                          loaded (or that is still empty) updates by itself; for a day you have
+                          edited, the blue banner offers the change.
   Fill this day           Fills and exports just the day on screen (Ctrl+Shift+Enter). Days
                           already exported stay exactly as they were.
 
@@ -8483,8 +8535,9 @@ UPDATE SYLLABI
 # =================================================================================
 #  ONE DAY AT A TIME
 #  "Load a day..." puts one day on the board from MasterData's Schedule sheet or from the
-#  last exported schedule. The sheet is re-read whenever MasterData is saved, and the
-#  banner offers any day the board is behind on. "Fill this day" fills and exports one day.
+#  last exported schedule. The sheet is re-read whenever MasterData is saved: its new days
+#  get their own tabs, and the banner offers any day the board is behind on.
+#  "Fill this day" fills and exports one day.
 # =================================================================================
 
 function Select-PBDay {
@@ -8570,13 +8623,15 @@ function Update-PBPublishedRead {
 }
 
 # Loads the sheet onto the board days that can take it without losing anything: days still
-# empty, and days nobody has edited since they were loaded. Returns 'Tue 20 Oct (14 line(s))'
-# for each day loaded.
+# empty, days nobody has edited since they were loaded, and each day the sheet has lines for
+# (from the board's first day on) that is not on the board yet, as a tab of its own.
+# Returns 'Tue 20 Oct (14 line(s))' for each day loaded.
 function Invoke-PBSheetAutoUpdate {
                 $done = New-Object System.Collections.Generic.List[string]
                 $rows = @(Get-PBSheetRows)
                 if ($rows.Count -eq 0) { return @() }
-                foreach ($day in @($script:PB.Board.Days)) {
+                $newDays = @(Get-SheetDaysToAdd -Board $script:PB.Board -SheetRows $rows -Ignore $script:PB.SheetIgnore.ToArray() | ForEach-Object { $_.Day })
+                foreach ($day in @(@($script:PB.Board.Days) + $newDays)) {
                                 $st = Get-BoardSheetState -Board $script:PB.Board -SheetRows $rows -Day $day
                                 if ($st.State -ne 'EmptyDay' -and $st.State -ne 'Outdated') { continue }
                                 $res = Invoke-PBLoadDay -Source 'Sheet' -SourceDay $day -TargetDay $day -Replace -KeepStudents -Quiet -StayOnDay
@@ -8641,26 +8696,27 @@ function Update-PBSheetBanner {
                 if ($null -eq $info) { $C.SheetBanner.Visibility = 'Collapsed'; return }
                 $C.SheetBannerText.Text = $info.Text
                 $C.SheetBannerLoadButton.Content = $info.ActionText
-                $C.SheetBannerIgnoreButton.Content = if ($info.State -eq 'OtherDay') { 'Not now' } else { "Keep the board's lines" }
+                $C.SheetBannerIgnoreButton.Content = if (@('OtherDay', 'PastDay') -contains $info.State) { 'Not now' } else { "Keep the board's lines" }
                 $C.SheetBanner.Visibility = 'Visible'
 }
 
 function Invoke-PBSheetBannerLoad {
                 $info = $script:PB.SheetBannerInfo
                 if ($null -eq $info) { return }
-                [void](Invoke-PBLoadDay -Source 'Sheet' -SourceDay $info.Day -TargetDay $info.Day -Replace -KeepStudents)
+                [void](Invoke-PBLoadDay -Source 'Sheet' -SourceDay $info.Day -TargetDay $info.TargetDay -Replace -KeepStudents)
 }
 
 function Invoke-PBSheetBannerIgnore {
                 $info = $script:PB.SheetBannerInfo
                 if ($null -eq $info) { return }
-                if ($info.State -eq 'OtherDay') { $script:PB.SheetIgnore.Add("$($info.Day)|$($info.Fingerprint)") }
+                if (@('OtherDay', 'PastDay') -contains $info.State) { $script:PB.SheetIgnore.Add("$($info.Day)|$($info.Fingerprint)") }
                 else {
                                 Set-BoardSheetSync -Board $script:PB.Board -Day $info.Day -Entry (New-SheetSyncEntry -Fingerprint $info.Fingerprint -Action 'Ignored')
                                 Request-PBAutosave
                 }
                 Update-PBSheetBanner
-                Set-PBStatus "Kept the board's lines for $(Format-BoardDayLabel $info.Day). You will be asked again if the Schedule sheet changes."
+                $what = if (@('OtherDay', 'PastDay') -contains $info.State) { "Left the sheet's $(Format-BoardDayLabel $info.Day) off the board" } else { "Kept the board's lines for $(Format-BoardDayLabel $info.Day)" }
+                Set-PBStatus "$what. You will be asked again if the Schedule sheet changes."
 }
 
 # Puts one day's lines on the board (one undo step) from MasterData's Schedule sheet
@@ -11849,7 +11905,8 @@ function Get-StudentTimeline {
 #             line with it: on the board, on their OutputSchedule tab and in their SimDebt
 # Read-TrainingFile / Get-SheetBlock / ConvertTo-TrainingEtd
 # Find-DailyScheduleHeadings / Read-DailyScheduleSheet / Find-BigBoardHeadings / Read-BigBoardSheet / Get-BigBoardInstructor
-# ConvertTo-PersonName / Get-PersonNameMatch / Resolve-TrainingStudents / Resolve-TrainingInstructor
+# ConvertTo-NameWords / ConvertTo-PersonName / Get-GivenNameMatch / Get-PersonNameMatch
+# New-PersonIndex / Find-PersonMatch / Resolve-TrainingStudents / Resolve-TrainingInstructor
 # Get-SyllabusUpdatePlan / Get-SyllabusTargetResult / New-SyllabusChange
 # Update-SyllabusTabTargets / Invoke-SyllabusUpdate / Save-SyllabusUpdate / Format-SyllabusUpdateSummary
 #
@@ -12155,101 +12212,194 @@ function Get-BigBoardInstructor {
 
 # =================================================================================
 #  WHO IS WHO
-#  The flying schedule lists the whole wing ("Quill, Casey B. [2d Lt]"), so a FAIS student
-#  is matched on more than a last name whenever FAIS has more than a last name for them.
+#  Names come written different ways: "Quill, Casey B. [2d Lt]" (the flying schedule),
+#  "Quill, Casey" or just "Quill" (MasterData), "Casey B. Quill" (the Big Board). A name with
+#  a comma is last name, then first names. A name without one is read every way it can be:
+#  first names then a last name of one or more words, a last name on its own ("Quill",
+#  "Vega Ortiz"), and - only when nothing else fits - a last name then first names.
+#  The flying schedule lists the whole wing, so a student is matched on more than a last
+#  name whenever both names have more than a last name.
 # =================================================================================
 
-# A name split for matching: "Quill, Casey B. [2d Lt]" -> Last 'quill', Given @('casey', 'b').
-# Tags in [ ], periods, apostrophes and case don't count; a hyphen counts as a space.
-# A name with no comma is all last name ("Quill").
+# Words that are never part of a name: ranks, titles and suffixes (a rank in [ ] or ( ) goes whole)
+$script:NameDropWords = @('2d', '2nd', '1st', '2lt', '1lt', 'lt', 'ltc', 'col', 'capt', 'cpt', 'maj', 'ltjg', 'lcdr', 'cdr', 'civ',
+                'mr', 'mrs', 'ms', 'dr', 'usaf', 'usn', 'usmc', 'ret', 'jr', 'sr', 'ii', 'iii', 'iv')
+
+# How two names match, best first. Reversed: one of them was read last name first, with no comma.
+$script:NameMatchKinds = @('Exact', 'Given', 'LastOnly', 'ReversedExact', 'ReversedGiven')
+
+# Part of a name as lower-case words: periods and apostrophes go, hyphens and other marks split
+# words, and ranks / titles / suffixes are dropped
+function ConvertTo-NameWords {
+                param ([string]$Text)
+
+                $s = ($Text.ToLowerInvariant() -replace "['.]", '') -replace '[^\p{L}\p{Nd}]', ' '
+                return @($s -split '\s+' | Where-Object { $_ -ne '' -and $script:NameDropWords -notcontains $_ })
+}
+
+# Every way a name can be read: {Key (the whole name, to tell people apart); Readings}, each
+# reading {Last; Given (words); Reversed}. For example:
+#   "Quill, Casey B. [2d Lt]" -> quill / casey b
+#   "Quill"                   -> quill
+#   "Casey B. Quill"          -> casey b quill (all last name); quill / casey b; and, reversed,
+#                                casey / b quill (a last name never starts with an initial)
 function ConvertTo-PersonName {
                 param ([string]$Name)
 
-                $text = Get-BaseName $Name
-                $last = $text
-                $given = ''
+                $text = ([string]$Name -replace '\[[^\]]*\]', ' ') -replace '\([^\)]*\)', ' '
+                $readings = New-Object System.Collections.Generic.List[object]
                 $comma = $text.IndexOf(',')
-                if ($comma -ge 0) { $last = $text.Substring(0, $comma); $given = $text.Substring($comma + 1) }
-                $clean = {
-                                param ([string]$Part)
-                                $s = ($Part.ToLowerInvariant() -replace "['.]", '') -replace '[^\p{L}\p{Nd}]', ' '
-                                return ($s -replace '\s+', ' ').Trim()
+                if ($comma -ge 0) {
+                                $last = @(ConvertTo-NameWords $text.Substring(0, $comma))
+                                $given = @(ConvertTo-NameWords $text.Substring($comma + 1))
+                                if ($last.Count -gt 0) { $readings.Add([PSCustomObject]@{ Last = ($last -join ' '); Given = $given; Reversed = $false }) }
+                                return [PSCustomObject]@{ Key = (($last -join ' ') + '|' + ($given -join ' ')); Readings = $readings.ToArray() }
                 }
-                $l = & $clean $last
-                $g = & $clean $given
-                # Assigned straight from @() so a single first name stays a one-item array
-                $tokens = @()
-                if ($g -ne '') { $tokens = @($g -split ' ') }
-                return [PSCustomObject]@{ Last = $l; Given = $tokens; Key = ($l + '|' + ($tokens -join ' ')) }
+
+                $words = @(ConvertTo-NameWords $text)
+                $n = $words.Count
+                if ($n -gt 0) { $readings.Add([PSCustomObject]@{ Last = ($words -join ' '); Given = @(); Reversed = $false }) }
+                for ($k = 1; $k -lt $n; $k++) {
+                                $front = @($words[0..($k - 1)])
+                                $back = @($words[$k..($n - 1)])
+                                # First names, then the last name ("Casey B. Quill", "Ana M. Vega Ortiz")
+                                if ($back[0].Length -gt 1) { $readings.Add([PSCustomObject]@{ Last = ($back -join ' '); Given = $front; Reversed = $false }) }
+                                # Last name, then first names ("Quill Casey B")
+                                if ($front[0].Length -gt 1) { $readings.Add([PSCustomObject]@{ Last = ($front -join ' '); Given = $back; Reversed = $true }) }
+                }
+                return [PSCustomObject]@{ Key = ($words -join ' '); Readings = $readings.ToArray() }
 }
 
-# How a FAIS name (-Known) matches a name from a file (-Other), both from ConvertTo-PersonName:
-#   'Exact'    same name
-#   'Given'    same last name, and the first names (and middle initials, as far as both go) agree;
-#              an initial agrees with any name it starts ("c" = "casey")
-#   'LastOnly' same last name and one of them has no first name
-#   ''         not the same person
-function Get-PersonNameMatch {
-                param ($Known, $Other)
+# How two lists of first names agree: 'Exact' (the same, or both none), 'LastOnly' (one has
+# none), 'Given' (word by word as far as both go, an initial agreeing with any name it starts:
+# "c" = "casey"), or '' (they differ)
+function Get-GivenNameMatch {
+                param ([string[]]$A = @(), [string[]]$B = @())
 
-                if ($Known.Last -eq '' -or $Known.Last -ne $Other.Last) { return '' }
-                if ($Known.Key -eq $Other.Key) { return 'Exact' }
-                if ($Known.Given.Count -eq 0 -or $Other.Given.Count -eq 0) { return 'LastOnly' }
-                $n = [math]::Min($Known.Given.Count, $Other.Given.Count)
+                if ($A.Count -eq 0 -and $B.Count -eq 0) { return 'Exact' }
+                if ($A.Count -eq 0 -or $B.Count -eq 0) { return 'LastOnly' }
+                if (($A -join ' ') -eq ($B -join ' ')) { return 'Exact' }
+                $n = [math]::Min($A.Count, $B.Count)
                 for ($i = 0; $i -lt $n; $i++) {
-                                $a = [string]$Known.Given[$i]
-                                $b = [string]$Other.Given[$i]
-                                if ($a -eq $b) { continue }
-                                if (($a.Length -eq 1 -and $b.StartsWith($a)) -or ($b.Length -eq 1 -and $a.StartsWith($b))) { continue }
+                                $x = [string]$A[$i]
+                                $y = [string]$B[$i]
+                                if ($x -eq $y) { continue }
+                                if (($x.Length -eq 1 -and $y.StartsWith($x)) -or ($y.Length -eq 1 -and $x.StartsWith($y))) { continue }
                                 return ''
                 }
                 return 'Given'
 }
 
+# How a FAIS name (-Known) matches a name from a file (-Other), both from ConvertTo-PersonName:
+# the best of every pair of their readings with the same last name, as {Kind (NameMatchKinds);
+# Last}, or $null when they can't be the same person. A reading taken last name first only
+# counts when both names have first names and they agree.
+function Get-PersonNameMatch {
+                param ($Known, $Other)
+
+                $best = -1
+                $bestLast = ''
+                foreach ($a in @($Known.Readings)) {
+                                foreach ($b in @($Other.Readings)) {
+                                                if ($a.Last -ne $b.Last) { continue }
+                                                $kind = Get-GivenNameMatch -A $a.Given -B $b.Given
+                                                if ($kind -eq '') { continue }
+                                                if ($a.Reversed -or $b.Reversed) {
+                                                                if ($kind -eq 'LastOnly') { continue }
+                                                                $kind = "Reversed$kind"
+                                                }
+                                                $rank = [array]::IndexOf($script:NameMatchKinds, $kind)
+                                                if ($best -lt 0 -or $rank -lt $best) { $best = $rank; $bestLast = $a.Last }
+                                }
+                }
+                if ($best -lt 0) { return $null }
+                return [PSCustomObject]@{ Kind = $script:NameMatchKinds[$best]; Last = $bestLast }
+}
+
+# FAIS people (students or instructors: anything with a Name) by every last name their name
+# can be read with, for Find-PersonMatch
+function New-PersonIndex {
+                param ([array]$Items = @())
+
+                $index = @{}
+                $id = 0
+                foreach ($item in $Items) {
+                                if ($null -eq $item -or [string]::IsNullOrWhiteSpace([string]$item.Name)) { continue }
+                                $person = ConvertTo-PersonName ([string]$item.Name)
+                                $entry = [PSCustomObject]@{ Id = $id; Item = $item; Person = $person }
+                                $id++
+                                foreach ($last in @($person.Readings | ForEach-Object { $_.Last } | Select-Object -Unique)) {
+                                                if (-not $index.ContainsKey($last)) { $index[$last] = New-Object System.Collections.Generic.List[object] }
+                                                $index[$last].Add($entry)
+                                }
+                }
+                return $index
+}
+
+# The FAIS people (from New-PersonIndex) a name matches best: {Kind; Last; Hits (the items)}.
+# Hits is empty and Kind '' when it matches no one.
+function Find-PersonMatch {
+                param ($Person, [hashtable]$Index)
+
+                $best = -1
+                $bestLast = ''
+                $hits = New-Object System.Collections.Generic.List[object]
+                $seen = @{}
+                foreach ($reading in @($Person.Readings)) {
+                                if (-not $Index.ContainsKey($reading.Last)) { continue }
+                                foreach ($entry in $Index[$reading.Last]) {
+                                                if ($seen.ContainsKey($entry.Id)) { continue }
+                                                $seen[$entry.Id] = $true
+                                                $m = Get-PersonNameMatch -Known $entry.Person -Other $Person
+                                                if ($null -eq $m) { continue }
+                                                $rank = [array]::IndexOf($script:NameMatchKinds, $m.Kind)
+                                                if ($best -lt 0 -or $rank -lt $best) { $best = $rank; $bestLast = $m.Last; $hits.Clear() }
+                                                if ($rank -eq $best) { $hits.Add($entry.Item) }
+                                }
+                }
+                $kind = if ($best -ge 0) { $script:NameMatchKinds[$best] } else { '' }
+                return [PSCustomObject]@{ Kind = $kind; Last = $bestLast; Hits = $hits.ToArray() }
+}
+
 # Matches the people a training file names to FAIS students. Returns {Map; Unknown; Ambiguous}:
-#   Map: file name -> student, by the closest match (Exact, then Given, then LastOnly). A student
-#   FAIS knows by last name only matches when just one person in the file has that last name.
+#   Map: file name -> student, by the closest match (see NameMatchKinds). A student FAIS knows
+#   by last name only matches when just one person in the file can have that last name.
 #   Unknown: names that are no FAIS student. Ambiguous: names left alone because they could be
 #   more than one student, or a student who could be more than one person in the file.
 function Resolve-TrainingStudents {
                 param ([string[]]$Names = @(), [array]$Students = @())
 
-                $known = @(foreach ($s in $Students) {
-                                if ($null -ne $s -and -not [string]::IsNullOrWhiteSpace([string]$s.Name)) { [PSCustomObject]@{ Student = $s; Person = ConvertTo-PersonName ([string]$s.Name) } }
-                })
+                $index = New-PersonIndex -Items $Students
                 $people = @(foreach ($n in @($Names | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)) {
                                 [PSCustomObject]@{ Raw = $n; Person = ConvertTo-PersonName $n }
                 })
-                # Last name -> how many different people in the file have it
+                # Last name -> the different people in the file who can have it (last-name-first readings aside)
                 $keysByLast = @{}
                 foreach ($p in $people) {
-                                if (-not $keysByLast.ContainsKey($p.Person.Last)) { $keysByLast[$p.Person.Last] = New-Object System.Collections.Generic.HashSet[string] }
-                                [void]$keysByLast[$p.Person.Last].Add($p.Person.Key)
+                                foreach ($reading in @($p.Person.Readings | Where-Object { -not $_.Reversed })) {
+                                                if (-not $keysByLast.ContainsKey($reading.Last)) { $keysByLast[$reading.Last] = New-Object System.Collections.Generic.HashSet[string] }
+                                                [void]$keysByLast[$reading.Last].Add($p.Person.Key)
+                                }
                 }
 
                 $map = @{}
                 $unknown = New-Object System.Collections.Generic.List[string]
                 $ambiguous = New-Object System.Collections.Generic.List[string]
                 foreach ($p in $people) {
-                                $found = @{ Exact = @(); Given = @(); LastOnly = @() }
-                                foreach ($k in $known) {
-                                                $how = Get-PersonNameMatch -Known $k.Person -Other $p.Person
-                                                if ($how) { $found[$how] += $k.Student }
+                                $found = Find-PersonMatch -Person $p.Person -Index $index
+                                $hits = @($found.Hits)
+                                if ($hits.Count -eq 0) { $unknown.Add($p.Raw); continue }
+                                if ($hits.Count -gt 1) {
+                                                $ambiguous.Add("$($p.Raw) (could be $(@($hits | ForEach-Object { $_.Name }) -join ' or '))")
+                                                continue
                                 }
-                                $matched = $false
-                                foreach ($how in @('Exact', 'Given', 'LastOnly')) {
-                                                $hits = @($found[$how])
-                                                if ($hits.Count -eq 0) { continue }
-                                                $matched = $true
-                                                if ($hits.Count -gt 1) { $ambiguous.Add("$($p.Raw) (could be $(@($hits | ForEach-Object { $_.Name }) -join ' or '))") }
-                                                elseif ($how -eq 'LastOnly' -and $keysByLast[$p.Person.Last].Count -gt 1) {
-                                                                $line = "$($hits[0].Name) (more than one person on the file is called $(Get-NormalizedLastName (Get-BaseName $p.Raw)))"
-                                                                if (-not $ambiguous.Contains($line)) { $ambiguous.Add($line) }
-                                                }
-                                                else { $map[$p.Raw] = $hits[0] }
-                                                break
+                                if ($found.Kind -eq 'LastOnly' -and $keysByLast[$found.Last].Count -gt 1) {
+                                                $called = [System.Globalization.CultureInfo]::InvariantCulture.TextInfo.ToTitleCase($found.Last)
+                                                $line = "$($hits[0].Name) (more than one person on the file is called $called)"
+                                                if (-not $ambiguous.Contains($line)) { $ambiguous.Add($line) }
+                                                continue
                                 }
-                                if (-not $matched) { $unknown.Add($p.Raw) }
+                                $map[$p.Raw] = $hits[0]
                 }
 
                 # A student matched by two names that aren't the same person is left alone
@@ -12264,7 +12414,7 @@ function Resolve-TrainingStudents {
                                 $same = $true
                                 for ($i = 0; $i -lt $raws.Count -and $same; $i++) {
                                                 for ($j = $i + 1; $j -lt $raws.Count; $j++) {
-                                                                if (-not (Get-PersonNameMatch -Known (ConvertTo-PersonName $raws[$i]) -Other (ConvertTo-PersonName $raws[$j]))) { $same = $false; break }
+                                                                if ($null -eq (Get-PersonNameMatch -Known (ConvertTo-PersonName $raws[$i]) -Other (ConvertTo-PersonName $raws[$j]))) { $same = $false; break }
                                                 }
                                 }
                                 if (-not $same) {
@@ -12277,24 +12427,16 @@ function Resolve-TrainingStudents {
 
 # The IP name to put on a syllabus event: the FAIS instructor it matches (as students are
 # matched, but no other file names are checked), else the name as the file has it, without
-# its rank tag. '' for no name.
+# its rank tag. '' for no name. -Index (New-PersonIndex of the instructors) saves building it
+# again for every name.
 function Resolve-TrainingInstructor {
-                param ([string]$Name, [array]$Instructors = @())
+                param ([string]$Name, [array]$Instructors = @(), [hashtable]$Index)
 
                 $plain = ((Get-BaseName $Name) -replace '\s+', ' ').Trim()
                 if ($plain -eq '') { return '' }
-                $person = ConvertTo-PersonName $Name
-                $found = @{ Exact = @(); Given = @(); LastOnly = @() }
-                foreach ($ip in @($Instructors)) {
-                                if ($null -eq $ip -or [string]::IsNullOrWhiteSpace([string]$ip.Name)) { continue }
-                                $how = Get-PersonNameMatch -Known (ConvertTo-PersonName ([string]$ip.Name)) -Other $person
-                                if ($how) { $found[$how] += $ip }
-                }
-                foreach ($how in @('Exact', 'Given', 'LastOnly')) {
-                                $hits = @($found[$how])
-                                if ($hits.Count -eq 1) { return ([string]$hits[0].Name).Trim() }
-                                if ($hits.Count -gt 1) { break }
-                }
+                if ($null -eq $Index) { $Index = New-PersonIndex -Items $Instructors }
+                $found = Find-PersonMatch -Person (ConvertTo-PersonName $Name) -Index $Index
+                if (@($found.Hits).Count -eq 1) { return ([string]$found.Hits[0].Name).Trim() }
                 return $plain
 }
 
@@ -12356,6 +12498,7 @@ function Get-SyllabusUpdatePlan {
                 }
 
                 $ipOf = @{}
+                $ipIndex = New-PersonIndex -Items $Instructors
                 $targets = New-Object System.Collections.Generic.List[object]
                 foreach ($groupKey in $groups.Keys) {
                                 $list = $groups[$groupKey]
@@ -12363,7 +12506,7 @@ function Get-SyllabusUpdatePlan {
                                 $pick = if ($done.Count -gt 0) { $done[$done.Count - 1] } else { $list[0] }
                                 $fact = $pick.Fact
                                 $rawIp = [string]$fact.Instructor
-                                if (-not $ipOf.ContainsKey($rawIp)) { $ipOf[$rawIp] = Resolve-TrainingInstructor -Name $rawIp -Instructors $Instructors }
+                                if (-not $ipOf.ContainsKey($rawIp)) { $ipOf[$rawIp] = Resolve-TrainingInstructor -Name $rawIp -Index $ipIndex }
                                 $targets.Add([PSCustomObject]@{
                                                 Student    = $pick.Student
                                                 Mission    = ([string]$pick.Entry.Mission).Trim()
@@ -20381,13 +20524,13 @@ powershell.exe -STA -File .\FAIS.ps1
 ```
 Add `-Trace` to print every scheduling decision to the console. FAIS restarts itself in STA mode if needed.
 
-**Needs:** Windows PowerShell 5.1 and the ImportExcel module. `MasterData.xlsx` lives in the folder *above* the FAIS folder. `OutputSchedule.xlsx` and `ATIS.xlsx` are written to the Desktop.
+**Needs:** Windows PowerShell 5.1 and the ImportExcel module. `MasterData.xlsx` and `OutputSchedule.xlsx` live in the FAIS folder, next to `FAIS.ps1`. `ATIS.xlsx` is written to the Desktop.
 
 **You can leave Excel open.** If MasterData or OutputSchedule is open in Excel, FAIS saves it before reading it (so edits you have not saved yet are read too), and saves and closes it before writing it (so there is no "file is open" error), then opens it again afterwards. You only see a "file is open" box if Excel can't be reached, for example while a cell is still being edited.
 
 **What happens:**
 1. **Pre-run pop-ups.** Log any hooked (unsat) or incomplete events from the last schedule, then click **Open Puck Board**. These are saved right away (see *Data in and out*).
-2. **Puck board.** The lines for each day come from MasterData's **Schedule** sheet (or you type them), and you hardcode whoever you want. *(details below)*
+2. **Puck board.** Each day on MasterData's **Schedule** sheet opens as its own tab with its lines (or you type them), and you hardcode whoever you want. *(details below)*
 3. **Fill.** The scheduler fills every open line: formation wingmen, direct support, O&B return legs and For Sale lines included. **Fill <day>** fills just the day on screen; **Fill all N days** (shown when the board has more than one day) fills them all. You review the result on the board.
 4. **Export.** All or nothing: if any part fails, none of the files change. It writes the days you filled:
    - OutputSchedule: the **MasterSchedule** sheet (first tab). Only the filled days are replaced; other days already exported (today onward) are kept, so you can update **one day at a time**,
@@ -20418,10 +20561,11 @@ Closing the board without exporting writes nothing (only the pre-run pop-ups hav
 
 ## MasterData's Schedule sheet
 
-The board reads the **Schedule** sheet one day at a time and keeps watching it:
+The board reads the **Schedule** sheet and keeps watching it:
 
-- **When the board opens,** each day that is still empty gets its lines from the sheet.
-- **Whenever you save MasterData in Excel,** the board reads the sheet again (within a few seconds). A day you have not changed on the board since it was loaded updates by itself. If you have changed that day on the board, a blue banner offers **Replace ... with the sheet** or **Keep the board's lines**. The banner also offers later days the sheet has that are not on the board yet.
+- **When the board opens,** every day the sheet has lines for gets its own day tab with those lines, from the board's first day (the next flying day) on. A sheet with lines for Fri, Mon and Tue opens three tabs. A day on the board that you built yourself (typed lines, a template) is not replaced: the blue banner asks first.
+- **Lines dated before the board's first day are not loaded.** That includes today, because the board starts on the next flying day. If that is all the sheet has, the blue banner says so and offers **Put them on <first day>**. **Load a day...** can put any sheet day on any board day.
+- **Whenever you save MasterData in Excel,** the board reads the sheet again (within a few seconds). A new day on the sheet gets its own tab. A day you have not changed on the board since it was loaded updates by itself. If you have changed that day on the board, a blue banner offers **Replace ... with the sheet** or **Keep the board's lines**. A day you take off with **Remove day** stays off until its lines on the sheet change.
 - **Load a day...** (toolbar) lists the days the sheet has, with line counts. Pick one, pick the day to put it on, choose **Replace** or **Add**, and whether to keep the students and missions it names (they go on as hardcoded). The sheet is saved in Excel and read fresh when the dialog opens. Rows that could not be read are listed with the reason.
 
 **The sheet's layout:**
@@ -20448,10 +20592,15 @@ The board reads the **Schedule** sheet one day at a time and keeps watching it:
 - People who aren't FAIS students. The flying schedule covers the whole wing.
 - Unsat flags. Log a hook with the pre-run pop-up as before.
 
-**Names:**
-- Rank tags (`[2d Lt]`), case, periods and extra spaces don't matter.
-- A student matches on last name **and** first name (and middle initial when both have one). An initial matches the name it starts: `Quill, C.` matches `Quill, Casey B.`.
-- A student MasterData knows by last name only matches when exactly one person on the file has that last name.
+**Names** can be written any of the usual ways. `Quill, Casey B. [2d Lt]` (flying schedule), `Quill, Casey` or `Quill` (MasterData) and `Casey B. Quill` (Big Board) are all the same student.
+- A name with a comma is last name, then first names.
+- A name without one is read every way it can be:
+  - first names, then the last name: `Casey B. Quill`, `Ana M. Vega Ortiz`;
+  - a last name on its own: `Quill`, `Vega Ortiz`;
+  - last name first (`Quill Casey B`), but only when nothing else fits and the first names agree.
+- Ranks and titles (`[2d Lt]`, `2d Lt`, `Capt`), suffixes (`Jr`, `III`), case, periods, hyphens and extra spaces don't matter.
+- A student matches on last name **and** first name (and middle name or initial as far as both have one). An initial matches the name it starts: `Quill, C.` matches `Casey B. Quill`. A different first name never matches: `Ann Quill` is not `Quill, Casey`.
+- A student MasterData knows by last name only matches when exactly one person on the file can have that last name. A first name doesn't count: student `Casey` is not `Casey Quill`.
 - A name that could be more than one student is left alone and listed.
 - The IP is written the way MasterData's Instructors sheet spells them when they are on it, otherwise as the file has them, without the rank.
 
@@ -28934,12 +29083,12 @@ if (Get-Module -ListAvailable -Name ImportExcel) {
         $read.Kind -eq 'DailySchedule' -and $saved.Saved -and @($plan.Changes).Count -eq 2 -and (ConvertTo-FaisBool $a.IsComplete) -and $a.Instructor -eq 'Jones, Bob' -and
             $a.ETD -eq '2026-10-21 07:30:00' -and -not (ConvertTo-FaisBool $b.IsComplete) -and $tab[0].MyNotes -eq 'keep me' -and [double]$debt -eq [double]$upd[0].SimDebt
     }
-    Assert-That 'Update Syllabi: a Big Board is recognized and each event block read (date, IP; empty = not complete)' {
+    Assert-That 'Update Syllabi: a Big Board is recognized, each event block read (date, IP; empty = not complete) and its First Last name matched' {
         $bb = Join-Path $work 'BigBoard.xlsx'
         $pkg = Open-ExcelPackage -Path $bb -Create
         $ws = Add-Worksheet -ExcelPackage $pkg -WorksheetName 'Big Board'
         $put = @{ C2 = 'Scheduling Aid for Organization E FLT'; B5 = 'Student Name'; C5 = 'Track'; D5 = 'Org'; F5 = 'Class'; G5 = 'BA101'; K5 = 'FT5001'; O5 = 'FT5102'
-            B6 = 'Adams, Al'; G6 = '07-24-2026-1500'; I6 = 'Complete'; K6 = '10-16-2026-0915'; L6 = 'Complete'; M6 = 'G'; N6 = 'Jones, Bob' }
+            B6 = 'Al Adams'; G6 = '07-24-2026-1500'; I6 = 'Complete'; K6 = '10-16-2026-0915'; L6 = 'Complete'; M6 = 'G'; N6 = 'Jones, Bob' }
         foreach ($k in $put.Keys) { $ws.Cells[$k].Value = $put[$k] }
         foreach ($m in @('D5:E5', 'G5:J5', 'K5:N5', 'O5:R5', 'G6:H6')) { $ws.Cells[$m].Merge = $true }
         Close-ExcelPackage $pkg
@@ -28947,7 +29096,7 @@ if (Get-Module -ListAvailable -Name ImportExcel) {
         $f = $read.Facts | Where-Object { $_.Mission -eq 'FT5001' }
         $g = $read.Facts | Where-Object { $_.Mission -eq 'FT5102' }
         $read.Kind -eq 'BigBoard' -and (@($read.Events) -join ',') -eq 'BA101,FT5001,FT5102' -and $f.Complete -and $f.Instructor -eq 'Jones, Bob' -and
-            $f.ETD -eq [datetime]'2026-10-16 09:15' -and -not $g.Complete
+            $f.ETD -eq [datetime]'2026-10-16 09:15' -and -not $g.Complete -and (Resolve-TrainingStudents -Names $read.People -Students $copyA).Map['Al Adams'].Name -eq 'Adams, Al'
     }
 }
 else {
@@ -29217,6 +29366,32 @@ Describe 'Sheet sync state and banner' {
         Get-SheetBannerInfo -Board (New-SyncBoard) -SheetRows @() | Should -BeNullOrEmpty
     }
 
+    It 'the days to add are the sheet days from the board''s first day on that are not on the board yet' {
+        $add = @(Get-SheetDaysToAdd -Board (New-SyncBoard) -SheetRows $script:Sheet)
+        ($add | ForEach-Object { $_.Day }) -join ',' | Should -BeExactly $script:D3 -Because 'Tue and Wed are on the board and Mon 19 Oct is before it'
+        $add[0].Count | Should -Be 1
+        $add[0].Fingerprint | Should -BeExactly (Get-ScheduleDayFingerprint -Rows $script:Sheet -Day $script:D3)
+        @(Get-SheetDaysToAdd -Board (New-SyncBoard) -SheetRows $script:Sheet -Ignore @("$($script:D3)|$($add[0].Fingerprint)")).Count | Should -Be 0
+        $several = @(Get-SheetDaysToAdd -Board (New-Board -Days @('2026-10-19')) -SheetRows $script:Sheet | ForEach-Object { $_.Day })
+        $several -join ',' | Should -BeExactly "$($script:D1),$($script:D2),$($script:D3)" -Because 'every later day comes, in date order'
+        @(Get-SheetDaysToAdd -Board (New-SyncBoard) -SheetRows @(New-SR '' '07:30')).Count | Should -Be 0 -Because 'rows with no date go on the first day, not a day of their own'
+    }
+
+    It 'a sheet with only days before the board''s first day says why nothing loaded, while that day is empty' {
+        $b = New-Board -Days @('2026-10-23')
+        $i = Get-SheetBannerInfo -Board $b -SheetRows $script:Sheet -ActiveDay '2026-10-23'
+        $i.State | Should -BeExactly 'PastDay'
+        $i.Day | Should -BeExactly $script:D3 -Because 'the latest of the earlier days is offered'
+        $i.TargetDay | Should -BeExactly '2026-10-23'
+        $i.Text | Should -BeLike "*only has lines for days before Fri 23 Oct (the board's first day): 1 line(s) for Thu 22 Oct. They were not loaded."
+        $i.ActionText | Should -BeExactly 'Put them on Fri 23 Oct'
+        Get-SheetBannerInfo -Board $b -SheetRows $script:Sheet -Ignore @("$($i.Day)|$($i.Fingerprint)") | Should -BeNullOrEmpty
+        Add-BoardLine -Board $b -Line @(New-BoardLine -ETD ([datetime]'2026-10-23 06:00') -SortieType 'Day Local') -NoUndo
+        Get-SheetBannerInfo -Board $b -SheetRows $script:Sheet | Should -BeNullOrEmpty -Because 'a first day with lines needs no explaining'
+        $withLater = @($script:Sheet) + @(New-SR '2026-10-26' '07:30')
+        (Get-SheetBannerInfo -Board (New-Board -Days @('2026-10-23')) -SheetRows $withLater).State | Should -BeExactly 'OtherDay' -Because 'a later sheet day is the news, not the earlier ones'
+    }
+
     It 'the sync record is saved with the day, reopened, and dropped with the day' {
         $dir = Join-Path $TestDrive 'sync'
         $b = New-SyncBoard
@@ -29397,7 +29572,7 @@ Describe 'Test-BoardReadyToFill -Days' {
 # Pester 5 tests for the puck board's one-day-at-a-time logic (Modules\PuckBoard.psm1) without
 # a window: the WPF-only helpers are mocked and the controls are plain objects. The real window
 # is driven by Tests\Invoke-SelfTest.ps1 on Windows.
-# Dates: Tue 2026-10-20 (D1), Wed 2026-10-21 (D2).
+# Dates: Tue 2026-10-20 (D1), Wed 2026-10-21 (D2), Thu 2026-10-22 (D3).
 
 BeforeAll {
     . "$PSScriptRoot/Fixtures/New-FaisTestData.ps1"
@@ -29405,6 +29580,7 @@ BeforeAll {
 
     $script:D1 = '2026-10-20'
     $script:D2 = '2026-10-21'
+    $script:D3 = '2026-10-22'
 
     function New-SR {
         param ([string]$Day, [string]$Time, [string]$Type = 'Day Local', [string]$IP = 'Jones, Bob', [string]$Student = $null)
@@ -29541,15 +29717,91 @@ Describe 'Puck board, one day at a time (no window)' {
         $pb.C.StatusText.Text | Should -BeLike 'MasterData was saved: updated Tue 20 Oct*'
     }
 
-    It 'the banner offers a later sheet day, and "Not now" hides it until that day changes' {
-        Initialize-TestBoard -Days @($script:D1) -Sheet (New-Sheet @(New-SR $script:D2 '07:30'))
+    It 'opening the board gives each sheet day from the first day on a tab of its own, with its lines' {
+        $rows = @((New-SR $script:D1 '07:30' -Student 'Adams, Al'), (New-SR $script:D1 '09:00'), (New-SR $script:D2 '07:30'), (New-SR $script:D3 '08:00'), (New-SR $script:D3 '08:30'), (New-SR '2026-10-19' '07:30'))
+        Initialize-TestBoard -Days @($script:D1) -Sheet (New-Sheet $rows)
+        $msg = InModuleScope PuckBoard { Invoke-PBSheetStartup }
+        $pb = Get-PB
+        ($pb.Board.Days.ToArray() -join ',') | Should -BeExactly "$($script:D1),$($script:D2),$($script:D3)" -Because 'Mon 19 Oct is before the board and is left off'
+        @(Get-BoardDayLines -Board $pb.Board -Day $script:D1).Count | Should -Be 2
+        @(Get-BoardDayLines -Board $pb.Board -Day $script:D2).Count | Should -Be 1
+        @(Get-BoardDayLines -Board $pb.Board -Day $script:D3).Count | Should -Be 2
+        (@(Get-BoardDayLines -Board $pb.Board -Day $script:D1))[0].Student | Should -BeExactly 'Adams, Al'
+        $msg | Should -BeLike 'Loaded Tue 20 Oct (2 line(s)), Wed 21 Oct (1 line(s)), Thu 22 Oct (2 line(s)) from MasterData*'
+        $pb.ActiveDay | Should -BeExactly $script:D1 -Because 'the board stays on its first day'
+        foreach ($d in @($script:D1, $script:D2, $script:D3)) { (Get-BoardSheetState -Board $pb.Board -SheetRows $rows -Day $d).State | Should -BeExactly 'InSync' }
+        $pb.SheetBannerInfo | Should -BeNullOrEmpty
+    }
+
+    It 'a new day on the sheet gets its own tab when MasterData is saved' {
+        Initialize-TestBoard -Days @($script:D1) -Sheet (New-Sheet @(New-SR $script:D1 '07:30'))
         [void](InModuleScope PuckBoard { Invoke-PBSheetStartup })
         $pb = Get-PB
+        $pb.Data.ScheduleSheet = New-Sheet @((New-SR $script:D1 '07:30'), (New-SR $script:D2 '08:00'))
+        $done = @(InModuleScope PuckBoard { Invoke-PBSheetAutoUpdate })
+        $done -join ', ' | Should -BeExactly 'Wed 21 Oct (1 line(s))'
+        ($pb.Board.Days.ToArray() -join ',') | Should -BeExactly "$($script:D1),$($script:D2)"
+        $pb.ActiveDay | Should -BeExactly $script:D1 -Because 'a background update does not change the day on screen'
+    }
+
+    It 'a removed sheet day stays off when MasterData is saved, until its lines on the sheet change' {
+        Initialize-TestBoard -Days @($script:D1) -Sheet (New-Sheet @((New-SR $script:D1 '07:30'), (New-SR $script:D2 '08:00')))
+        [void](InModuleScope PuckBoard { Invoke-PBSheetStartup })
+        $pb = Get-PB
+        $pb.Settings.BoardDir = $TestDrive
+        $saved = Join-Path $TestDrive "$($script:D2).json"
+        [System.IO.File]::WriteAllText($saved, '{}')
+        InModuleScope PuckBoard -Parameters @{ D = $script:D2 } { param($D) Remove-PBDay $D }
+        ($pb.Board.Days.ToArray() -join ',') | Should -BeExactly $script:D1
+        Test-Path -LiteralPath $saved | Should -BeFalse -Because 'its autosave goes with it'
+        @(InModuleScope PuckBoard { Invoke-PBSheetAutoUpdate }).Count | Should -Be 0
+        ($pb.Board.Days.ToArray() -join ',') | Should -BeExactly $script:D1
+        $pb.Data.ScheduleSheet = New-Sheet @((New-SR $script:D1 '07:30'), (New-SR $script:D2 '08:15'))
+        @(InModuleScope PuckBoard { Invoke-PBSheetAutoUpdate }).Count | Should -Be 1
+        ($pb.Board.Days.ToArray() -join ',') | Should -BeExactly "$($script:D1),$($script:D2)" -Because 'the sheet changed for that day'
+    }
+
+    It 'a sheet with only days before the board says so, and can put them on the first day' {
+        Initialize-TestBoard -Days @($script:D2) -Sheet (New-Sheet @((New-SR $script:D1 '07:30' -Student 'Adams, Al'), (New-SR $script:D1 '08:10')))
+        $msg = InModuleScope PuckBoard { Invoke-PBSheetStartup }
+        $pb = Get-PB
+        $msg | Should -BeExactly ''
+        $pb.Board.Lines.Count | Should -Be 0
+        $pb.C.SheetBanner.Visibility | Should -BeExactly 'Visible'
+        $pb.SheetBannerInfo.State | Should -BeExactly 'PastDay'
+        $pb.C.SheetBannerText.Text | Should -BeLike "*only has lines for days before Wed 21 Oct*2 line(s) for Tue 20 Oct. They were not loaded."
+        $pb.C.SheetBannerLoadButton.Content | Should -BeExactly 'Put them on Wed 21 Oct'
+        $pb.C.SheetBannerIgnoreButton.Content | Should -BeExactly 'Not now'
+        InModuleScope PuckBoard { Invoke-PBSheetBannerLoad }
+        ($pb.Board.Days.ToArray() -join ',') | Should -BeExactly $script:D2 -Because 'the earlier day is not added'
+        (@(Get-BoardDayLines -Board $pb.Board -Day $script:D2) | ForEach-Object { $_.ETD.ToString('HHmm') + ' ' + $_.Student }) -join ',' | Should -BeExactly '0730 Adams, Al,0810 '
+        $pb.C.SheetBanner.Visibility | Should -BeExactly 'Collapsed'
+    }
+
+    It '"Not now" on the earlier-days banner hides it until those lines change' {
+        Initialize-TestBoard -Days @($script:D2) -Sheet (New-Sheet @(New-SR $script:D1 '07:30'))
+        [void](InModuleScope PuckBoard { Invoke-PBSheetStartup })
+        $pb = Get-PB
+        InModuleScope PuckBoard { Invoke-PBSheetBannerIgnore }
+        $pb.C.SheetBanner.Visibility | Should -BeExactly 'Collapsed'
+        $pb.Data.ScheduleSheet = New-Sheet @(New-SR $script:D1 '07:45')
+        InModuleScope PuckBoard { Update-PBSheetBanner }
+        $pb.SheetBannerInfo.State | Should -BeExactly 'PastDay'
+    }
+
+    It 'the banner offers a later sheet day read before the board could add it, and "Not now" hides it until that day changes' {
+        Initialize-TestBoard -Days @($script:D1) -Sheet (New-Sheet @(New-SR $script:D1 '07:30'))
+        [void](InModuleScope PuckBoard { Invoke-PBSheetStartup })
+        $pb = Get-PB
+        # Read (in review mode, say) but not applied yet
+        $pb.Data.ScheduleSheet = New-Sheet @((New-SR $script:D1 '07:30'), (New-SR $script:D2 '07:30'))
+        InModuleScope PuckBoard { Update-PBSheetBanner }
         $pb.SheetBannerInfo.State | Should -BeExactly 'OtherDay'
         $pb.C.SheetBannerIgnoreButton.Content | Should -BeExactly 'Not now'
         InModuleScope PuckBoard { Invoke-PBSheetBannerIgnore }
         $pb.C.SheetBanner.Visibility | Should -BeExactly 'Collapsed'
-        $pb.Data.ScheduleSheet = New-Sheet @((New-SR $script:D2 '07:30'), (New-SR $script:D2 '08:00'))
+        @(InModuleScope PuckBoard { Invoke-PBSheetAutoUpdate }).Count | Should -Be 0 -Because 'a day waved off is not added by itself either'
+        $pb.Data.ScheduleSheet = New-Sheet @((New-SR $script:D1 '07:30'), (New-SR $script:D2 '07:30'), (New-SR $script:D2 '08:00'))
         InModuleScope PuckBoard { Update-PBSheetBanner }
         $pb.C.SheetBanner.Visibility | Should -BeExactly 'Visible'
         InModuleScope PuckBoard { Invoke-PBSheetBannerLoad }
@@ -30900,15 +31152,23 @@ BeforeAll {
 
 
 Describe 'Matching names' {
-    It 'splits a name into last name and first names, without the rank tag, case or periods' {
+    It 'reads a comma name one way: last name, then first names (no rank tag, case or periods)' {
         $p = ConvertTo-PersonName 'Quill, Cy  D. [2d Lt]'
-        $p.Last | Should -BeExactly 'quill'
-        $p.Given -join ' ' | Should -BeExactly 'cy d'
-        (ConvertTo-PersonName 'Quill').Given.Count | Should -Be 0
-        (ConvertTo-PersonName 'Diaz-Ortega, Dee').Last | Should -BeExactly 'diaz ortega'
+        @($p.Readings).Count | Should -Be 1
+        $p.Readings[0].Last | Should -BeExactly 'quill'
+        $p.Readings[0].Given -join ' ' | Should -BeExactly 'cy d'
+        (ConvertTo-PersonName 'Diaz-Ortega, Dee').Readings[0].Last | Should -BeExactly 'diaz ortega'
+        (ConvertTo-PersonName 'Quill Jr., Cy').Readings[0].Last | Should -BeExactly 'quill'
+    }
+
+    It 'reads a name with no comma every way it can be: all last name, first names first, and last name first' {
+        @((ConvertTo-PersonName 'Quill').Readings | ForEach-Object { "$($_.Last)/$($_.Given -join ' ')/$($_.Reversed)" }) | Should -Be @('quill//False')
+        @((ConvertTo-PersonName '2d Lt Cy D. Quill').Readings | ForEach-Object { "$($_.Last)/$($_.Given -join ' ')/$($_.Reversed)" }) | Should -Be @(
+            'cy d quill//False', 'cy/d quill/True', 'quill/cy d/False', 'cy d/quill/True')
     }
 
     It '<Known> vs <Other> is <Want>' -ForEach @(
+        # Last, First on both sides
         @{ Known = 'Quill, Cy D.'; Other = 'QUILL, CY D. [2d Lt]'; Want = 'Exact' }
         @{ Known = 'Quill, Cy'; Other = 'Quill, Cy D. [2d Lt]'; Want = 'Given' }
         @{ Known = 'Quill, C.'; Other = 'Quill, Cy D. [2d Lt]'; Want = 'Given' }
@@ -30918,8 +31178,51 @@ Describe 'Matching names' {
         @{ Known = 'Quill'; Other = 'Quill, Cy D. [2d Lt]'; Want = 'LastOnly' }
         @{ Known = 'Quill, Cy'; Other = 'Quillon, Cy [2d Lt]'; Want = '' }
         @{ Known = 'Diaz Ortega, Dee'; Other = 'DIAZ-ORTEGA, Dee M. [Capt]'; Want = 'Given' }
+        # First Last (the Big Board), with loose ranks, suffixes and two-word last names
+        @{ Known = 'Quill, Cy D.'; Other = 'Cy D. Quill'; Want = 'Exact' }
+        @{ Known = 'Quill, Cy D.'; Other = 'CY QUILL'; Want = 'Given' }
+        @{ Known = 'Quill, Cy D.'; Other = 'Cy Dale Quill'; Want = 'Given' }
+        @{ Known = 'Quill, Cy D.'; Other = '2d Lt Cy D. Quill'; Want = 'Exact' }
+        @{ Known = 'Quill, Cy'; Other = 'Capt Cy Quill Jr.'; Want = 'Exact' }
+        @{ Known = 'Quill'; Other = 'Cy D. Quill'; Want = 'LastOnly' }
+        @{ Known = 'Vega Ortiz, Ana M.'; Other = 'Ana M. Vega Ortiz'; Want = 'Exact' }
+        @{ Known = 'Vega Ortiz'; Other = 'Ana Vega-Ortiz'; Want = 'LastOnly' }
+        @{ Known = 'Diaz Ortega, Dee'; Other = 'Dee Diaz-Ortega'; Want = 'Exact' }
+        @{ Known = 'Quill, Cy'; Other = 'Al Quill'; Want = '' }
+        @{ Known = 'Casey'; Other = 'Casey Quill'; Want = '' }
+        # A FAIS name typed first name first
+        @{ Known = 'Cy Quill'; Other = 'Quill, Cy D. [2d Lt]'; Want = 'Given' }
+        # Last First with no comma: only when the first names agree too
+        @{ Known = 'Quill, Cy D.'; Other = 'Quill Cy D'; Want = 'ReversedExact' }
+        @{ Known = 'Quill, Cy'; Other = 'QUILL CY D'; Want = 'ReversedGiven' }
+        @{ Known = 'Quill'; Other = 'Quill Cy D'; Want = '' }
     ) {
-        Get-PersonNameMatch -Known (ConvertTo-PersonName $Known) -Other (ConvertTo-PersonName $Other) | Should -BeExactly $Want
+        $m = Get-PersonNameMatch -Known (ConvertTo-PersonName $Known) -Other (ConvertTo-PersonName $Other)
+        $(if ($m) { $m.Kind } else { '' }) | Should -BeExactly $Want
+    }
+
+    It 'matches the Big Board''s First Last names to FAIS''s Last, First and last-name-only students' {
+        $students = @((New-TestStudent -Name 'Quill, Cy D.'), (New-TestStudent -Name 'Adams, Al'), (New-TestStudent -Name 'Vance'), (New-TestStudent -Name 'Vega Ortiz, Ana'), (New-TestStudent -Name 'Casey'))
+        $m = Resolve-TrainingStudents -Names @('Cy D. Quill', 'AL B ADAMS', 'Max Vance', 'Ana M. Vega Ortiz', 'Casey Moss', 'Zoe Zed') -Students $students
+        $m.Map['Cy D. Quill'].Name | Should -BeExactly 'Quill, Cy D.'
+        $m.Map['AL B ADAMS'].Name | Should -BeExactly 'Adams, Al'
+        $m.Map['Max Vance'].Name | Should -BeExactly 'Vance'
+        $m.Map['Ana M. Vega Ortiz'].Name | Should -BeExactly 'Vega Ortiz, Ana'
+        @($m.Unknown) | Should -Be @('Casey Moss', 'Zoe Zed') -Because 'Casey is Moss''s first name, not the FAIS student Casey'
+        @($m.Ambiguous).Count | Should -Be 0
+    }
+
+    It 'a last-name-only student is left alone when two First Last people share the last name' {
+        $m = Resolve-TrainingStudents -Names @('Max Vance', 'Lou K. Vance') -Students @(New-TestStudent -Name 'Vance')
+        $m.Map.Count | Should -Be 0
+        @($m.Ambiguous) | Should -Be @('Vance (more than one person on the file is called Vance)')
+    }
+
+    It 'a Last First name with no comma matches only when nothing better does' {
+        $students = @((New-TestStudent -Name 'Quill, Cy'), (New-TestStudent -Name 'Cy, Quill'))
+        $m = Resolve-TrainingStudents -Names @('Quill Cy') -Students $students
+        $m.Map['Quill Cy'].Name | Should -BeExactly 'Cy, Quill' -Because 'read first name first, Quill Cy is Quill (first) Cy (last)'
+        (Resolve-TrainingStudents -Names @('Quill Cy') -Students @($students[0])).Map['Quill Cy'].Name | Should -BeExactly 'Quill, Cy'
     }
 
     It 'matches the wing-wide schedule to FAIS students on first name too, never on last name alone' {
@@ -30966,6 +31269,9 @@ Describe 'Matching names' {
         Resolve-TrainingInstructor -Name 'Ortiz, S. [Capt]' -Instructors $ips | Should -BeExactly 'Ortiz, Sam'
         Resolve-TrainingInstructor -Name 'PARR, PAT  Q. [CIV]' -Instructors $ips | Should -BeExactly 'PARR, PAT Q.'
         Resolve-TrainingInstructor -Name '' -Instructors $ips | Should -BeExactly ''
+        Resolve-TrainingInstructor -Name 'Ann Lee' -Instructors $ips | Should -BeExactly 'Lee, Ann'
+        Resolve-TrainingInstructor -Name 'Maj Tom Leech' -Instructors $ips | Should -BeExactly 'Leech, Tom'
+        Resolve-TrainingInstructor -Name 'Pat Q. Parr' -Instructors $ips | Should -BeExactly 'Pat Q. Parr'
     }
 }
 
@@ -31131,17 +31437,17 @@ Describe 'The plan (Big Board)' {
         $script:Quill = New-TestStudent -Name 'Quill, Cy'
         $script:Students = @($script:Adams, $script:Brown, $script:Quill)
         $events = @('BA101', 'FI3101', 'FE3102', 'FT5001', 'FT5102')
-        $script:File = New-TFile -Kind 'BigBoard' -Events $events -People @('Adams, Al B.', 'Brown, Bea', 'Visitor, Vic') -Facts @(
-            New-TFact 'Adams, Al B.' 'BA101' -At '2026-07-24 15:00' -IP 'Instructor, Ivy' -Board
-            New-TFact 'Adams, Al B.' 'FI3101' -At '2026-09-18 08:00' -IP 'SIM IP' -Board
-            New-TFact 'Adams, Al B.' 'FE3102' -At '2026-09-19 09:00' -IP 'PARR, PAT' -Board
-            New-TFact 'Adams, Al B.' 'FT5001' -Board
-            New-TFact 'Adams, Al B.' 'FT5102' -Board
-            New-TFact 'Brown, Bea' 'BA101' -Board
-            New-TFact 'Brown, Bea' 'FI3101' -At '2026-09-18 08:00' -Board
-            New-TFact 'Brown, Bea' 'FE3102' -Board
-            New-TFact 'Brown, Bea' 'FT5001' -Board
-            New-TFact 'Brown, Bea' 'FT5102' -Board
+        $script:File = New-TFile -Kind 'BigBoard' -Events $events -People @('Al B. Adams', 'Bea Brown', 'Vic Visitor') -Facts @(
+            New-TFact 'Al B. Adams' 'BA101' -At '2026-07-24 15:00' -IP 'Instructor, Ivy' -Board
+            New-TFact 'Al B. Adams' 'FI3101' -At '2026-09-18 08:00' -IP 'SIM IP' -Board
+            New-TFact 'Al B. Adams' 'FE3102' -At '2026-09-19 09:00' -IP 'PARR, PAT' -Board
+            New-TFact 'Al B. Adams' 'FT5001' -Board
+            New-TFact 'Al B. Adams' 'FT5102' -Board
+            New-TFact 'Bea Brown' 'BA101' -Board
+            New-TFact 'Bea Brown' 'FI3101' -At '2026-09-18 08:00' -Board
+            New-TFact 'Bea Brown' 'FE3102' -Board
+            New-TFact 'Bea Brown' 'FT5001' -Board
+            New-TFact 'Bea Brown' 'FT5102' -Board
         )
         $script:Plan = Get-SyllabusUpdatePlan -File $script:File -Students $script:Students -Instructors (New-TestInstructors) -SoftWeights $script:SW -Now $script:Now
     }
@@ -31170,10 +31476,10 @@ Describe 'The plan (Big Board)' {
 
     It 'lists the FAIS students the Big Board does not have, and its people who are not FAIS students' {
         @($script:Plan.NotOnFile) | Should -Be @('Quill, Cy')
-        @($script:Plan.Unknown) | Should -Be @('Visitor, Vic')
+        @($script:Plan.Unknown) | Should -Be @('Vic Visitor')
         $text = Format-SyllabusUpdateSummary -File $script:File -Plan $script:Plan
         $text | Should -Match ([regex]::Escape('FAIS students not on the Big Board: Quill, Cy'))
-        $text | Should -Match ([regex]::Escape('Not FAIS students: Visitor, Vic'))
+        $text | Should -Match ([regex]::Escape('Not FAIS students: Vic Visitor'))
         $text | Should -Match ([regex]::Escape("Left as planned: 1 event(s) FAIS has scheduled after now, which the Big Board can't show yet."))
     }
 }
@@ -31201,8 +31507,8 @@ Describe 'Reading the training files' -Skip:$script:NoExcel {
 
         # Big Board: headings on row 5, each event over 4 columns (date, status, grade, IP); BA101 over 6
         $row5 = @($null, 'Student Name', 'Track', 'Org', $null, 'Class', 'BA101', $null, $null, $null, $null, $null, 'FI3101', $null, $null, $null, 'FT5001', $null, $null, $null, 'FT5102', $null, $null, $null)
-        $adams = @($null, 'Adams, Al B.', 'Default', 'E FLT', $null, '27-05', '07-24-2026-1500', $null, 'Complete', $null, $null, 'Instructor, Ivy', '09-18-2026-0800', 'Complete', $null, 'PARR, PAT Q.', '09-22-2026-0913', 'Complete', 'G', 'Jones, Bob', $null, $null, $null, $null)
-        $brown = @($null, 'Brown, Bea', 'Default', 'E FLT', $null, '27-05', $null, $null, $null, $null, $null, $null, '09-18-2026-0815', 'Complete', 'U', $null, '09-17-2026-0830', $null, $null, $null, $null, $null, $null, $null)
+        $adams = @($null, 'Al B. Adams', 'Default', 'E FLT', $null, '27-05', '07-24-2026-1500', $null, 'Complete', $null, $null, 'Instructor, Ivy', '09-18-2026-0800', 'Complete', $null, 'PARR, PAT Q.', '09-22-2026-0913', 'Complete', 'G', 'Jones, Bob', $null, $null, $null, $null)
+        $brown = @($null, 'Bea Brown', 'Default', 'E FLT', $null, '27-05', $null, $null, $null, $null, $null, $null, '09-18-2026-0815', 'Complete', 'U', $null, '09-17-2026-0830', $null, $null, $null, $null, $null, $null, $null)
         $script:Board = New-TBook 'BigBoard.xlsx' ([ordered]@{ 'Big Board' = @(@($null), @($null, $null, 'Scheduling Aid for Organization E FLT'), @($null), @($null, $null, $null, $null, $null, $null, 'Default'), $row5, $adams, $brown, @($null, $null, $null, $null, 'For CUI Use Only')) }) `
             -Merge @{ 'Big Board' = @('G5:L5', 'M5:P5', 'Q5:T5', 'U5:X5', 'D5:E5', 'G6:H6', 'I6:J6') }
 
@@ -31234,20 +31540,28 @@ Describe 'Reading the training files' -Skip:$script:NoExcel {
         $script:B.Kind | Should -BeExactly 'BigBoard'
         $script:B.Label | Should -BeExactly 'Big Board (Scheduling Aid for Organization E FLT)'
         @($script:B.Events) | Should -Be @('BA101', 'FI3101', 'FT5001', 'FT5102')
-        @($script:B.People) | Should -Be @('Adams, Al B.', 'Brown, Bea')
+        @($script:B.People) | Should -Be @('Al B. Adams', 'Bea Brown')
     }
 
     It 'a Big Board entry is complete with its date and IP (not its status or grade); an empty block is not' {
         @($script:B.Facts | ForEach-Object { "$($_.Student)|$($_.Mission)|$($_.Complete)|$($_.Instructor)|$(if ($_.ETD) { $_.ETD.ToString('yyyy-MM-dd HHmm') })" }) | Should -Be @(
-            'Adams, Al B.|BA101|True|Instructor, Ivy|2026-07-24 1500'
-            'Adams, Al B.|FI3101|True|PARR, PAT Q.|2026-09-18 0800'
-            'Adams, Al B.|FT5001|True|Jones, Bob|2026-09-22 0913'
-            'Adams, Al B.|FT5102|False||'
-            'Brown, Bea|BA101|False||'
-            'Brown, Bea|FI3101|True||2026-09-18 0815'
-            'Brown, Bea|FT5001|True||2026-09-17 0830'
-            'Brown, Bea|FT5102|False||'
+            'Al B. Adams|BA101|True|Instructor, Ivy|2026-07-24 1500'
+            'Al B. Adams|FI3101|True|PARR, PAT Q.|2026-09-18 0800'
+            'Al B. Adams|FT5001|True|Jones, Bob|2026-09-22 0913'
+            'Al B. Adams|FT5102|False||'
+            'Bea Brown|BA101|False||'
+            'Bea Brown|FI3101|True||2026-09-18 0815'
+            'Bea Brown|FT5001|True||2026-09-17 0830'
+            'Bea Brown|FT5102|False||'
         )
+    }
+
+    It 'the Big Board''s First Last names find the FAIS students written Last, First or by last name' {
+        $students = @((New-TestStudent -Name 'Adams, Al B.'), (New-TestStudent -Name 'Brown'))
+        $plan = Get-SyllabusUpdatePlan -File $script:B -Students $students -SoftWeights $script:SW -Now $script:Now
+        @($plan.Matched) | Should -Be @('Adams, Al B.', 'Brown')
+        @($plan.Changes | Where-Object { $_.Kind -eq 'Complete' } | ForEach-Object { "$($_.Student) $($_.Mission)" } | Sort-Object) |
+            Should -Be @('Adams, Al B. FI3101', 'Adams, Al B. FT5001', 'Brown FI3101', 'Brown FT5001')
     }
 
     It 'says so for a workbook that is neither, and for a file that is not a workbook' {

@@ -9,13 +9,13 @@ powershell.exe -STA -File .\FAIS.ps1
 ```
 Add `-Trace` to print every scheduling decision to the console. FAIS restarts itself in STA mode if needed.
 
-**Needs:** Windows PowerShell 5.1 and the ImportExcel module. `MasterData.xlsx` lives in the folder *above* the FAIS folder. `OutputSchedule.xlsx` and `ATIS.xlsx` are written to the Desktop.
+**Needs:** Windows PowerShell 5.1 and the ImportExcel module. `MasterData.xlsx` and `OutputSchedule.xlsx` live in the FAIS folder, next to `FAIS.ps1`. `ATIS.xlsx` is written to the Desktop.
 
 **You can leave Excel open.** If MasterData or OutputSchedule is open in Excel, FAIS saves it before reading it (so edits you have not saved yet are read too), and saves and closes it before writing it (so there is no "file is open" error), then opens it again afterwards. You only see a "file is open" box if Excel can't be reached, for example while a cell is still being edited.
 
 **What happens:**
 1. **Pre-run pop-ups.** Log any hooked (unsat) or incomplete events from the last schedule, then click **Open Puck Board**. These are saved right away (see *Data in and out*).
-2. **Puck board.** The lines for each day come from MasterData's **Schedule** sheet (or you type them), and you hardcode whoever you want. *(details below)*
+2. **Puck board.** Each day on MasterData's **Schedule** sheet opens as its own tab with its lines (or you type them), and you hardcode whoever you want. *(details below)*
 3. **Fill.** The scheduler fills every open line: formation wingmen, direct support, O&B return legs and For Sale lines included. **Fill <day>** fills just the day on screen; **Fill all N days** (shown when the board has more than one day) fills them all. You review the result on the board.
 4. **Export.** All or nothing: if any part fails, none of the files change. It writes the days you filled:
    - OutputSchedule: the **MasterSchedule** sheet (first tab). Only the filled days are replaced; other days already exported (today onward) are kept, so you can update **one day at a time**,
@@ -46,10 +46,11 @@ Closing the board without exporting writes nothing (only the pre-run pop-ups hav
 
 ## MasterData's Schedule sheet
 
-The board reads the **Schedule** sheet one day at a time and keeps watching it:
+The board reads the **Schedule** sheet and keeps watching it:
 
-- **When the board opens,** each day that is still empty gets its lines from the sheet.
-- **Whenever you save MasterData in Excel,** the board reads the sheet again (within a few seconds). A day you have not changed on the board since it was loaded updates by itself. If you have changed that day on the board, a blue banner offers **Replace ... with the sheet** or **Keep the board's lines**. The banner also offers later days the sheet has that are not on the board yet.
+- **When the board opens,** every day the sheet has lines for gets its own day tab with those lines, from the board's first day (the next flying day) on. A sheet with lines for Fri, Mon and Tue opens three tabs. A day on the board that you built yourself (typed lines, a template) is not replaced: the blue banner asks first.
+- **Lines dated before the board's first day are not loaded.** That includes today, because the board starts on the next flying day. If that is all the sheet has, the blue banner says so and offers **Put them on <first day>**. **Load a day...** can put any sheet day on any board day.
+- **Whenever you save MasterData in Excel,** the board reads the sheet again (within a few seconds). A new day on the sheet gets its own tab. A day you have not changed on the board since it was loaded updates by itself. If you have changed that day on the board, a blue banner offers **Replace ... with the sheet** or **Keep the board's lines**. A day you take off with **Remove day** stays off until its lines on the sheet change.
 - **Load a day...** (toolbar) lists the days the sheet has, with line counts. Pick one, pick the day to put it on, choose **Replace** or **Add**, and whether to keep the students and missions it names (they go on as hardcoded). The sheet is saved in Excel and read fresh when the dialog opens. Rows that could not be read are listed with the reason.
 
 **The sheet's layout:**
@@ -76,10 +77,15 @@ The board reads the **Schedule** sheet one day at a time and keeps watching it:
 - People who aren't FAIS students. The flying schedule covers the whole wing.
 - Unsat flags. Log a hook with the pre-run pop-up as before.
 
-**Names:**
-- Rank tags (`[2d Lt]`), case, periods and extra spaces don't matter.
-- A student matches on last name **and** first name (and middle initial when both have one). An initial matches the name it starts: `Quill, C.` matches `Quill, Casey B.`.
-- A student MasterData knows by last name only matches when exactly one person on the file has that last name.
+**Names** can be written any of the usual ways. `Quill, Casey B. [2d Lt]` (flying schedule), `Quill, Casey` or `Quill` (MasterData) and `Casey B. Quill` (Big Board) are all the same student.
+- A name with a comma is last name, then first names.
+- A name without one is read every way it can be:
+  - first names, then the last name: `Casey B. Quill`, `Ana M. Vega Ortiz`;
+  - a last name on its own: `Quill`, `Vega Ortiz`;
+  - last name first (`Quill Casey B`), but only when nothing else fits and the first names agree.
+- Ranks and titles (`[2d Lt]`, `2d Lt`, `Capt`), suffixes (`Jr`, `III`), case, periods, hyphens and extra spaces don't matter.
+- A student matches on last name **and** first name (and middle name or initial as far as both have one). An initial matches the name it starts: `Quill, C.` matches `Casey B. Quill`. A different first name never matches: `Ann Quill` is not `Quill, Casey`.
+- A student MasterData knows by last name only matches when exactly one person on the file can have that last name. A first name doesn't count: student `Casey` is not `Casey Quill`.
 - A name that could be more than one student is left alone and listed.
 - The IP is written the way MasterData's Instructors sheet spells them when they are on it, otherwise as the file has them, without the rank.
 

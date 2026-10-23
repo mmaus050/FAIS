@@ -215,6 +215,32 @@ Describe 'Sheet sync state and banner' {
         Get-SheetBannerInfo -Board (New-SyncBoard) -SheetRows @() | Should -BeNullOrEmpty
     }
 
+    It 'the days to add are the sheet days from the board''s first day on that are not on the board yet' {
+        $add = @(Get-SheetDaysToAdd -Board (New-SyncBoard) -SheetRows $script:Sheet)
+        ($add | ForEach-Object { $_.Day }) -join ',' | Should -BeExactly $script:D3 -Because 'Tue and Wed are on the board and Mon 19 Oct is before it'
+        $add[0].Count | Should -Be 1
+        $add[0].Fingerprint | Should -BeExactly (Get-ScheduleDayFingerprint -Rows $script:Sheet -Day $script:D3)
+        @(Get-SheetDaysToAdd -Board (New-SyncBoard) -SheetRows $script:Sheet -Ignore @("$($script:D3)|$($add[0].Fingerprint)")).Count | Should -Be 0
+        $several = @(Get-SheetDaysToAdd -Board (New-Board -Days @('2026-10-19')) -SheetRows $script:Sheet | ForEach-Object { $_.Day })
+        $several -join ',' | Should -BeExactly "$($script:D1),$($script:D2),$($script:D3)" -Because 'every later day comes, in date order'
+        @(Get-SheetDaysToAdd -Board (New-SyncBoard) -SheetRows @(New-SR '' '07:30')).Count | Should -Be 0 -Because 'rows with no date go on the first day, not a day of their own'
+    }
+
+    It 'a sheet with only days before the board''s first day says why nothing loaded, while that day is empty' {
+        $b = New-Board -Days @('2026-10-23')
+        $i = Get-SheetBannerInfo -Board $b -SheetRows $script:Sheet -ActiveDay '2026-10-23'
+        $i.State | Should -BeExactly 'PastDay'
+        $i.Day | Should -BeExactly $script:D3 -Because 'the latest of the earlier days is offered'
+        $i.TargetDay | Should -BeExactly '2026-10-23'
+        $i.Text | Should -BeLike "*only has lines for days before Fri 23 Oct (the board's first day): 1 line(s) for Thu 22 Oct. They were not loaded."
+        $i.ActionText | Should -BeExactly 'Put them on Fri 23 Oct'
+        Get-SheetBannerInfo -Board $b -SheetRows $script:Sheet -Ignore @("$($i.Day)|$($i.Fingerprint)") | Should -BeNullOrEmpty
+        Add-BoardLine -Board $b -Line @(New-BoardLine -ETD ([datetime]'2026-10-23 06:00') -SortieType 'Day Local') -NoUndo
+        Get-SheetBannerInfo -Board $b -SheetRows $script:Sheet | Should -BeNullOrEmpty -Because 'a first day with lines needs no explaining'
+        $withLater = @($script:Sheet) + @(New-SR '2026-10-26' '07:30')
+        (Get-SheetBannerInfo -Board (New-Board -Days @('2026-10-23')) -SheetRows $withLater).State | Should -BeExactly 'OtherDay' -Because 'a later sheet day is the news, not the earlier ones'
+    }
+
     It 'the sync record is saved with the day, reopened, and dropped with the day' {
         $dir = Join-Path $TestDrive 'sync'
         $b = New-SyncBoard

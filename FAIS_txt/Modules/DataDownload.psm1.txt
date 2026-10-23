@@ -21,14 +21,13 @@
 function IngestData {
                 param (
                                 [string]$excelInputPath,
-                                [string]$desktopPath,
                                 [string]$excelOutputPath,
                                 [int]$MaxStudents = 100
                 )
 
-                # Build the output path from the Desktop folder when it was not passed in
-                if ([string]::IsNullOrWhiteSpace($excelOutputPath) -and -not [string]::IsNullOrWhiteSpace($desktopPath)) {
-                                $excelOutputPath = Join-Path $desktopPath "OutputSchedule.xlsx"
+                # Default to OutputSchedule.xlsx in the FAIS folder when no path was passed in
+                if ([string]::IsNullOrWhiteSpace($excelOutputPath)) {
+                                $excelOutputPath = Join-Path (Split-Path $PSScriptRoot -Parent) "OutputSchedule.xlsx"
                 }
 
                 # ------------------------------------------------------------------
@@ -150,6 +149,8 @@ function IngestData {
                                 $dayText = @(Get-ScheduleSheetDays -Rows $ScheduleSheet.Rows | ForEach-Object { "$($_.Label) ($($_.Count))" }) -join ', '
                                 Write-Host "Schedule sheet: $(@($ScheduleSheet.Rows).Count) line(s): $dayText" -ForegroundColor Cyan
                 }
+                elseif ($ScheduleSheet.Found) { Write-Host "Schedule sheet: no lines" -ForegroundColor Yellow }
+                else { Write-Host "Schedule sheet: MasterData has no sheet named 'Schedule'" -ForegroundColor Yellow }
                 foreach ($skip in @($ScheduleSheet.Skipped)) { Write-Host "  Schedule sheet $skip" -ForegroundColor Yellow }
                 $Schedule = @($ScheduleSheet.Rows | Where-Object { $_.ETD } | Sort-Object -Property ETD)
 
@@ -581,14 +582,12 @@ function DownloadPrevSchedule {
                 param (
                                 $Students,
                                 $Instructors,
-                                $desktopPath,
                                 $excelOutputPath
                 )
 
                 $filePath = $excelOutputPath
                 if ([string]::IsNullOrWhiteSpace($filePath)) {
-                                if ([string]::IsNullOrWhiteSpace($desktopPath)) { $desktopPath = [Environment]::GetFolderPath('Desktop') }
-                                $filePath = Join-Path $desktopPath "OutputSchedule.xlsx"
+                                $filePath = Join-Path (Split-Path $PSScriptRoot -Parent) "OutputSchedule.xlsx"
                 }
 
                 if (-not (Test-Path $filePath)) {
@@ -633,7 +632,7 @@ function DownloadPrevSchedule {
 function Import-MasterSchedule {
     [CmdletBinding()]
     param(
-        [string]$WorkbookPath = (Join-Path $env:USERPROFILE 'Desktop\OutputSchedule.xlsx'),
+        [string]$WorkbookPath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'OutputSchedule.xlsx'),
 
         [string]$WorksheetName = 'MasterSchedule',
 
@@ -659,10 +658,10 @@ function Import-MasterSchedule {
     try {
         # Locate OutputSchedule if the supplied default path does not exist.
         if (-not (Test-Path -LiteralPath $WorkbookPath)) {
-            $desktop = Join-Path $env:USERPROFILE 'Desktop'
+            $faisDir = Split-Path $PSScriptRoot -Parent
 
             $matches = @(
-                Get-ChildItem -Path $desktop -File -ErrorAction SilentlyContinue |
+                Get-ChildItem -Path $faisDir -File -ErrorAction SilentlyContinue |
                     Where-Object {
                         $_.BaseName -eq 'OutputSchedule' -and
                         $_.Extension -in '.xlsx', '.xlsm', '.xls'
@@ -670,12 +669,12 @@ function Import-MasterSchedule {
             )
 
             if ($matches.Count -eq 0) {
-                Write-Warning "OutputSchedule workbook was not found on the Desktop. Continuing with an empty schedule."
+                Write-Warning "OutputSchedule workbook was not found in the FAIS folder. Continuing with an empty schedule."
                 return $emptySchedule
             }
 
             if ($matches.Count -gt 1) {
-                Write-Warning "Multiple OutputSchedule workbooks were found on the Desktop. Continuing with an empty schedule. Specify -WorkbookPath explicitly."
+                Write-Warning "Multiple OutputSchedule workbooks were found in the FAIS folder. Continuing with an empty schedule. Specify -WorkbookPath explicitly."
                 return $emptySchedule
             }
 

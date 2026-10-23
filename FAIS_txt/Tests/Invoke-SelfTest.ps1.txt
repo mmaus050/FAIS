@@ -266,12 +266,12 @@ if (Get-Module -ListAvailable -Name ImportExcel) {
         $read.Kind -eq 'DailySchedule' -and $saved.Saved -and @($plan.Changes).Count -eq 2 -and (ConvertTo-FaisBool $a.IsComplete) -and $a.Instructor -eq 'Jones, Bob' -and
             $a.ETD -eq '2026-10-21 07:30:00' -and -not (ConvertTo-FaisBool $b.IsComplete) -and $tab[0].MyNotes -eq 'keep me' -and [double]$debt -eq [double]$upd[0].SimDebt
     }
-    Assert-That 'Update Syllabi: a Big Board is recognized and each event block read (date, IP; empty = not complete)' {
+    Assert-That 'Update Syllabi: a Big Board is recognized, each event block read (date, IP; empty = not complete) and its First Last name matched' {
         $bb = Join-Path $work 'BigBoard.xlsx'
         $pkg = Open-ExcelPackage -Path $bb -Create
         $ws = Add-Worksheet -ExcelPackage $pkg -WorksheetName 'Big Board'
         $put = @{ C2 = 'Scheduling Aid for Organization E FLT'; B5 = 'Student Name'; C5 = 'Track'; D5 = 'Org'; F5 = 'Class'; G5 = 'BA101'; K5 = 'FT5001'; O5 = 'FT5102'
-            B6 = 'Adams, Al'; G6 = '07-24-2026-1500'; I6 = 'Complete'; K6 = '10-16-2026-0915'; L6 = 'Complete'; M6 = 'G'; N6 = 'Jones, Bob' }
+            B6 = 'Al Adams'; G6 = '07-24-2026-1500'; I6 = 'Complete'; K6 = '10-16-2026-0915'; L6 = 'Complete'; M6 = 'G'; N6 = 'Jones, Bob' }
         foreach ($k in $put.Keys) { $ws.Cells[$k].Value = $put[$k] }
         foreach ($m in @('D5:E5', 'G5:J5', 'K5:N5', 'O5:R5', 'G6:H6')) { $ws.Cells[$m].Merge = $true }
         Close-ExcelPackage $pkg
@@ -279,7 +279,7 @@ if (Get-Module -ListAvailable -Name ImportExcel) {
         $f = $read.Facts | Where-Object { $_.Mission -eq 'FT5001' }
         $g = $read.Facts | Where-Object { $_.Mission -eq 'FT5102' }
         $read.Kind -eq 'BigBoard' -and (@($read.Events) -join ',') -eq 'BA101,FT5001,FT5102' -and $f.Complete -and $f.Instructor -eq 'Jones, Bob' -and
-            $f.ETD -eq [datetime]'2026-10-16 09:15' -and -not $g.Complete
+            $f.ETD -eq [datetime]'2026-10-16 09:15' -and -not $g.Complete -and (Resolve-TrainingStudents -Names $read.People -Students $copyA).Map['Al Adams'].Name -eq 'Adams, Al'
     }
 }
 else {
