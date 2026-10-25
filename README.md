@@ -14,7 +14,7 @@ Add `-Trace` to print every scheduling decision to the console. FAIS restarts it
 **You can leave Excel open.** If MasterData or OutputSchedule is open in Excel, FAIS saves it before reading it (so edits you have not saved yet are read too), and saves and closes it before writing it (so there is no "file is open" error), then opens it again afterwards. You only see a "file is open" box if Excel can't be reached, for example while a cell is still being edited.
 
 **What happens:**
-1. **Pre-run pop-ups.** Log any hooked (unsat) or incomplete events from the last schedule, then click **Open Puck Board**. These are saved right away (see *Data in and out*).
+1. **Pre-run pop-ups.** Log any hooked (unsat) or incomplete events from the last schedule, and put students on or off hold with **Change Student HOLD status** (checked = on hold), then click **Open Puck Board**. These are saved right away (see *Data in and out*).
 2. **Puck board.** Each day on MasterData's **Schedule** sheet opens as its own tab with its lines (or you type them), and you hardcode whoever you want. *(details below)*
 3. **Fill.** The scheduler fills every open line: formation wingmen, direct support, O&B return legs and For Sale lines included. **Fill <day>** fills just the day on screen; **Fill all N days** (shown when the board has more than one day) fills them all. You review the result on the board.
 4. **Export.** All or nothing: if any part fails, none of the files change. It writes the days you filled:
@@ -35,6 +35,7 @@ Closing the board without exporting writes nothing (only the pre-run pop-ups hav
 | Start | MasterData: Schedule (see *MasterData's Schedule sheet*), Instructors, Students (first 100), SoftWeights, FormCallsigns, StudentAbsences. OutputSchedule: each student's tab (a student with no tab starts from the MasterData Syllabus sheet). Workbooks open in Excel are saved first. | Nothing |
 | **Log Hooked Event** | | MasterData: UnsatSim or UnsatFlight = TRUE |
 | **Log Incomplete Event** | | MasterData: SimDebt (only that event's debt comes off). OutputSchedule: that event's cells on the student's tab |
+| **Change Student HOLD status** | | MasterData: OnHold = TRUE or FALSE for the students you changed |
 | Puck board and fill | MasterData's Schedule sheet again whenever MasterData is saved; **Load a day...** reads it (or the last exported MasterSchedule) fresh | Nothing (the board's own autosave in `Boards\` aside) |
 | **Update Syllabi** | The training file you pick (flying schedule or Big Board) | OutputSchedule: the changed events' cells on the students' tabs (a student with no tab gets one). MasterData: SimDebt |
 | **Export** | | OutputSchedule: MasterSchedule (the filled days), student tabs. MasterData: SimDebt, unsat resets. ATIS: the exported days' tabs |

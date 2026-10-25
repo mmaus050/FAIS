@@ -16,10 +16,10 @@ BeforeAll {
 
                 # Students sheet laid out like MasterData: SPName in B, SimDebt in P
                 function New-TStudentRow {
-                                param ([string]$Name, [int]$Key = 1, $UnsatSim = $false, $UnsatFlight = $false, [double]$SimDebt = 0)
+                                param ([string]$Name, [int]$Key = 1, $UnsatSim = $false, $UnsatFlight = $false, [double]$SimDebt = 0, $OnHold = $false)
                                 return [PSCustomObject][ordered]@{
                                                 SPKey = $Key; SPName = $Name; IsCap = $false; IsInternational = $false; Priority = 0
-                                                UnsatSim = $UnsatSim; UnsatFlight = $UnsatFlight; OnHold = $false
+                                                UnsatSim = $UnsatSim; UnsatFlight = $UnsatFlight; OnHold = $OnHold
                                                 Col9 = ''; Col10 = ''; Col11 = ''; Col12 = ''; Col13 = ''; Col14 = 'keep'; Col15 = ''
                                                 SimDebt = $SimDebt
                                 }
@@ -82,6 +82,37 @@ Describe 'Get-UnsatFlagUpdates' {
                                 $u['A']['UnsatSim'] | Should -BeFalse
                                 $u['B'].Count | Should -Be 1
                                 $u['B']['UnsatFlight'] | Should -BeTrue
+                }
+
+                It 'lists a HOLD change MasterData does not have yet' {
+                                $held = New-TestStudent -Name 'E' -OnHold
+                                $held | Add-Member -NotePropertyName 'OnHoldInMasterData' -NotePropertyValue $false
+                                $same = New-TestStudent -Name 'F' -OnHold
+                                $same | Add-Member -NotePropertyName 'OnHoldInMasterData' -NotePropertyValue $true
+                                $u = Get-UnsatFlagUpdates -Students @($held, $same)
+                                @($u.Keys) | Should -Be @('E')
+                                $u['E'].Count | Should -Be 1
+                                $u['E']['OnHold'] | Should -BeTrue
+                }
+}
+
+Describe 'Update-StudentHoldStatus' {
+                It 'changes only the students whose box changed and returns them for MasterData' {
+                                $a = New-TestStudent -Name 'Adams, Al'
+                                $b = New-TestStudent -Name 'Brown, Bea' -OnHold
+                                $c = New-TestStudent -Name 'Cole, Cy' -OnHold
+                                $d = New-TestStudent -Name 'Dunn, Di'
+                                $changes = Update-StudentHoldStatus -HoldByName @{ 'Adams, Al' = $true; 'Brown, Bea' = $false; 'Cole, Cy' = $true } -Students @($a, $b, $c, $d) 6>$null
+                                @($changes.Keys | Sort-Object) | Should -Be @('Adams, Al', 'Brown, Bea')
+                                $changes['Adams, Al']['OnHold'] | Should -BeTrue
+                                $changes['Brown, Bea']['OnHold'] | Should -BeFalse
+                                @($a, $b, $c, $d | ForEach-Object { $_.OnHold }) | Should -Be @($true, $false, $true, $false)
+                }
+
+                It 'returns no changes when no box changed' {
+                                $a = New-TestStudent -Name 'Adams, Al' -OnHold
+                                (Update-StudentHoldStatus -HoldByName @{ 'Adams, Al' = $true } -Students @($a) 6>$null).Count | Should -Be 0
+                                $a.OnHold | Should -BeTrue
                 }
 }
 
@@ -209,6 +240,18 @@ Describe 'Update-MasterDataStudents' -Skip:(-not $script:HasExcel) {
                                 ConvertTo-FaisBool $rows[0].UnsatSim | Should -BeFalse
                                 $rows[1].Col14 | Should -Be 'keep'
                                 (Get-TCell -Path $script:MD -Sheet 'Students' -Row 1 -Col 16) | Should -Be 'SimDebt'
+                }
+
+                It 'writes OnHold to its headed column, on and off, nothing else' {
+                                $path = Join-Path $TestDrive 'Hold.xlsx'
+                                New-TMasterData -Path $path -Students @((New-TStudentRow -Name 'Adams, Al' -Key 1 -SimDebt 1), (New-TStudentRow -Name 'Brown, Bea' -Key 2 -OnHold $true -SimDebt 2))
+                                Update-MasterDataStudents -MasterDataPath $path -FlagsByName @{ 'Adams, Al' = @{ OnHold = $true }; 'Brown, Bea' = @{ OnHold = $false } } 6>$null
+                                $rows = @(Import-Excel -Path $path -WorksheetName 'Students')
+                                ConvertTo-FaisBool $rows[0].OnHold | Should -BeTrue
+                                ConvertTo-FaisBool $rows[1].OnHold | Should -BeFalse
+                                ConvertTo-FaisBool $rows[0].UnsatSim | Should -BeFalse
+                                $rows[0].SimDebt | Should -Be 1
+                                $rows[1].SimDebt | Should -Be 2
                 }
 
                 It 'warns about names it can''t find and still writes the rest' {
@@ -351,6 +394,24 @@ Describe 'Pre-run saves (incomplete and hooked events)' -Skip:(-not $script:HasE
                                 ConvertTo-FaisBool $rows[0].UnsatSim | Should -BeTrue
                                 ConvertTo-FaisBool $rows[0].UnsatFlight | Should -BeFalse
                                 ConvertTo-FaisBool $rows[1].UnsatSim | Should -BeFalse
+                }
+
+                It 'a HOLD change sets OnHold in MasterData right away, on and then off' {
+                                $students = $script:PIng.Students
+                                ($students | Where-Object { $_.Name -eq 'Adams, Al' }).OnHoldInMasterData | Should -BeFalse
+                                $changes = Update-StudentHoldStatus -HoldByName @{ 'Adams, Al' = $true; 'Brown, Bea' = $false } -Students $students 6>$null
+                                @($changes.Keys) | Should -Be @('Adams, Al')
+                                # Not saved yet: Export would write it
+                                (Get-UnsatFlagUpdates -Students $students)['Adams, Al']['OnHold'] | Should -BeTrue
+                                Save-PreRunChanges -MasterDataPath $script:PMD -OutputPath $script:POut -FlagsByName $changes 3>$null 6>$null | Should -BeTrue
+                                $rows = @(Import-Excel -Path $script:PMD -WorksheetName 'Students')
+                                ConvertTo-FaisBool $rows[0].OnHold | Should -BeTrue
+                                ConvertTo-FaisBool $rows[1].OnHold | Should -BeFalse
+
+                                $changes = Update-StudentHoldStatus -HoldByName @{ 'Adams, Al' = $false } -Students $students 6>$null
+                                Save-PreRunChanges -MasterDataPath $script:PMD -OutputPath $script:POut -FlagsByName $changes 3>$null 6>$null | Should -BeTrue
+                                ConvertTo-FaisBool @(Import-Excel -Path $script:PMD -WorksheetName 'Students')[0].OnHold | Should -BeFalse
+                                (IngestData -excelInputPath $script:PMD -excelOutputPath $script:POut 3>$null 6>$null).Students[0].OnHold | Should -BeFalse
                 }
 
                 It 'keeps the change in memory, and saves nothing, when MasterData is missing' {

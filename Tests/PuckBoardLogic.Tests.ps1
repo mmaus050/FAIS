@@ -818,7 +818,7 @@ Describe 'Puck board: click and place, Line details, fill buttons, export result
             Overrides = @([PSCustomObject]@{ ETD = "$($script:D1) 07:30:00"; Student = 'Adams, Al'; Violations = @('Turn time 2.8 hr < 3.25 hr minimum') })
         }
         $s = Get-FaisExportSummary -Ok $true -FillResult $fill -Days @($script:D1) -OutputPath 'C:\o.xlsx' -MasterDataPath 'C:\m.xlsx' -AtisPath 'C:\a.xlsx' `
-            -UnsatChanges @{ 'Brown, Bea' = @{ UnsatSim = $false } } -Warnings @('Not found in the SPName column: Cruz, Cy')
+            -UnsatChanges @{ 'Brown, Bea' = @{ UnsatSim = $false }; 'Cruz, Cy' = @{ OnHold = $true } } -Warnings @('Not found in the SPName column: Cruz, Cy')
         $s.Ok | Should -BeTrue
         $s.Title | Should -BeExactly 'Schedule exported: Tue 20 Oct'
         $texts = @($s.Lines | ForEach-Object { "$($_.Kind)|$($_.Text)" })
@@ -826,6 +826,7 @@ Describe 'Puck board: click and place, Line details, fill buttons, export result
         $texts | Should -Contain 'Warn|1 line(s) are For Sale: no student could fly them.'
         $texts | Should -Contain 'Path|C:\a.xlsx'
         $texts | Should -Contain 'Good|UnsatSim cleared for Brown, Bea (cleaned up on this schedule)'
+        $texts | Should -Contain 'Text|Cruz, Cy put on hold'
         $texts | Should -Contain 'Hard|0730 Adams, Al: Turn time 2.8 hr < 3.25 hr minimum'
         $texts | Should -Contain 'Warn|Not found in the SPName column: Cruz, Cy'
     }

@@ -399,7 +399,7 @@ function Format-TabEtd {
 # UnsatFlight into the columns with those headings.
 # Only the cells passed in change. Throws when MasterData can't be written.
 #   -SimDebtDeltaByName: name -> amount added to the SimDebt already there (Update Syllabi)
-#   -FlagsByName: name -> @{ UnsatSim = $true/$false; UnsatFlight = $true/$false } (either key)
+#   -FlagsByName: name -> @{ UnsatSim = $true/$false; UnsatFlight = $true/$false; OnHold = $true/$false } (any of the keys)
 # ==========================================
 function Update-MasterDataStudents {
                 param (
@@ -427,7 +427,7 @@ function Update-MasterDataStudents {
                                 $seenName = $false; $seenDebt = $false
                                 for ($c = 1; $c -le $lastCol; $c++) {
                                                 $heading = ([string]$ws.Cells[1, $c].Value).Trim()
-                                                if ($heading -in @('UnsatSim', 'UnsatFlight') -and -not $flagCol.ContainsKey($heading)) { $flagCol[$heading] = $c }
+                                                if ($heading -in @('UnsatSim', 'UnsatFlight', 'OnHold') -and -not $flagCol.ContainsKey($heading)) { $flagCol[$heading] = $c }
                                                 elseif ($heading -ieq 'SPName' -and -not $seenName) { $nameCol = $c; $seenName = $true }
                                                 elseif ($heading -ieq 'SimDebt' -and -not $seenDebt) { $debtCol = $c; $seenDebt = $true }
                                 }
@@ -472,7 +472,7 @@ function Update-MasterDataStudents {
                                                 Write-Warning "Not found in the SPName column of the MasterData Students sheet (above the first blank name), so nothing was written for: $($missing -join '; ')"
                                 }
                                 $debtNames = @(@($SimDebtByName.Keys) + @($SimDebtDeltaByName.Keys) | Sort-Object -Unique | Where-Object { $found.ContainsKey($_) })
-                                Write-Host ("MasterData updated: SimDebt for {0} student(s), unsat flags for {1}." -f $debtNames.Count, @($FlagsByName.Keys | Where-Object { $found.ContainsKey($_) }).Count) -ForegroundColor Green
+                                Write-Host ("MasterData updated: SimDebt for {0} student(s), unsat / HOLD flags for {1}." -f $debtNames.Count, @($FlagsByName.Keys | Where-Object { $found.ContainsKey($_) }).Count) -ForegroundColor Green
                 }
                 catch {
                                 if ($null -ne $package) { Close-ExcelPackage -ExcelPackage $package -NoSave }
@@ -480,9 +480,10 @@ function Update-MasterDataStudents {
                 }
 }
 
-# The UnsatSim / UnsatFlight values that no longer match what was read from MasterData:
+# The UnsatSim / UnsatFlight / OnHold values that no longer match what was read from MasterData:
 # $false where this run's schedule cleaned up the unsat, $true where a hook (or a re-planned
-# clean-up) set one that MasterData doesn't have yet. Same shape as -FlagsByName above.
+# clean-up) set one that MasterData doesn't have yet, and a HOLD change the pre-run menu
+# could not save. Same shape as -FlagsByName above.
 function Get-UnsatFlagUpdates {
                 param ([array]$Students)
 
@@ -492,7 +493,7 @@ function Get-UnsatFlagUpdates {
                                 $name = ([string]$s.Name).Trim()
                                 if ($name -eq '') { continue }
                                 $flags = @{}
-                                foreach ($key in @('UnsatSim', 'UnsatFlight')) {
+                                foreach ($key in @('UnsatSim', 'UnsatFlight', 'OnHold')) {
                                                 $saved = $s.PSObject.Properties["${key}InMasterData"]
                                                 if ($null -eq $saved) { continue }
                                                 $now = ConvertTo-FaisBool $s.$key

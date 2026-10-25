@@ -3693,7 +3693,7 @@ function Submit-PBDialog {
 
 # What the export result window says: {Ok; Title; Subtitle; Lines = @({Kind; Text})}.
 # Kind: Head, Text, Path, Good, Warn, Hard.
-#   -UnsatChanges: Get-UnsatFlagUpdates from before the export (name -> @{ UnsatSim; UnsatFlight })
+#   -UnsatChanges: Get-UnsatFlagUpdates from before the export (name -> @{ UnsatSim; UnsatFlight; OnHold })
 #   -Warnings: the export's warning messages (why it failed, or names MasterData didn't have)
 function Get-FaisExportSummary {
                 param (
@@ -3736,7 +3736,7 @@ function Get-FaisExportSummary {
                 & $add 'Text' "OutputSchedule: the MasterSchedule tab for $dayText (other days already exported are kept), and each student's syllabus tab"
                 & $add 'Path' $OutputPath
                 $unsatCount = @($UnsatChanges.Keys).Count
-                & $add 'Text' $(if ($unsatCount -gt 0) { "MasterData: SimDebt, and the unsat flags of $unsatCount student(s)" } else { 'MasterData: SimDebt' })
+                & $add 'Text' $(if ($unsatCount -gt 0) { "MasterData: SimDebt, and the unsat / HOLD flags of $unsatCount student(s)" } else { 'MasterData: SimDebt' })
                 & $add 'Path' $MasterDataPath
                 if ($AtisPath) {
                                 & $add 'Text' "ATIS: one tab per day for $dayText, flights then sims"
@@ -3744,11 +3744,12 @@ function Get-FaisExportSummary {
                 }
 
                 if ($unsatCount -gt 0) {
-                                & $add 'Head' 'Unsats'
+                                & $add 'Head' 'Unsats and HOLD status'
                                 foreach ($name in @($UnsatChanges.Keys | Sort-Object)) {
                                                 $flags = $UnsatChanges[$name]
                                                 foreach ($key in @($flags.Keys | Sort-Object)) {
-                                                                if ($flags[$key]) { & $add 'Warn' "$key set for $name" }
+                                                                if ($key -eq 'OnHold') { & $add 'Text' $(if ($flags[$key]) { "$name put on hold" } else { "$name taken off hold" }) }
+                                                                elseif ($flags[$key]) { & $add 'Warn' "$key set for $name" }
                                                                 else { & $add 'Good' "$key cleared for $name (cleaned up on this schedule)" }
                                                 }
                                 }
