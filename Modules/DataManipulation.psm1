@@ -1,7 +1,7 @@
 # DATAMANIPULATION.PSM1 DIRECTORY:
 #             Shared helpers that change, move, match and format data during the program run
 # ConvertTo-FaisBool / Get-NameText / Get-BaseName
-# Parse-ETD / ConvertTo-FaisTimeValue / Format-EtdShort / Format-EventLabel
+# Parse-ETD / ConvertTo-FaisTimeValue / Format-EtdShort / Format-EventLabel / Format-AbsenceTime
 # New-FallbackInstructor / Get-MatchedInstructor / Resolve-SortieInstructor
 # Get-NormalizedLastName / Resolve-StudentByName / Test-IsSentinelStudent
 # Test-IsSimSortieType / Test-IsReturnSortieType / Test-IsOBSortieType / Get-SortieCategory / ConvertTo-CanonicalSortieType
@@ -181,6 +181,16 @@ function Format-EtdShort {
                 $dt = Parse-ETD $Date
                 if ($null -eq $dt) { return '----' }
                 return $dt.ToString('HHmm')
+}
+
+# 'Tue 20 Oct 0730-1130', or 'Tue 20 Oct 2200 - Wed 21 Oct 0600' when it runs past midnight
+function Format-AbsenceTime {
+                param ($Absence)
+
+                $s = [datetime]$Absence.StartTime
+                $e = [datetime]$Absence.EndTime
+                if ($s.Date -eq $e.Date) { return ('{0} {1}-{2}' -f $s.ToString('ddd dd MMM'), $s.ToString('HHmm'), $e.ToString('HHmm')) }
+                return ('{0} - {1}' -f $s.ToString('ddd dd MMM HHmm'), $e.ToString('ddd dd MMM HHmm'))
 }
 
 # "0730 FT5103" or "Mon 0730 FT5103" when the event is on a different day

@@ -474,3 +474,125 @@ Describe 'IngestData' -Skip:(-not $script:HasExcel) {
                                 $adams.SimDebt | Should -Be 1.5
                 }
 }
+
+Describe 'Get-PendingStudentAbsences' {
+                It 'lists only the absences added this run that MasterData does not have yet, each once' {
+                                $read = [PSCustomObject]@{ Student = 'A'; StartTime = [datetime]'2026-03-03 08:00'; EndTime = [datetime]'2026-03-03 09:00'; Reason = '' }
+                                $saved = [PSCustomObject]@{ Student = 'A'; StartTime = [datetime]'2026-03-03 10:00'; EndTime = [datetime]'2026-03-03 11:00'; Reason = ''; InMasterData = $true }
+                                $new = [PSCustomObject]@{ Student = 'A'; StartTime = [datetime]'2026-03-03 12:00'; EndTime = [datetime]'2026-03-03 13:00'; Reason = ''; InMasterData = $false }
+                                $a = New-TestStudent -Name 'A' -Absences @($read, $saved, $new)
+                                $pending = @(Get-PendingStudentAbsences -Students @($a, (Copy-StudentForEval $a), $null, (New-TestStudent -Name 'B')))
+                                $pending.Count | Should -Be 1
+                                [object]::ReferenceEquals($pending[0], $new) | Should -BeTrue
+                }
+}
+
+Describe 'Add Student Absence: lines on the StudentAbsences sheet' -Skip:(-not $script:HasExcel) {
+                BeforeAll {
+                                function New-TAbsence {
+                                                param ([string]$Student, [string]$From, [string]$To, [string]$Reason = '')
+                                                return [PSCustomObject]@{ Student = $Student; StartTime = [datetime]$From; EndTime = [datetime]$To; Reason = $Reason; InMasterData = $false }
+                                }
+                                $script:AbsStudents = @((New-TStudentRow -Name 'Adams, Al' -Key 1), (New-TStudentRow -Name 'Brown, Bea' -Key 2))
+                                $script:OldAbsence = [PSCustomObject]@{ Student = 'Adams, Al'; StartTime = '2026-03-02 08:00'; EndTime = '2026-03-02 09:00'; Reason = 'Old'; IsActive = $true }
+                }
+
+                It 'adds a line under the last one with IsActive TRUE, and IngestData gives it to the student' {
+                                $md = Join-Path $TestDrive 'Abs-MD.xlsx'
+                                New-TMasterData -Path $md -Students $script:AbsStudents -Absences @($script:OldAbsence)
+                                Add-MasterDataAbsences -MasterDataPath $md -Absences @((New-TAbsence 'Brown, Bea' '2026-03-03 13:00' '2026-03-03 15:30' ' Dentist '), (New-TAbsence 'Adams, Al' '2026-03-03 22:00' '2026-03-04 06:00')) 6>$null
+                                $rows = @(Import-Excel -Path $md -WorksheetName 'StudentAbsences')
+                                $rows.Count | Should -Be 3
+                                $rows[0].Reason | Should -Be 'Old'
+                                $rows[1].Student | Should -Be 'Brown, Bea'
+                                $rows[1].Reason | Should -Be 'Dentist'
+                                ConvertTo-FaisBool $rows[1].IsActive | Should -BeTrue
+                                (Parse-ETD $rows[2].EndTime) | Should -Be ([datetime]'2026-03-04 06:00')
+                                [string]::IsNullOrWhiteSpace([string]$rows[2].Reason) | Should -BeTrue
+
+                                $ing = IngestData -excelInputPath $md -excelOutputPath (Join-Path $TestDrive 'Abs-Out.xlsx') 3>$null 6>$null
+                                $brown = $ing.Students | Where-Object { $_.Name -eq 'Brown, Bea' }
+                                @($brown.Absences).Count | Should -Be 1
+                                $brown.Absences[0].StartTime | Should -Be ([datetime]'2026-03-03 13:00')
+                                $brown.Absences[0].EndTime | Should -Be ([datetime]'2026-03-03 15:30')
+                                $brown.Absences[0].Reason | Should -Be 'Dentist'
+                                @(($ing.Students | Where-Object { $_.Name -eq 'Adams, Al' }).Absences).Count | Should -Be 2
+                }
+
+                It 'fills in blank lines formatted ahead of time, keeping their date format' {
+                                $md = Join-Path $TestDrive 'Abs-Formatted.xlsx'
+                                New-TMasterData -Path $md -Students $script:AbsStudents -Absences @($script:OldAbsence)
+                                $pkg = Open-ExcelPackage -Path $md
+                                $ws = $pkg.Workbook.Worksheets['StudentAbsences']
+                                foreach ($r in 3..6) { foreach ($c in 2..3) { $ws.Cells[$r, $c].Style.Numberformat.Format = 'd mmm yy hh:mm' } }
+                                Close-ExcelPackage -ExcelPackage $pkg
+                                Add-MasterDataAbsences -MasterDataPath $md -Absences @(New-TAbsence 'Brown, Bea' '2026-03-03 13:00' '2026-03-03 15:30') 6>$null
+                                $pkg = Open-ExcelPackage -Path $md
+                                try {
+                                                $ws = $pkg.Workbook.Worksheets['StudentAbsences']
+                                                $ws.Cells[3, 1].Value | Should -Be 'Brown, Bea'
+                                                $ws.Cells[3, 2].Style.Numberformat.Format | Should -Be 'd mmm yy hh:mm'
+                                                $ws.Cells[4, 1].Value | Should -BeNullOrEmpty
+                                }
+                                finally { Close-ExcelPackage -ExcelPackage $pkg -NoSave }
+                }
+
+                It 'adds the sheet, with its headings, when MasterData has none' {
+                                $md = Join-Path $TestDrive 'Abs-NoSheet.xlsx'
+                                New-TMasterData -Path $md -Students $script:AbsStudents
+                                $pkg = Open-ExcelPackage -Path $md
+                                $pkg.Workbook.Worksheets.Delete('StudentAbsences')
+                                Close-ExcelPackage -ExcelPackage $pkg
+                                Add-MasterDataAbsences -MasterDataPath $md -Absences @(New-TAbsence 'Adams, Al' '2026-03-03 08:00' '2026-03-03 09:00' 'Leave') 6>$null
+                                $rows = @(Import-Excel -Path $md -WorksheetName 'StudentAbsences')
+                                @($rows[0].PSObject.Properties.Name) | Should -Be @('Student', 'StartTime', 'EndTime', 'Reason', 'IsActive')
+                                $rows.Count | Should -Be 1
+                                $rows[0].Student | Should -Be 'Adams, Al'
+                }
+
+                It 'throws, and saves nothing, when a heading IngestData reads is missing' {
+                                $path = Join-Path $TestDrive 'Abs-NoActive.xlsx'
+                                @([PSCustomObject][ordered]@{ Student = 'Adams, Al'; StartTime = '2026-03-02 08:00'; EndTime = '2026-03-02 09:00' }) | Export-Excel -Path $path -WorksheetName 'StudentAbsences' 3>$null
+                                $before = [System.IO.File]::ReadAllBytes($path)
+                                { Add-MasterDataAbsences -MasterDataPath $path -Absences @(New-TAbsence 'Brown, Bea' '2026-03-03 13:00' '2026-03-03 14:00') 6>$null } | Should -Throw "*no 'IsActive' heading*"
+                                [System.IO.File]::ReadAllBytes($path) | Should -Be $before
+                }
+
+                It 'Save-StudentAbsences saves what MasterData does not have yet and marks it saved; a missing file keeps it for Export' {
+                                $md = Join-Path $TestDrive 'Abs-Save.xlsx'
+                                New-TMasterData -Path $md -Students $script:AbsStudents -Absences @($script:OldAbsence)
+                                $a = New-TestStudent -Name 'Adams, Al'
+                                $b = New-TestStudent -Name 'Brown, Bea'
+                                $made = New-StudentAbsences -Students @('Adams, Al', 'Brown, Bea') -Day '2026-03-03' -From '1300' -To '0230 PM' -Reason 'Brief'
+                                [void](Add-StudentAbsences -Absences $made.Absences -Students @($a, $b))
+
+                                $r = Save-StudentAbsences -MasterDataPath $md -Students @($a, $b) 6>$null
+                                $r.Saved | Should -BeTrue
+                                $r.Count | Should -Be 2
+                                @(Get-PendingStudentAbsences -Students @($a, $b)).Count | Should -Be 0
+                                @(Import-Excel -Path $md -WorksheetName 'StudentAbsences' | ForEach-Object { $_.Student }) | Should -Be @('Adams, Al', 'Adams, Al', 'Brown, Bea')
+                                (Save-StudentAbsences -MasterDataPath $md -Students @($a, $b) 6>$null).Count | Should -Be 0 -Because 'nothing is left to save'
+
+                                $later = New-StudentAbsences -Students @('Brown, Bea') -Day '2026-03-04' -From '0800' -To '0900'
+                                [void](Add-StudentAbsences -Absences $later.Absences -Students @($b))
+                                $gone = Save-StudentAbsences -MasterDataPath (Join-Path $TestDrive 'nope.xlsx') -Students @($a, $b) 6>$null
+                                $gone.Saved | Should -BeFalse
+                                $gone.Message | Should -Be 'MasterData.xlsx was not found'
+                                @(Get-PendingStudentAbsences -Students @($a, $b)).Count | Should -Be 1
+                }
+
+                It 'Export writes an absence that could not be saved before, with everything else' {
+                                $md = Join-Path $TestDrive 'Abs-Export-MD.xlsx'
+                                $out = Join-Path $TestDrive 'Abs-Export-Out.xlsx'
+                                New-TMasterData -Path $md -Students $script:AbsStudents -Absences @($script:OldAbsence)
+                                $a = New-TestStudent -Name 'Adams, Al' -Done 'FI3101|2026-02-20 08:00'
+                                $made = New-StudentAbsences -Students @('Adams, Al') -Day '2026-03-03' -From '1500' -To '1600' -Reason 'Medical'
+                                [void](Add-StudentAbsences -Absences $made.Absences -Students @($a))
+                                $fill = [PSCustomObject]@{ Schedule = @(New-TestRow -ETD '2026-03-03 07:30' -Instructor 'Jones, Bob' -Student 'Adams, Al' -Mission 'FT5001'); Students = @(Copy-StudentForEval $a) }
+                                Export-FaisOutput -FillResult $fill -OutputPath $out -MasterDataPath $md 3>$null 6>$null | Should -BeTrue
+                                $rows = @(Import-Excel -Path $md -WorksheetName 'StudentAbsences')
+                                $rows.Count | Should -Be 2
+                                $rows[1].Reason | Should -Be 'Medical'
+                                $a.Absences[0].InMasterData | Should -BeTrue
+                }
+}

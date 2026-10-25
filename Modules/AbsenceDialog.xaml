@@ -1,0 +1,129 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Add student absence" Height="640" Width="800" MinHeight="540" MinWidth="700"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False" Background="#F8FAFC"
+        FontFamily="Segoe UI" FontSize="12">
+    <Window.Resources>
+        <!-- A student in the list on the right: drag them into the box, or click them and then click the box -->
+        <DataTemplate x:Key="AbsencePuckTemplate">
+            <Border Tag="AbsencePuck" CornerRadius="13" Padding="9,3" Margin="3,2" Cursor="Hand" Background="{Binding Background}"
+                    BorderBrush="{Binding BorderBrush}" BorderThickness="{Binding PuckBorderThickness}" ToolTip="{Binding ToolTipText}">
+                <StackPanel>
+                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="#14532D" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="{Binding BadgeText}" FontSize="10" FontWeight="SemiBold" Foreground="#B45309"
+                               Visibility="{Binding BadgeVisibility}" TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <!-- A student in the box: the x (or dragging them back to the list) takes them out -->
+        <DataTemplate x:Key="AbsenceChosenTemplate">
+            <Border Tag="AbsenceChosen" CornerRadius="13" Padding="9,2,3,2" Margin="3" Cursor="Hand" Background="#DBEAFE"
+                    BorderBrush="#93C5FD" BorderThickness="1" ToolTip="Drag back to the list, or press x, to take them out">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="#1E3A8A" VerticalAlignment="Center"/>
+                    <Button Tag="AbsenceRemove" Content="&#x2715;" Margin="6,0,0,0" Padding="0" Width="18" Height="18" Cursor="Hand"
+                            Background="Transparent" BorderThickness="0" Foreground="#64748B" ToolTip="Take them out"/>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+    </Window.Resources>
+
+    <DockPanel Margin="14">
+        <TextBlock DockPanel.Dock="Top" Text="Add student absence" FontSize="15" FontWeight="Bold"/>
+        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="#475569" Margin="0,2,0,10"
+                   Text="Blocks students off for a stretch of time, the same as a line on MasterData's StudentAbsences sheet. The board and the scheduler keep them off every line inside it."/>
+
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button x:Name="AddButton" Content="Add absence" Padding="18,4" Margin="3,0" FontWeight="Bold" IsDefault="True"/>
+            <Button x:Name="CancelButton" Content="Cancel" Padding="10,3" Margin="3,0" IsCancel="True"/>
+        </StackPanel>
+
+        <!-- Right: every student -->
+        <Border DockPanel.Dock="Right" Width="250" Margin="12,0,0,0" Background="White" CornerRadius="6" BorderBrush="#CBD5E1" BorderThickness="1"
+                Padding="6" Tag="AbsencePool" AllowDrop="True">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Text="STUDENTS" FontWeight="Bold" Foreground="#14532D" Margin="2,0,0,4"/>
+                <TextBox DockPanel.Dock="Top" x:Name="SearchBox" Margin="0,0,0,4" Padding="3" ToolTip="Filter students by name"/>
+                <TextBlock DockPanel.Dock="Top" FontSize="10" Foreground="#64748B" TextWrapping="Wrap" Margin="2,0,0,6"
+                           Text="Drag a student into the box, or click them and then click the box. Double-click adds them straight away."/>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <ItemsControl x:Name="StudentPool" ItemTemplate="{StaticResource AbsencePuckTemplate}"/>
+                </ScrollViewer>
+            </DockPanel>
+        </Border>
+
+        <!-- Left: who, when and why -->
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <TextBlock Text="Students to block off:" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                <Border x:Name="DropBox" Tag="AbsenceDrop" AllowDrop="True" Focusable="True" MinHeight="96" Background="White"
+                        BorderBrush="#94A3B8" BorderThickness="2" CornerRadius="6" Padding="6" Cursor="Hand"
+                        ToolTip="Drop students here, click here while holding one, or click here and press Ctrl+V to paste names">
+                    <Grid>
+                        <TextBlock x:Name="DropHint" TextWrapping="Wrap" Foreground="#94A3B8" TextAlignment="Center" Margin="10"
+                                   VerticalAlignment="Center" HorizontalAlignment="Center"
+                                   Text="Drag students here, or click a student and then click here. Names you copied (from Excel, an email...) go in with Ctrl+V."/>
+                        <ItemsControl x:Name="ChosenList" ItemTemplate="{StaticResource AbsenceChosenTemplate}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+                    </Grid>
+                </Border>
+                <DockPanel Margin="0,4,0,0">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <Button x:Name="PasteButton" Content="Paste names" Padding="10,2" Margin="3,0"
+                                ToolTip="Add the students named in what you copied: one name per line or cell (Ctrl+V does the same)"/>
+                        <Button x:Name="ClearButton" Content="Clear" Padding="10,2" Margin="3,0,0,0" ToolTip="Take every student out of the box"/>
+                    </StackPanel>
+                    <TextBlock x:Name="HoldText" TextWrapping="Wrap" Foreground="#1E3A8A" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                </DockPanel>
+                <TextBlock x:Name="PasteText" TextWrapping="Wrap" Foreground="#B45309" Margin="0,4,0,0"/>
+
+                <Grid Margin="0,12,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="70"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Text="Day:" VerticalAlignment="Center"/>
+                    <DatePicker x:Name="DayPicker" Grid.Row="0" Grid.Column="1" Width="150" HorizontalAlignment="Left" Margin="0,3"
+                                ToolTip="The day the absence starts"/>
+
+                    <TextBlock Grid.Row="1" Text="From:" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="0,3">
+                        <TextBox x:Name="FromBox" Width="90" FontFamily="Consolas" FontSize="13" Padding="3,2" MaxLength="12"
+                                 ToolTip="24-hour time (0730, 1530) or 12-hour time with AM or PM (0730 AM, 0330 PM)"/>
+                        <TextBlock Text="e.g. 0730, 1530 or 0330 PM" Foreground="#94A3B8" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="2" Text="To:" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="0,3">
+                        <TextBox x:Name="ToBox" Width="90" FontFamily="Consolas" FontSize="13" Padding="3,2" MaxLength="12"
+                                 ToolTip="24-hour time (1130, 1700) or 12-hour time with AM or PM (1130 AM, 0500 PM)"/>
+                        <TextBlock Text="on" VerticalAlignment="Center" Margin="10,0,6,0"/>
+                        <DatePicker x:Name="EndDayPicker" Width="150"
+                                    ToolTip="The same day as the start, unless the absence runs past midnight or over several days"/>
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="3" Text="Reason:" VerticalAlignment="Center"/>
+                    <TextBox x:Name="ReasonBox" Grid.Row="3" Grid.Column="1" Padding="3,2" Margin="0,3" MaxLength="120"
+                             ToolTip="Optional, e.g. Dentist, Leave, Medical. It shows on the board and in the rule flag."/>
+                </Grid>
+
+                <Border Background="White" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,12,0,0">
+                    <TextBlock x:Name="PreviewText" TextWrapping="Wrap" MinHeight="34"/>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

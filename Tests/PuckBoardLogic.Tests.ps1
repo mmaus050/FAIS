@@ -850,3 +850,244 @@ Describe 'Puck board: click and place, Line details, fill buttons, export result
         }
     }
 }
+
+Describe 'Puck board: Add Student Absence (no window)' {
+    BeforeEach {
+        Mock -ModuleName PuckBoard Update-PBTabs { }
+        Mock -ModuleName PuckBoard Update-PBDay { }
+        Mock -ModuleName PuckBoard Update-PBPools { }
+        Mock -ModuleName PuckBoard Restore-PBFocus { }
+        Mock -ModuleName PuckBoard Get-PBFocusState { $null }
+        Mock -ModuleName PuckBoard Request-PBAutosave { }
+        Mock -ModuleName PuckBoard Start-PBAssessQueue { }
+        Mock -ModuleName PuckBoard Close-PBPopup { }
+        Mock -ModuleName PuckBoard Stop-PBHeat { }
+        Mock -ModuleName PuckBoard Update-PBHoldBanner { }
+        Mock -ModuleName PuckBoard Show-BusyOverlay { }
+        Mock -ModuleName PuckBoard Hide-BusyOverlay { }
+        Mock -ModuleName PuckBoard Get-PBActiveDay { & (Get-Module PuckBoard) { $script:PB.ActiveDay } }
+        Mock -ModuleName PuckBoard Set-PBStatus { & (Get-Module PuckBoard) { param($t, $k) $script:PB.C.StatusText.Text = $t; $script:PB.StatusLog.Add("$k|$t") } $Text $Kind }
+        Mock -ModuleName PuckBoard Save-StudentAbsences { [PSCustomObject]@{ Saved = $true; Count = 1; Message = '' } }
+        Mock -ModuleName PuckBoard Show-PBMessage { throw 'should not ask' }
+        Clear-AssessmentCache
+
+        # Adams is hardcoded on Tue 0730 (his sortie window is 0600-1000)
+        Initialize-TestBoard -Days @($script:D1) -Sheet (New-Sheet @())
+        $script:Board = (Get-PB).Board
+        Add-BoardLine -Board $script:Board -Line @(New-BoardLine -ETD ([datetime]"$($script:D1) 07:30") -SortieType 'Day Local' -Instructor 'Jones, Bob' -Student 'Adams, Al' -Id 'L1') -NoUndo
+        & (Get-Module PuckBoard) { $script:PB.Held = $null }
+
+        function New-AbsAsk {
+            param ([string[]]$Students, [string]$From, [string]$To, [string]$Reason = '')
+            @{ Students = $Students; Day = [datetime]'2026-10-20'; From = $From; To = $To; EndDay = [datetime]'2026-10-20'; Reason = $Reason }
+        }
+        function Get-Student { param ([string]$Name) (Get-PB).Data.Students | Where-Object { $_.Name -eq $Name } }
+        function Get-LastStatus { @((Get-PB).StatusLog)[-1] }
+    }
+
+    It 'the button blocks the students off, checks the board again and saves to MasterData right away' {
+        Mock -ModuleName PuckBoard Show-PBAbsenceDialog { New-AbsAsk -Students @('Brown, Bea') -From '1300' -To '0330 PM' -Reason 'Dentist' }
+        & (Get-Module PuckBoard) { Invoke-PBAddAbsence }
+        Should -Invoke -ModuleName PuckBoard Show-PBAbsenceDialog -Times 1 -Exactly -ParameterFilter { $Day -eq '2026-10-20' -and @($Students).Count -eq 0 }
+        $abs = @((Get-Student 'Brown, Bea').Absences)
+        $abs.Count | Should -Be 1
+        $abs[0].StartTime | Should -Be ([datetime]'2026-10-20 13:00')
+        $abs[0].EndTime | Should -Be ([datetime]'2026-10-20 15:30')
+        $abs[0].Reason | Should -BeExactly 'Dentist'
+        Should -Invoke -ModuleName PuckBoard Save-StudentAbsences -Times 1 -Exactly -ParameterFilter { @($Students).Count -eq 2 -and $null -ne $LockedPrompt }
+        Should -Invoke -ModuleName PuckBoard Start-PBAssessQueue -Times 1
+        Get-LastStatus | Should -BeExactly "Good|Brown, Bea blocked off Tue 20 Oct 1300-1530 (Dentist). Saved to MasterData's StudentAbsences sheet."
+    }
+
+    It 'a student already hardcoded inside the absence is named, and their line breaks the ABSENCE rule' {
+        Mock -ModuleName PuckBoard Show-PBAbsenceDialog { New-AbsAsk -Students @('Adams, Al', 'Brown, Bea') -From '0700 AM' -To '0800' }
+        & (Get-Module PuckBoard) { Invoke-PBAddAbsence }
+        Get-LastStatus | Should -BeExactly "Warn|Adams, Al and Brown, Bea blocked off Tue 20 Oct 0700-0800. Already hardcoded inside it (flagged red): Tue 0730 Adams, Al. Saved to MasterData's StudentAbsences sheet."
+        $check = Get-PlacementAssessment -Board $script:Board -LineId 'L1' -StudentName 'Adams, Al' -Data (Get-PB).Data
+        @($check.Violations | ForEach-Object { $_.Rule }) | Should -Contain 'ABSENCE'
+    }
+
+    It 'when MasterData cannot be saved it holds for this run, and it says so' {
+        Mock -ModuleName PuckBoard Show-PBAbsenceDialog { New-AbsAsk -Students @('Brown, Bea') -From '1300' -To '1400' }
+        Mock -ModuleName PuckBoard Save-StudentAbsences { [PSCustomObject]@{ Saved = $false; Count = 0; Message = 'MasterData.xlsx is still open' } }
+        Mock -ModuleName PuckBoard Show-PBMessage { 'OK' }
+        & (Get-Module PuckBoard) { Invoke-PBAddAbsence }
+        @((Get-Student 'Brown, Bea').Absences).Count | Should -Be 1
+        Should -Invoke -ModuleName PuckBoard Show-PBMessage -Times 1 -Exactly -ParameterFilter { $Icon -eq 'Warning' -and $Text -like '*for this run only: MasterData could not be saved (MasterData.xlsx is still open). Export writes it*' }
+        Get-LastStatus | Should -BeLike 'Warn|Brown, Bea blocked off Tue 20 Oct 1300-1400. It holds for this run only*'
+    }
+
+    It 'cancelling the window changes nothing, and so does an absence the student already has' {
+        Mock -ModuleName PuckBoard Show-PBAbsenceDialog { $null }
+        & (Get-Module PuckBoard) { Invoke-PBAddAbsence }
+        @((Get-Student 'Brown, Bea').Absences).Count | Should -Be 0
+        Should -Invoke -ModuleName PuckBoard Save-StudentAbsences -Times 0 -Exactly
+
+        Mock -ModuleName PuckBoard Show-PBAbsenceDialog { New-AbsAsk -Students @('Brown, Bea') -From '1300' -To '1400' }
+        & (Get-Module PuckBoard) { Invoke-PBAddAbsence }
+        & (Get-Module PuckBoard) { Invoke-PBAddAbsence }
+        @((Get-Student 'Brown, Bea').Absences).Count | Should -Be 1
+        Should -Invoke -ModuleName PuckBoard Save-StudentAbsences -Times 1 -Exactly
+        Get-LastStatus | Should -BeExactly 'Warn|Brown, Bea already blocked off Tue 20 Oct 1300-1400 - nothing was added.'
+    }
+
+    It 'a student picked up on the board starts in the box, and is let go of once blocked off' {
+        & (Get-Module PuckBoard) { $script:PB.Held = @{ Kind = 'Student'; Name = 'Brown, Bea' } }
+        Mock -ModuleName PuckBoard Show-PBAbsenceDialog { New-AbsAsk -Students $Students -From '1300' -To '1400' }
+        & (Get-Module PuckBoard) { Invoke-PBAddAbsence }
+        Should -Invoke -ModuleName PuckBoard Show-PBAbsenceDialog -Times 1 -Exactly -ParameterFilter { (@($Students) -join ',') -eq 'Brown, Bea' }
+        @((Get-Student 'Brown, Bea').Absences).Count | Should -Be 1
+        (Get-PB).Held | Should -BeNullOrEmpty
+    }
+
+    It 'while reviewing a fill: the fill is thrown away (it was made without the absence)' {
+        & (Get-Module PuckBoard) { $script:PB.Mode = 'Review'; $script:PB.FillResult = 'old fill' }
+        Mock -ModuleName PuckBoard Show-PBAbsenceDialog { New-AbsAsk -Students @('Brown, Bea') -From '1300' -To '1400' }
+        & (Get-Module PuckBoard) { Invoke-PBAddAbsence }
+        (Get-PB).Mode | Should -BeExactly 'Edit'
+        (Get-PB).FillResult | Should -BeNullOrEmpty
+    }
+
+    It 'the export result lists the absences Export wrote because they could not be saved before' {
+        $fill = [PSCustomObject]@{ Stats = [PSCustomObject]@{ Lines = 1; Pinned = 1; Filled = 0; Wing = 0; Return = 0; DS = 0; ForSale = 0 }; Overrides = @() }
+        $abs = @([PSCustomObject]@{ Student = 'Adams, Al'; StartTime = [datetime]'2026-10-20 13:00'; EndTime = [datetime]'2026-10-20 15:30'; Reason = 'Dentist'; InMasterData = $false })
+        $s = Get-FaisExportSummary -Ok $true -FillResult $fill -Days @($script:D1) -OutputPath 'C:\o.xlsx' -MasterDataPath 'C:\m.xlsx' -Absences $abs
+        $texts = @($s.Lines | ForEach-Object { "$($_.Kind)|$($_.Text)" })
+        $texts | Should -Contain 'Text|MasterData: SimDebt; StudentAbsences: 1 line(s) Add Student Absence could not save'
+        $texts | Should -Contain 'Head|Student absences'
+        $texts | Should -Contain 'Text|Adams, Al: Tue 20 Oct 1300-1530 (Dentist)'
+        @((Get-FaisExportSummary -Ok $true -FillResult $fill -Days @($script:D1)).Lines | Where-Object { $_.Text -like '*absence*' }).Count | Should -Be 0
+    }
+
+    Context 'the window (plain objects stand in for its boxes)' {
+        BeforeEach {
+            Mock -ModuleName PuckBoard Get-PBBrush { $Color }
+            Mock -ModuleName PuckBoard Get-PBClipboardText { "Brown, Bea [2d Lt]`r`nNobody, No" }
+            & (Get-Module PuckBoard) {
+                $o = { param($h) [PSCustomObject]$h }
+                $script:PBAbs = @{ Window = (& $o @{ DialogResult = $null }); Result = $null; Chosen = (New-Object System.Collections.Generic.List[string])
+                    Held = ''; Press = $null; Drag = $null; PendingDrop = $null; LastDay = [datetime]'2026-10-20' }
+                foreach ($box in @('SearchBox', 'FromBox', 'ToBox', 'ReasonBox', 'HoldText', 'PasteText', 'PreviewText')) { $script:PBAbs[$box] = & $o @{ Text = ''; Foreground = '' } }
+                $script:PBAbs.StudentPool = & $o @{ ItemsSource = $null }
+                $script:PBAbs.ChosenList = & $o @{ ItemsSource = $null }
+                $script:PBAbs.DropHint = & $o @{ Visibility = 'Visible' }
+                $script:PBAbs.DropBox = & $o @{ BorderBrush = '' }
+                $script:PBAbs.AddButton = & $o @{ IsEnabled = $true }
+                $script:PBAbs.DayPicker = & $o @{ SelectedDate = [datetime]'2026-10-20' }
+                $script:PBAbs.EndDayPicker = & $o @{ SelectedDate = [datetime]'2026-10-20' }
+            }
+            function Get-Abs { & (Get-Module PuckBoard) { $script:PBAbs } }
+            function Invoke-Abs { param ([scriptblock]$Do) & (Get-Module PuckBoard) $Do }
+            function Get-PoolNames { @((Get-Abs).StudentPool.ItemsSource | ForEach-Object { $_.Name }) }
+        }
+        AfterEach { & (Get-Module PuckBoard) { $script:PBAbs = $null } }
+
+        It 'Add absence waits for a student and both times, then says what it will add' {
+            Invoke-Abs { Update-PBAbsenceView }
+            (Get-Abs).AddButton.IsEnabled | Should -BeFalse
+            (Get-Abs).PreviewText.Foreground | Should -BeExactly '#64748B' -Because 'boxes still empty are not an error'
+            (Get-Abs).DropHint.Visibility | Should -BeExactly 'Visible'
+            Get-PoolNames | Should -Be @('Adams, Al', 'Brown, Bea')
+
+            Invoke-Abs { Add-PBAbsenceStudent -Name 'brown, bea' }
+            @((Get-Abs).Chosen) | Should -Be @('Brown, Bea')
+            Get-PoolNames | Should -Be @('Adams, Al') -Because 'a student in the box leaves the list'
+            @((Get-Abs).ChosenList.ItemsSource | ForEach-Object { $_.Name }) | Should -Be @('Brown, Bea')
+            (Get-Abs).DropHint.Visibility | Should -BeExactly 'Collapsed'
+
+            (Get-Abs).FromBox.Text = '1300'
+            (Get-Abs).ToBox.Text = '0330 pm'
+            Invoke-Abs { Update-PBAbsencePreview } | Should -BeTrue
+            (Get-Abs).AddButton.IsEnabled | Should -BeTrue
+            (Get-Abs).PreviewText.Text | Should -BeLike "Brown, Bea: away Tue 20 Oct 1300-1530. A line for each goes on MasterData's StudentAbsences sheet."
+
+            (Get-Abs).ToBox.Text = '1200'
+            Invoke-Abs { Update-PBAbsencePreview } | Should -BeFalse
+            (Get-Abs).PreviewText.Foreground | Should -BeExactly '#B91C1C'
+            (Get-Abs).PreviewText.Text | Should -BeLike 'It ends (Tue 20 Oct 1200) before it starts*'
+        }
+
+        It 'a click picks a student up (thick outline) and a second click lets go; putting them in the box lets go too' {
+            Invoke-Abs { Set-PBAbsenceHeld -Name 'Adams, Al' }
+            (Get-Abs).Held | Should -BeExactly 'Adams, Al'
+            (Get-Abs).HoldText.Text | Should -BeExactly 'Holding Adams, Al: click the box to add them (Esc lets go).'
+            (Get-Abs).DropBox.BorderBrush | Should -BeExactly '#1D4ED8'
+            @((Get-Abs).StudentPool.ItemsSource | Where-Object { $_.Name -eq 'Adams, Al' })[0].PuckBorderThickness | Should -BeExactly '3'
+            Invoke-Abs { Set-PBAbsenceHeld -Name 'Adams, Al' }
+            (Get-Abs).Held | Should -BeExactly ''
+            (Get-Abs).HoldText.Text | Should -BeExactly ''
+
+            Invoke-Abs { Set-PBAbsenceHeld -Name 'Adams, Al' }
+            Invoke-Abs { Add-PBAbsenceStudent -Name $script:PBAbs.Held }
+            @((Get-Abs).Chosen) | Should -Be @('Adams, Al')
+            (Get-Abs).Held | Should -BeExactly ''
+            (Get-Abs).DropBox.BorderBrush | Should -BeExactly '#94A3B8'
+        }
+
+        It 'pasting adds the students named in what was copied, and lists the names that are no one' {
+            Invoke-Abs { Invoke-PBAbsencePaste }
+            @((Get-Abs).Chosen) | Should -Be @('Brown, Bea')
+            (Get-Abs).PasteText.Text | Should -BeExactly 'Not a student (or more than one): Nobody, No'
+            Invoke-Abs { Invoke-PBAbsencePaste -Text 'Adams, Al' }
+            @((Get-Abs).Chosen) | Should -Be @('Brown, Bea', 'Adams, Al')
+            (Get-Abs).PasteText.Text | Should -BeExactly ''
+            Mock -ModuleName PuckBoard Get-PBClipboardText { '' }
+            Invoke-Abs { Invoke-PBAbsencePaste }
+            (Get-Abs).PasteText.Text | Should -BeLike 'Nothing to paste*'
+
+            Invoke-Abs { Remove-PBAbsenceStudent -Name 'Adams, Al' }
+            @((Get-Abs).Chosen) | Should -Be @('Brown, Bea')
+            Invoke-Abs { Clear-PBAbsenceStudents }
+            (Get-Abs).Chosen.Count | Should -Be 0
+        }
+
+        It 'mouse actions queued while an event runs are done in order once it is over' {
+            Invoke-Abs {
+                $script:PBAbs.Actions = New-Object System.Collections.Generic.List[object]
+                foreach ($a in @(@{ Action = 'Hold'; Name = 'Adams, Al' }, @{ Action = 'Add'; Name = 'Adams, Al' }, @{ Action = 'Paste'; Text = 'Brown, Bea' }, @{ Action = 'Remove'; Name = 'Adams, Al' })) {
+                    $script:PBAbs.Actions.Add($a)
+                }
+                Invoke-PBAbsenceDrain
+            }
+            @((Get-Abs).Chosen) | Should -Be @('Brown, Bea')
+            (Get-Abs).Held | Should -BeExactly ''
+            (Get-Abs).Actions.Count | Should -Be 0
+        }
+
+        It 'the end day follows the day picked, unless it was set to another day' {
+            (Get-Abs).DayPicker.SelectedDate = [datetime]'2026-10-21'
+            Invoke-Abs { Invoke-PBAbsenceDayChanged }
+            (Get-Abs).EndDayPicker.SelectedDate | Should -Be ([datetime]'2026-10-21')
+            (Get-Abs).EndDayPicker.SelectedDate = [datetime]'2026-10-23'
+            (Get-Abs).DayPicker.SelectedDate = [datetime]'2026-10-22'
+            Invoke-Abs { Invoke-PBAbsenceDayChanged }
+            (Get-Abs).EndDayPicker.SelectedDate | Should -Be ([datetime]'2026-10-23')
+        }
+
+        It "the list shows a student's absences on the day picked, an absence they already have can't be added again, and Add returns the boxes" {
+            $r = New-StudentAbsences -Students @('Adams, Al') -Day '2026-10-20' -From '0900' -To '1100' -Reason 'Dentist'
+            [void](Add-StudentAbsences -Absences $r.Absences -Students @((Get-PB).Data.Students))
+            Invoke-Abs { Update-PBAbsencePool }
+            $adams = @((Get-Abs).StudentPool.ItemsSource | Where-Object { $_.Name -eq 'Adams, Al' })[0]
+            $adams.BadgeText | Should -BeExactly 'ABS 0900-1100'
+            $adams.Background | Should -BeExactly '#FEF3C7'
+            $adams.ToolTipText | Should -BeLike 'Absent 0900-1100 Dentist*'
+
+            Invoke-Abs { Add-PBAbsenceStudent -Name 'Adams, Al' }
+            (Get-Abs).FromBox.Text = '0900'
+            (Get-Abs).ToBox.Text = '1100'
+            Invoke-Abs { Update-PBAbsencePreview } | Should -BeFalse
+            (Get-Abs).PreviewText.Text | Should -BeLike '*Already blocked off then (nothing is added for them): Adams, Al'
+
+            Invoke-Abs { Add-PBAbsenceStudent -Name 'Brown, Bea' }
+            (Get-Abs).ReasonBox.Text = 'Leave'
+            Invoke-Abs { Submit-PBAbsenceDialog }
+            (Get-Abs).Window.DialogResult | Should -BeTrue
+            $ask = (Get-Abs).Result
+            @($ask.Students) | Should -Be @('Adams, Al', 'Brown, Bea')
+            $ask.From | Should -BeExactly '0900'
+            $ask.Reason | Should -BeExactly 'Leave'
+            $ask.Day | Should -Be ([datetime]'2026-10-20')
+        }
+    }
+}

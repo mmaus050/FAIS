@@ -8,6 +8,7 @@
 #        Set-BoardMission / Set-BoardLineField / Set-FormationPair / Unlink-ReturnLine
 # Typing: ConvertTo-BoardTime / Format-BoardTime / ConvertTo-BoardSortieType / ConvertFrom-QuickEntry
 #         New-BulkBoardLines (Add Bulk Lines)
+# Absences: ConvertTo-ClockTime / Resolve-PastedStudents / New-StudentAbsences / Add-StudentAbsences
 # Engine: ConvertTo-ScheduleRows / ConvertFrom-ScheduleRows / Get-FillOverlay / Test-BoardReadyToFill
 # One day at a time: Resolve-SheetRowDays / ConvertFrom-SheetRows / Import-BoardDayLines / Get-BoardSheetState / Get-SheetBannerInfo / Get-SheetDaysToAdd
 #         Set-BoardSheetSync / ConvertFrom-PublishedRows / Get-PublishedContextRows / Split-FillResult
@@ -737,6 +738,139 @@ function New-BulkBoardLines {
                                 Times  = $(if ($errors.Count -eq 0) { $times.ToArray() } else { @() })
                                 Errors = $errors.ToArray()
                 }
+}
+
+
+# =================================================================================
+#  ADD STUDENT ABSENCE
+#  Blocks students off for a stretch of time: the same as a line on MasterData's
+#  StudentAbsences sheet, so the ABSENCE hard rule keeps them off any line in it.
+# =================================================================================
+
+# A start or end time as typed for an absence: 24-hour (0730, 730, 7:30, 1530) or 12-hour
+# with AM / PM (0730 AM, 0330 PM, 330pm, 3:30 p.m., 3 PM). With AM / PM the hour is 1 to 12.
+# Returns [timespan], or $null when it isn't a time (1530 PM, 0030 AM, 2500).
+function ConvertTo-ClockTime {
+                param ([string]$Text)
+
+                if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+                $t = $Text.Trim()
+                if ($t -notmatch '^(?<clock>.*?)\s*(?<ap>[aApP])\.?\s*([mM]\.?)?$') { return (ConvertTo-BoardTime $t) }
+                $pm = ($Matches['ap'] -ieq 'p')
+                $clock = ConvertTo-BoardTime $Matches['clock']
+                if ($null -eq $clock -or $clock.Hours -lt 1 -or $clock.Hours -gt 12) { return $null }
+                $hours = $clock.Hours % 12
+                if ($pm) { $hours += 12 }
+                return New-TimeSpan -Hours $hours -Minutes $clock.Minutes
+}
+
+# Names copied from Excel, an email or a list -> the students they are. One name per line,
+# cell or ';'. A piece with commas that is nobody's name ('Adams, Brown') is read as several
+# names. Names are matched like Update Syllabi does: exactly first, then 'Casey B. Quill' or
+# 'Quill, Casey [2d Lt]' for 'Quill, Casey'.
+# Returns {Students (in the order pasted, each once); Unknown (pieces that are no one, or more than one)}
+function Resolve-PastedStudents {
+                param ([string]$Text, [array]$Students = @())
+
+                $byName = @{}
+                foreach ($s in $Students) {
+                                $name = ([string]$s.Name).Trim()
+                                if ($name -ne '' -and -not $byName.ContainsKey($name)) { $byName[$name] = $s }
+                }
+                # name -> student for the names that are exactly one student
+                $resolve = {
+                                param ([string[]]$Names)
+                                $map = @{}
+                                $rest = @(foreach ($n in $Names) { if ($byName.ContainsKey($n)) { $map[$n] = $byName[$n] } else { $n } })
+                                if ($rest.Count -gt 0) {
+                                                $matched = (Resolve-TrainingStudents -Names $rest -Students $Students).Map
+                                                foreach ($k in $matched.Keys) { $map[$k] = $matched[$k] }
+                                }
+                                return $map
+                }
+
+                $pieces = @([string]$Text -split '[\r\n\t;]+' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+                $map = if ($pieces.Count -gt 0) { & $resolve $pieces } else { @{} }
+                $found = New-Object System.Collections.Generic.List[object]
+                $unknown = New-Object System.Collections.Generic.List[string]
+                foreach ($piece in $pieces) {
+                                $hits = @()
+                                if ($map.ContainsKey($piece)) { $hits = @($map[$piece]) }
+                                elseif ($piece.Contains(',')) {
+                                                $parts = @($piece -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+                                                $partMap = & $resolve $parts
+                                                if (@($parts | Where-Object { -not $partMap.ContainsKey($_) }).Count -eq 0) { $hits = @(foreach ($p in $parts) { $partMap[$p] }) }
+                                }
+                                if ($hits.Count -eq 0) { if (-not $unknown.Contains($piece)) { $unknown.Add($piece) }; continue }
+                                foreach ($h in $hits) { if (-not $found.Contains($h)) { $found.Add($h) } }
+                }
+                return [PSCustomObject]@{ Students = $found.ToArray(); Unknown = $unknown.ToArray() }
+}
+
+# The absences the Add Student Absence window asks for: one per student, from -Day at -From
+# to -EndDay (the same day when not given) at -To. Values come straight from the window, so
+# they are checked here. Each absence has the shape IngestData reads from StudentAbsences
+# ({Student; StartTime; EndTime; Reason}) plus InMasterData = $false until it is saved.
+# Returns {Absences; Errors}. Absences is empty when there are errors.
+function New-StudentAbsences {
+                param (
+                                [string[]]$Students = @(),
+                                $Day,
+                                [string]$From,
+                                [string]$To,
+                                $EndDay,
+                                [string]$Reason = ''
+                )
+
+                $errors = New-Object System.Collections.Generic.List[string]
+                $names = @($Students | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ -ne '' } | Select-Object -Unique)
+                if ($names.Count -eq 0) { $errors.Add('Add at least one student.') }
+                $startDay = ConvertTo-BoardDay $Day
+                if ($null -eq $startDay) { $errors.Add('Pick the day on the calendar.') }
+                $endDayText = if ($null -eq $EndDay -or ([string]$EndDay).Trim() -eq '') { $startDay } else { ConvertTo-BoardDay $EndDay }
+                if ($null -ne $startDay -and $null -eq $endDayText) { $errors.Add('Pick the day the absence ends on the calendar.') }
+                $hint = 'Type 24-hour time (0730, 1530) or 12-hour time with AM or PM (0730 AM, 0330 PM).'
+                $start = ConvertTo-ClockTime $From
+                if ($null -eq $start) { $errors.Add($(if ([string]::IsNullOrWhiteSpace($From)) { "Type the start time. $hint" } else { "Start time '$($From.Trim())' isn't a time. $hint" })) }
+                $end = ConvertTo-ClockTime $To
+                if ($null -eq $end) { $errors.Add($(if ([string]::IsNullOrWhiteSpace($To)) { "Type the end time. $hint" } else { "End time '$($To.Trim())' isn't a time. $hint" })) }
+
+                $absences = New-Object System.Collections.Generic.List[object]
+                if ($errors.Count -eq 0) {
+                                $inv = [System.Globalization.CultureInfo]::InvariantCulture
+                                $startAt = [datetime]::ParseExact($startDay, 'yyyy-MM-dd', $inv).Add($start)
+                                $endAt = [datetime]::ParseExact($endDayText, 'yyyy-MM-dd', $inv).Add($end)
+                                if ($endAt -le $startAt) {
+                                                $errors.Add(("It ends ({0}) before it starts ({1}). For an absence past midnight, pick the next day for the end." -f $endAt.ToString('ddd dd MMM HHmm'), $startAt.ToString('ddd dd MMM HHmm')))
+                                }
+                                else {
+                                                foreach ($name in $names) {
+                                                                $absences.Add([PSCustomObject]@{ Student = $name; StartTime = $startAt; EndTime = $endAt; Reason = ([string]$Reason).Trim(); InMasterData = $false })
+                                                }
+                                }
+                }
+                return [PSCustomObject]@{
+                                Absences = $(if ($errors.Count -eq 0) { $absences.ToArray() } else { @() })
+                                Errors   = $errors.ToArray()
+                }
+}
+
+# Gives each student their new absences, so the hard rules and the pucks see them straight
+# away. An absence a student already has (same start and end) is left out, as is a name
+# that is no one's. Returns the absences added.
+function Add-StudentAbsences {
+                param ([array]$Absences = @(), [array]$Students = @())
+
+                $added = New-Object System.Collections.Generic.List[object]
+                foreach ($a in @($Absences | Where-Object { $null -ne $_ })) {
+                                $student = @($Students | Where-Object { $null -ne $_ -and ([string]$_.Name).Trim() -ieq ([string]$a.Student).Trim() })[0]
+                                if ($null -eq $student) { continue }
+                                $have = @($student.Absences | Where-Object { $null -ne $_ })
+                                if (@($have | Where-Object { $_.StartTime -eq $a.StartTime -and $_.EndTime -eq $a.EndTime }).Count -gt 0) { continue }
+                                $student | Add-Member -NotePropertyName 'Absences' -NotePropertyValue @($have + $a) -Force
+                                $added.Add($a)
+                }
+                return $added.ToArray()
 }
 
 function Find-InstructorForEntry {

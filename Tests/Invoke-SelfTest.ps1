@@ -245,6 +245,15 @@ if (Get-Module -ListAvailable -Name ImportExcel) {
         $debt = @(Import-Excel -Path $md -WorksheetName 'Students')[0].SimDebt
         $ok -and (($back -join ',') -eq ((@($days) + '2026-10-22' | Sort-Object -Unique) -join ',')) -and [double]$debt -eq [double]$copyA[0].SimDebt
     }
+    Assert-That 'Add Student Absence: a line goes on the StudentAbsences sheet (added with its headings when missing), active, at the times typed' {
+        $absStudent = @(Copy-StudentList $copyA)[0]
+        $made = New-StudentAbsences -Students @($absStudent.Name) -Day '2026-10-21' -From '0900' -To '0130 PM' -Reason 'Dentist'
+        [void](Add-StudentAbsences -Absences $made.Absences -Students @($absStudent))
+        $saved = Save-StudentAbsences -MasterDataPath $md -Students @($absStudent) 6>$null
+        $row = @(Import-Excel -Path $md -WorksheetName 'StudentAbsences')[0]
+        $saved.Saved -and $row.Student -eq $absStudent.Name -and (Parse-ETD $row.EndTime) -eq [datetime]'2026-10-21 13:30' -and $row.Reason -eq 'Dentist' -and
+            (ConvertTo-FaisBool $row.IsActive) -and @(Get-PendingStudentAbsences -Students @($absStudent)).Count -eq 0
+    }
     Assert-That 'Update Syllabi: a flying schedule CM completes an event and CX takes one back, on the tab (a hand-added column stays) and in SimDebt' {
         $sched = Join-Path $work 'FlyingSchedule.xlsx'
         $upd = @(Copy-StudentList $copyA)
