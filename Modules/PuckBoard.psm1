@@ -111,7 +111,7 @@ function Initialize-PuckBoardWindow {
                 $board = Open-BoardState -Dir $set.BoardDir -Days $allDays -Settings $set
 
                 # Events a previous run planned on these days are plans, not flown events
-                $reset = @(Reset-PlannedCompletions -Students $Data.Students -FromDate $firstDate -SoftWeights $Data.SoftWeights -PrevSchedule @($Data.PrevSchedule))
+                $reset = @(Reset-PlannedCompletions -Students $Data.Students -FromDate $firstDate -SoftWeights $Data.SoftWeights -PrevSchedule @($Data.PrevSchedule) -Instructors @($Data.Instructors))
                 Clear-AssessmentCache
 
                 $xamlPath = Join-Path $PSScriptRoot 'PuckBoard.xaml'
@@ -957,7 +957,7 @@ function Update-PBPools {
                                 if ($info.Blocked) { $bg = '#E5E7EB'; $bd = '#9CA3AF' }
                                 elseif ($info.Badges | Where-Object { $_ -like 'U-*' -or $_ -like 'ABS*' }) { $bg = '#FEF3C7'; $bd = '#FCD34D' }
                                 $turnsBrush = if ($info.Turns -ge 3) { '#DC2626' } elseif ($info.Turns -eq 2) { '#D97706' } else { '#16A34A' }
-                                $tip = @("Next: $($info.Next)", ("Sim debt: {0:0.##}" -f $info.SimDebt), "Priority: $($s.Priority)")
+                                $tip = @("Next: $($info.Next)", ("Sim debt: {0:0.##}" -f $info.SimDebt), ("Discontinuity: {0:0.##}" -f $info.Discontinuity), "Priority: $($s.Priority)")
                                 if ($info.Badges.Count -gt 0) { $tip += "Flags: $($info.Badges -join ', ')" }
                                 foreach ($a in $info.Absences) { $tip += "Absent $a" }
                                 $tip += $clickTip.Trim()
@@ -2929,7 +2929,7 @@ function Invoke-PBUpdateSyllabi {
                                 Set-PBStatus "Update Syllabi: every syllabus already matches $fileName - nothing was changed." 'Good'
                                 return
                 }
-                $question = "$summary`n`nUpdate these syllabi? Each student's tab in OutputSchedule and their SimDebt in MasterData are saved right away."
+                $question = "$summary`n`nUpdate these syllabi? Each student's tab in OutputSchedule and their SimDebt and DiscontinuityScore in MasterData are saved right away."
                 if ($script:PB.Mode -eq 'Review') { $question += "`n`nThe fill you are reviewing is thrown away (it was made from the old syllabi). Fill again afterwards." }
                 if ((Show-PBMessage -Text $question -Title 'Update Syllabi' -Buttons 'YesNo' -Icon 'Question') -ne 'Yes') {
                                 Set-PBStatus 'Update Syllabi cancelled - nothing was changed.'
@@ -2938,7 +2938,7 @@ function Invoke-PBUpdateSyllabi {
 
                 # A fill made from the old syllabi would put them back on Export
                 Exit-PBReview
-                $memory = @(Invoke-SyllabusUpdate -Targets $plan.Targets -SoftWeights $data.SoftWeights -Now $now)
+                $memory = @(Invoke-SyllabusUpdate -Targets $plan.Targets -SoftWeights $data.SoftWeights -Instructors @($data.Instructors) -Now $now)
                 $prompt = {
                                 param($file)
                                 $text = "$file is still open and FAIS could not close it (a cell may be in edit mode, or someone else has it open).`n`nClose it, then press OK to try again."
@@ -2946,7 +2946,8 @@ function Invoke-PBUpdateSyllabi {
                 }
                 Show-BusyOverlay 'Saving the syllabi...'
                 try {
-                                $saved = Save-SyllabusUpdate -Targets $plan.Targets -MemoryChanges $memory -OutputPath ([string]$data.OutputPath) -MasterDataPath ([string]$data.MasterDataPath) `
+                                $saved = Save-SyllabusUpdate -Targets $plan.Targets -MemoryChanges $memory -DiscontinuityDeltaByName $plan.Discontinuity `
+                                                -OutputPath ([string]$data.OutputPath) -MasterDataPath ([string]$data.MasterDataPath) `
                                                 -SoftWeights $data.SoftWeights -LockedPrompt $prompt -Now $now
                 }
                 finally { Hide-BusyOverlay }
@@ -3601,7 +3602,7 @@ function Invoke-PBAddDay {
 function Reset-PBPlannedFromBoard {
                 if ($script:PB.Board.Days.Count -eq 0) { return }
                 $first = [datetime]::ParseExact($script:PB.Board.Days[0], 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
-                $changed = @(Reset-PlannedCompletions -Students $script:PB.Data.Students -FromDate $first -SoftWeights $script:PB.Data.SoftWeights -PrevSchedule @($script:PB.Data.PrevSchedule))
+                $changed = @(Reset-PlannedCompletions -Students $script:PB.Data.Students -FromDate $first -SoftWeights $script:PB.Data.SoftWeights -PrevSchedule @($script:PB.Data.PrevSchedule) -Instructors @($script:PB.Data.Instructors))
                 if ($changed.Count -gt 0) {
                                 Clear-AssessmentCache
                                 $script:PB.Assess = @{}
@@ -3807,7 +3808,8 @@ UPDATE SYLLABI
   - the Big Board: an entry in an event's columns marks it complete with its IP and date;
     no entry makes sure it is not complete (an event FAIS has planned for later stays).
   Only events in a student's syllabus change. You see what will change first; Yes saves
-  each student's tab in OutputSchedule and their SimDebt in MasterData right away.
+  each student's tab in OutputSchedule and their SimDebt and DiscontinuityScore in
+  MasterData right away.
 
 ADD STUDENT ABSENCE
   Blocks students off for a stretch of time: the same as a line on MasterData's
@@ -4269,7 +4271,7 @@ function Get-FaisExportSummary {
                 & $add 'Path' $OutputPath
                 $unsatCount = @($UnsatChanges.Keys).Count
                 $absenceRows = @($Absences | Where-Object { $null -ne $_ })
-                $mdText = if ($unsatCount -gt 0) { "MasterData: SimDebt, and the unsat / HOLD flags of $unsatCount student(s)" } else { 'MasterData: SimDebt' }
+                $mdText = if ($unsatCount -gt 0) { "MasterData: SimDebt, DiscontinuityScore, and the unsat / HOLD flags of $unsatCount student(s)" } else { 'MasterData: SimDebt, DiscontinuityScore' }
                 if ($absenceRows.Count -gt 0) { $mdText += "; StudentAbsences: $($absenceRows.Count) line(s) Add Student Absence could not save" }
                 & $add 'Text' $mdText
                 & $add 'Path' $MasterDataPath

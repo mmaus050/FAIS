@@ -304,6 +304,22 @@ Describe 'The plan and the update in memory (flying schedule)' {
         [int]$script:Brown.SyllabusRevision | Should -BeGreaterThan $rev
     }
 
+    It 'works out what the update does to each student''s DiscontinuityScore, without changing anyone' {
+        # Adams: his only ride (Lee) is taken back, a 1-string and a counter gone. Brown: a first ride with Jones
+        $script:Plan.Discontinuity['Adams, Al'] | Should -Be -2
+        $script:Plan.Discontinuity['Brown, Bea'] | Should -Be 2
+        $script:Adams.DiscontinuityScore | Should -Be 0
+        $script:Brown.DiscontinuityScore | Should -Be 0
+        (Get-Entry $script:Brown 'FT5001').IsComplete | Should -BeFalse
+    }
+
+    It 'Invoke-SyllabusUpdate moves each student''s DiscontinuityScore once, by the plan''s amount' {
+        $script:Adams.DiscontinuityScore = 5
+        [void](Invoke-SyllabusUpdate -Targets $script:Plan.Targets -SoftWeights $script:SW -Instructors (New-TestInstructors) -Now $script:Now)
+        $script:Adams.DiscontinuityScore | Should -Be 3
+        $script:Brown.DiscontinuityScore | Should -Be 2
+    }
+
     It 'running it again changes nothing' {
         [void](Invoke-SyllabusUpdate -Targets $script:Plan.Targets -SoftWeights $script:SW -Now $script:Now)
         $again = Get-SyllabusUpdatePlan -File $script:File -Students $script:Students -Instructors (New-TestInstructors) -SoftWeights $script:SW -Now $script:Now
@@ -316,8 +332,8 @@ Describe 'The plan and the update in memory (flying schedule)' {
         $text | Should -Match 'Flying schedule for Mon 21 Sep 2026'
         $text | Should -Match 'FAIS students on it: 2'
         $text | Should -Match ([regex]::Escape('Changes for 2 student(s): 2 event(s) marked complete, 1 marked NOT complete, 0 IP / ETD updated.'))
-        $text | Should -Match ([regex]::Escape('Adams, Al: NOT complete FT5001 (CX); SimDebt -1'))
-        $text | Should -Match ([regex]::Escape('Brown, Bea: complete FE3102 FT5001; SimDebt +0.5'))
+        $text | Should -Match ([regex]::Escape('Adams, Al: NOT complete FT5001 (CX); SimDebt -1; Discontinuity -2'))
+        $text | Should -Match ([regex]::Escape('Brown, Bea: complete FE3102 FT5001; SimDebt +0.5; Discontinuity +2'))
         $text | Should -Match ([regex]::Escape("Not in the student's syllabus: Brown, Bea T6 OFT"))
         $text | Should -Match ([regex]::Escape('1 other people on the schedule are not FAIS students.'))
     }
@@ -501,7 +517,7 @@ Describe 'Saving an update' -Skip:$script:NoExcel {
         $script:Brown = New-TestStudent -Name 'Brown, Bea' -Done @('FI3101|2026-09-18 08:00') -SimDebt 1
         $rows = @(foreach ($m in $script:Adams.Syllabus) { $r = ConvertTo-SyllabusTabRow $m; $r | Add-Member -NotePropertyName Notes -NotePropertyValue "note $($m.Mission)"; $r })
         $rows | Export-Excel -Path $script:Out -WorksheetName 'Adams, Al' 3>$null
-        @([PSCustomObject]@{ SPKey = 1; SPName = 'Adams, Al'; SimDebt = 2 }, [PSCustomObject]@{ SPKey = 2; SPName = 'Brown, Bea'; SimDebt = 1 }) |
+        @([PSCustomObject]@{ SPKey = 1; SPName = 'Adams, Al'; SimDebt = 2; DiscontinuityScore = 5 }, [PSCustomObject]@{ SPKey = 2; SPName = 'Brown, Bea'; SimDebt = 1; DiscontinuityScore = $null }) |
             Export-Excel -Path $script:MD -WorksheetName 'Students' 3>$null
 
         $file = New-TFile -Facts @(
@@ -543,6 +559,17 @@ Describe 'Saving an update' -Skip:$script:NoExcel {
         ($md | Where-Object { $_.SPName -eq 'Brown, Bea' }).SimDebt | Should -Be 2
         $script:Adams.SimDebt | Should -Be 0.5
         $script:Brown.SimDebt | Should -Be 2
+    }
+
+    It 'moves DiscontinuityScore in MasterData by the plan''s amounts (a blank cell stays blank)' {
+        $memory = @(Invoke-SyllabusUpdate -Targets $script:Plan.Targets -SoftWeights $script:SW -Instructors (New-TestInstructors) -Now $script:Now)
+        $saved = Save-SyllabusUpdate -Targets $script:Plan.Targets -MemoryChanges $memory -DiscontinuityDeltaByName $script:Plan.Discontinuity `
+            -OutputPath $script:Out -MasterDataPath $script:MD -SoftWeights $script:SW -Now $script:Now 6>$null
+        $saved.Saved | Should -BeTrue
+        # Adams: his ride with Lee taken back (-2); Brown: a first ride with Jones, but no score in MasterData yet
+        $md = @(Import-Excel -Path $script:MD -WorksheetName 'Students')
+        ($md | Where-Object { $_.SPName -eq 'Adams, Al' }).DiscontinuityScore | Should -Be 3
+        ($md | Where-Object { $_.SPName -eq 'Brown, Bea' }).DiscontinuityScore | Should -BeNullOrEmpty
     }
 
     It 'saves nothing when a file stays open, and says which' {

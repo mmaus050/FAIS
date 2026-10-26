@@ -2,6 +2,7 @@
 #             "Update Syllabi": reads a training file (the day's flying schedule or the Big
 #             Board), works out which one it is, and brings each FAIS student's syllabus in
 #             line with it: on the board, on their OutputSchedule tab and in their SimDebt
+#             and DiscontinuityScore
 # Read-TrainingFile / Get-SheetBlock / ConvertTo-TrainingEtd
 # Find-DailyScheduleHeadings / Read-DailyScheduleSheet / Find-BigBoardHeadings / Read-BigBoardSheet / Get-BigBoardInstructor
 # ConvertTo-NameWords / ConvertTo-PersonName / Get-GivenNameMatch / Get-PersonNameMatch
@@ -643,6 +644,19 @@ function Get-SyllabusUpdatePlan {
                                 Close-FaisWorkbookForRead $book
                 }
 
+                # What the update does to each changed student's DiscontinuityScore, worked out on a copy of them
+                $discOf = @{}
+                $changedNames = @($changes.ToArray() | Where-Object { $_.Kind -ne 'Planned' } | ForEach-Object { [string]$_.Student } | Sort-Object -Unique)
+                foreach ($name in $changedNames) {
+                                if (-not $byStudent.Contains($name)) { continue }
+                                $student = $byStudent[$name][0].Student
+                                $copy = Copy-StudentForEval $student
+                                $copyTargets = @(foreach ($t in $byStudent[$name]) { $ct = $t.PSObject.Copy(); $ct.Student = $copy; $ct })
+                                [void](Invoke-SyllabusUpdate -Targets $copyTargets -SoftWeights $SoftWeights -Instructors $Instructors -Now $Now)
+                                $delta = [double](Get-OptionalProperty $copy 'DiscontinuityScore' 0) - [double](Get-OptionalProperty $student 'DiscontinuityScore' 0)
+                                if ([math]::Abs($delta) -ge 0.005) { $discOf[$name] = [math]::Round($delta, 2) }
+                }
+
                 $matched = @($match.Map.Values | ForEach-Object { [string]$_.Name } | Sort-Object -Unique)
                 $notOnFile = @()
                 if ($isBoard) { $notOnFile = @($Students | Where-Object { $null -ne $_ -and $matched -notcontains [string]$_.Name } | ForEach-Object { [string]$_.Name }) }
@@ -656,6 +670,8 @@ function Get-SyllabusUpdatePlan {
                                 Ambiguous     = @($match.Ambiguous)
                                 NotInSyllabus = @($notInSyllabus.ToArray() | Sort-Object -Unique)
                                 NotOnFile     = $notOnFile
+                                # Student name -> what the update does to their DiscontinuityScore (only the ones it moves)
+                                Discontinuity = $discOf
                 }
 }
 
@@ -773,21 +789,32 @@ function Update-SyllabusTabTargets {
 
 # Applies -Targets to the students' syllabi in memory, through Complete-StudentMission and
 # Undo-StudentMission (so SimDebt moves with each event, and unsat flags are left alone).
+# Each student's DiscontinuityScore moves once, by what all of their changes did to their
+# strings (-Instructors says who the non-counters are).
 # -Preview only works the changes out. Returns the changes, as Update-SyllabusTabTargets does.
 function Invoke-SyllabusUpdate {
-                param ([array]$Targets = @(), $SoftWeights, [datetime]$Now = (Get-Date), [switch]$Preview)
+                param ([array]$Targets = @(), $SoftWeights, [array]$Instructors = @(), [datetime]$Now = (Get-Date), [switch]$Preview)
 
                 $out = New-Object System.Collections.Generic.List[object]
+                $discBefore = [ordered]@{}
                 foreach ($t in $Targets) {
                                 $entry = Find-SyllabusMission -Student $t.Student -Mission $t.Mission
                                 if ($null -eq $entry) { continue }
                                 $res = Get-SyllabusTargetResult -Current $entry -Target $t -Now $Now
                                 if ($null -eq $res) { continue }
-                                if (-not $Preview) {
-                                                if ($res.Kind -eq 'NotComplete') { [void](Undo-StudentMission -Student $t.Student -Mission $entry -SoftWeights $SoftWeights) }
-                                                elseif ($res.Kind -ne 'Planned') { [void](Complete-StudentMission -Student $t.Student -Mission $entry -InstructorName $res.Instructor -ETD $res.ETD -SoftWeights $SoftWeights) }
+                                if (-not $Preview -and $res.Kind -ne 'Planned') {
+                                                $name = [string]$t.Student.Name
+                                                $touches = if ($res.Kind -eq 'NotComplete') { Test-ChangesStrings $entry -Undo } else { Test-ChangesStrings $entry $res.Instructor }
+                                                if ($null -ne $SoftWeights -and $touches -and -not $discBefore.Contains($name)) {
+                                                                $discBefore[$name] = [PSCustomObject]@{ Student = $t.Student; Score = (Get-DiscontinuityScore -Syllabus $t.Student.Syllabus -Instructors $Instructors -SoftWeights $SoftWeights) }
+                                                }
+                                                if ($res.Kind -eq 'NotComplete') { [void](Undo-StudentMission -Student $t.Student -Mission $entry -SoftWeights $SoftWeights -NoDiscontinuity) }
+                                                else { [void](Complete-StudentMission -Student $t.Student -Mission $entry -InstructorName $res.Instructor -ETD $res.ETD -SoftWeights $SoftWeights -NoDiscontinuity) }
                                 }
                                 $out.Add((New-SyllabusChange -Target $t -Result $res -SoftWeights $SoftWeights))
+                }
+                foreach ($b in $discBefore.Values) {
+                                Add-StudentDiscontinuity -Student $b.Student -Delta ((Get-DiscontinuityScore -Syllabus $b.Student.Syllabus -Instructors $Instructors -SoftWeights $SoftWeights) - $b.Score)
                 }
                 return $out.ToArray()
 }
@@ -796,12 +823,14 @@ function Invoke-SyllabusUpdate {
 # the cells of the events that change; a student with no tab gets a whole one, from their
 # syllabus in memory, so run Invoke-SyllabusUpdate first) and their SimDebt in MasterData,
 # moved by what the tab changes did (-MemoryChanges: what Invoke-SyllabusUpdate returned, used
-# for the new tabs). A file open in Excel is saved and closed for the write, then opened again.
+# for the new tabs), and their DiscontinuityScore, moved by -DiscontinuityDeltaByName (the
+# plan's Discontinuity). A file open in Excel is saved and closed for the write, then opened again.
 # Returns {Saved; Changes; Message}.
 function Save-SyllabusUpdate {
                 param (
                                 [array]$Targets = @(),
                                 [array]$MemoryChanges = @(),
+                                [hashtable]$DiscontinuityDeltaByName = @{},
                                 [string]$OutputPath,
                                 [string]$MasterDataPath,
                                 $SoftWeights,
@@ -810,6 +839,7 @@ function Save-SyllabusUpdate {
                 )
 
                 $result = [PSCustomObject]@{ Saved = $false; Changes = @(); Message = '' }
+                if ($null -eq $DiscontinuityDeltaByName) { $DiscontinuityDeltaByName = @{} }
                 if ([string]::IsNullOrWhiteSpace($OutputPath) -or [string]::IsNullOrWhiteSpace($MasterDataPath) -or -not (Test-Path -LiteralPath $MasterDataPath)) {
                                 $result.Message = 'MasterData.xlsx or OutputSchedule.xlsx was not found'
                                 return $result
@@ -858,7 +888,9 @@ function Save-SyllabusUpdate {
                                                                 }
                                                                 foreach ($c in $written) { if ($c.SimDebt -ne 0) { $debt[$c.Student] = [double]$debt[$c.Student] + $c.SimDebt } }
                                                                 foreach ($name in @($debt.Keys)) { if ([math]::Abs($debt[$name]) -lt 0.000001) { $debt.Remove($name) } }
-                                                                if ($debt.Count -gt 0) { Update-MasterDataStudents -MasterDataPath $MasterDataPath -SimDebtDeltaByName $debt }
+                                                                if ($debt.Count -gt 0 -or $DiscontinuityDeltaByName.Count -gt 0) {
+                                                                                Update-MasterDataStudents -MasterDataPath $MasterDataPath -SimDebtDeltaByName $debt -DiscontinuityDeltaByName $DiscontinuityDeltaByName
+                                                                }
                                                 }
                                 }
                                 catch {
@@ -933,6 +965,8 @@ function Format-SyllabusUpdateSummary {
                                                 $debt = 0.0
                                                 foreach ($c in $mine) { $debt += [double]$c.SimDebt }
                                                 if ([math]::Abs($debt) -ge 0.005) { $parts += ("SimDebt {0:+0.##;-0.##}" -f $debt) }
+                                                $disc = Get-OptionalProperty $Plan 'Discontinuity' $null
+                                                if ($null -ne $disc -and $disc.Contains($name)) { $parts += ("Discontinuity {0:+0.##;-0.##}" -f [double]$disc[$name]) }
                                                 $lines.Add("  ${name}: $($parts -join '; ')")
                                                 $shown++
                                 }

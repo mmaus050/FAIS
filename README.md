@@ -20,7 +20,7 @@ Add `-Trace` to print every scheduling decision to the console. FAIS restarts it
 4. **Export.** All or nothing: if any part fails, none of the files change. It writes the days you filled:
    - OutputSchedule: the **MasterSchedule** sheet (first tab). Only the filled days are replaced; other days already exported (today onward) are kept, so you can update **one day at a time**,
    - OutputSchedule: **each student's syllabus tab** (tomorrow's run starts from it),
-   - MasterData: **SimDebt**, and **UnsatSim / UnsatFlight** reset to FALSE for students whose schedule cleans up the unsat,
+   - MasterData: **SimDebt**, **DiscontinuityScore** (see *Discontinuity score*), and **UnsatSim / UnsatFlight** reset to FALSE for students whose schedule cleans up the unsat,
    - MasterData: the **String Tracker** sheet, one row per student: 5+, 4, 3, 2 and 1-strings and unique counters, counted from each student's syllabus (the exported rides included). Each category (FT, FF, AA) is counted in mission order; sims, solos and check rides are left out; a non-counter counts only for a student they flew two rides in a row.
 
    It also writes **ATIS.xlsx**: one tab per day (named like `Wednesday. October 21, 2026`). Each tab lists that day's flights in ETD order, then a thick border, then that day's sims (OFT / IFT) in ETD order, in the same columns as MasterSchedule. Each export rebuilds the tabs for the days it covers and keeps every other day's tab, so ATIS builds up a day-by-day history. The file opens on the first day you just exported. Set `WriteAtis = $false` in `$OutputSettings` to turn it off.
@@ -35,15 +35,15 @@ Closing the board without exporting writes nothing (only the pre-run pop-ups hav
 |---|---|---|
 | Start | MasterData: Schedule (see *MasterData's Schedule sheet*), Instructors, Students (first 100), SoftWeights, FormCallsigns, StudentAbsences. OutputSchedule: each student's tab (a student with no tab starts from the MasterData Syllabus sheet). Workbooks open in Excel are saved first. | Nothing |
 | **Log Hooked Event** | | MasterData: UnsatSim or UnsatFlight = TRUE |
-| **Log Incomplete Event** | | MasterData: SimDebt (only that event's debt comes off). OutputSchedule: that event's cells on the student's tab |
+| **Log Incomplete Event** | | MasterData: SimDebt and DiscontinuityScore (only that event's part comes off). OutputSchedule: that event's cells on the student's tab |
 | **Change Student HOLD status** | | MasterData: OnHold = TRUE or FALSE for the students you changed |
 | Puck board and fill | MasterData's Schedule sheet again whenever MasterData is saved; **Load a day...** reads it (or the last exported MasterSchedule) fresh | Nothing (the board's own autosave in `Boards\` aside) |
-| **Update Syllabi** | The training file you pick (flying schedule or Big Board) | OutputSchedule: the changed events' cells on the students' tabs (a student with no tab gets one). MasterData: SimDebt |
+| **Update Syllabi** | The training file you pick (flying schedule or Big Board) | OutputSchedule: the changed events' cells on the students' tabs (a student with no tab gets one). MasterData: SimDebt, DiscontinuityScore |
 | **Add Student Absence** | | MasterData: a line on StudentAbsences for each student (Student, StartTime, EndTime, Reason, IsActive = TRUE) |
-| **Export** | | OutputSchedule: MasterSchedule (the filled days), student tabs. MasterData: SimDebt, unsat resets, String Tracker, and any absence **Add Student Absence** could not save. ATIS: the exported days' tabs |
+| **Export** | | OutputSchedule: MasterSchedule (the filled days), student tabs. MasterData: SimDebt, DiscontinuityScore, unsat resets, String Tracker, and any absence **Add Student Absence** could not save. ATIS: the exported days' tabs |
 
 - **MasterSchedule is the only sheet of OutputSchedule that is rewritten**, and only the filled days in it change (ATIS rebuilds the tabs of the days it exports). A student's tab is updated in place: only the Instructor, ETD and IsComplete cells of events that changed are written, so your own columns, notes and formatting stay. A student with no tab gets a new one.
-- **MasterData Students sheet:** students are matched by the column headed SPName and SimDebt goes to the column headed SimDebt (columns B and P when those headings are missing). UnsatSim and UnsatFlight are written to the columns with those headings.
+- **MasterData Students sheet:** students are matched by the column headed SPName and SimDebt goes to the column headed SimDebt (columns B and P when those headings are missing). DiscontinuityScore goes to the column headed DiscontinuityScore; the first time, FAIS adds that heading after the last one (column Q on the usual sheet). UnsatSim and UnsatFlight are written to the columns with those headings.
 - **Absences** are attached only when the name matches a student's name exactly (capital letters aside). A name that matches no one is reported in the console. **Add Student Absence** always writes the name exactly as the Students sheet has it.
 - **Unsat clean-up:** after a hooked OFT, the student can't fly until an OFT. After a hooked IFT, an OFT or IFT will do. After a hooked flight, the student can't sim until they fly. The scheduler and the board treat the unsat as cleaned up for every line after that sim or flight, and the line's Notes say `Clears Unsat Sim (OFT)` (or IFT, or `Clears Unsat Flight`). MasterData only says TRUE or FALSE, so for an unsat typed into MasterData the hooked sim is taken to be the student's last sim flown (an OFT if unknown). If you re-plan a day whose schedule cleaned up an unsat, the unsat comes back until the new schedule cleans it up again.
 
@@ -92,11 +92,35 @@ The board reads the **Schedule** sheet and keeps watching it:
 - A name that could be more than one student is left alone and listed.
 - The IP is written the way MasterData's Instructors sheet spells them when they are on it, otherwise as the file has them, without the rank.
 
-**Before anything is saved** you see what will change, student by student: events marked complete, events marked NOT complete (with the status, e.g. `(CX)`), IP / ETD updates, and each student's SimDebt change. Then come the people, events and planned events left alone. The console lists everything. **Yes** saves right away:
+**Before anything is saved** you see what will change, student by student: events marked complete, events marked NOT complete (with the status, e.g. `(CX)`), IP / ETD updates, and each student's SimDebt and Discontinuity change. Then come the people, events and planned events left alone. The console lists everything. **Yes** saves right away:
 - the changed events' Instructor, ETD and IsComplete cells on each student's tab in OutputSchedule (nothing else on the tab is touched; a student with no tab gets one);
-- SimDebt in MasterData, moved by each changed event, the same way a scheduled event or a logged incomplete moves it.
+- SimDebt in MasterData, moved by each changed event, the same way a scheduled event or a logged incomplete moves it;
+- DiscontinuityScore in MasterData, moved by what the changes did to the student's strings (a blank cell stays blank and is counted at the next start).
 
 Both files are saved or neither. If they can't be saved (still open), the change is kept for this run and Export writes it. If you are reviewing a fill, it is thrown away (it was made from the old syllabi), so fill again.
+
+## Discontinuity score
+
+Each student has a **DiscontinuityScore**: how broken up their rides have been. It is counted from the same strings and counters as the String Tracker:
+
+| Each | Points (SoftWeights heading, default) |
+|---|---|
+| 1-string | `Disc1String`, **+1** |
+| unique counter | `DiscCounter`, **+1** |
+| 3+ string (3, 4, 5+) | `Disc3PlusString`, **-1** |
+
+A student who keeps getting a new IP (lots of 1-strings and counters) has a high score; a student who has had long strings has a low one.
+
+**What it does:** when a line would **continue the student's string** (the *Continue String* rule: the IP flew their last ride, and it would make a 2- or 3-string), the score is added on top, as its own line in the + / − list: `Discontinuity 4, 2 String +4`. So of two students who could stay with an IP, the one with the more broken-up history gets to. A negative score takes points off. String 4 / String 5, Zipper, Break String and Non-Counter lines don't get it.
+
+**It is kept like SimDebt:**
+- read from the **DiscontinuityScore** column of MasterData's Students sheet at start;
+- moved by every ride that is scheduled (hardcoded lines, the scheduler's picks, wingmen and return legs), logged incomplete, re-planned, or changed by Update Syllabi: by what that ride does to the student's strings. Sims, solos and check rides don't count, as on the String Tracker;
+- written back on **Export**, **Log Incomplete Event** and **Update Syllabi**. A number you type in yourself is kept and moved from there.
+
+**A blank cell** (or no DiscontinuityScore column yet, the first time) is counted from the student's syllabus at start, and Export writes it. To have FAIS count a student's score again, clear their cell. The student's puck shows the score when you hover over it.
+
+Add `Disc1String`, `DiscCounter` and `Disc3PlusString` columns to the SoftWeights sheet to change the points; a blank or missing one uses the default. A new weight applies to the rides from then on; clear the DiscontinuityScore cells to count everyone again with it.
 
 ## Add Student Absence
 
@@ -142,7 +166,7 @@ An absence a student already has (same start and end) is not added twice.
 | **Colors** (top right) | A small window that says what every color on the board means (also Help > What the colors mean). |
 | **Day tabs** | One tab per day. **Add day** builds several days at once; crew rest is checked across them. |
 | **IP pucks** (left) | Drag onto a line's IP slot. The badge shows how many lines that IP has that day. |
-| **Student pucks** (right) | Drag onto a line's student slot to hardcode them. Badges: CAP, INTL, HOLD, U-SIM, U-FLT, ABS times, turns that day. |
+| **Student pucks** (right) | Drag onto a line's student slot to hardcode them. Badges: CAP, INTL, HOLD, U-SIM, U-FLT, ABS times, turns that day. Hover for the next events, sim debt, discontinuity score and priority. |
 
 - **Two ways to put a puck on a line:** drag it onto the slot, or **click it to pick it up** (it gets a thick outline and a dark banner says what you are holding) and then **click the slot**. Hold **Ctrl** as you click the slot to keep holding the puck for another line; **Esc** or **Let go** puts it down. **Double-click** a puck to put it straight on the selected line.
 - **Moving pucks:** drag between lines to move a puck (hold **Ctrl** to copy). Drop it back on its pool to take it off the line.
@@ -150,7 +174,7 @@ An absence a student already has (same start and end) is not added twice.
 - **When you drop a student,** a pop-up lists:
   - hard-rule flags (red ✖), for example `Turn time 2.8 hr < 3.25 hr minimum (vs 0730 FT5103)` or `Not opted for FE3102: FT5001 isn't complete yet` (a sim whose prerequisite is the dollar ride);
   - warnings, for example `Less than 3.5 hr TT, Flt/CC Approval Required`;
-  - the **+ / −** score reasons, spelled out, for example `3 String +10`, `Breaks 4 String w/ Lee −5` or `2 Flights and 2 Sims in last 5 Days −6`.
+  - the **+ / −** score reasons, spelled out, for example `3 String +10`, `Discontinuity 4, 3 String +4`, `Breaks 4 String w/ Lee −5` or `2 Flights and 2 Sims in last 5 Days −6`.
 - **Rule breaks are allowed.** The line is hardcoded anyway and marked `OVERRIDE: ...` on the output.
 - **Corner marker** on every hardcoded student: green, amber, red, or grey while checking. Hover for the reasons; right-click for more (explain, take off, *Fly wing to...*, duplicate, delete line).
 - **Mission dropdown:** `(auto)` picks the best-scoring event that passes the rules. Choose an event to hardcode it. After the events the student can fly on the line come the next ones they are **not opted for** yet (marked `(not opted)`), then **Type a mission...** for anything else.
@@ -230,3 +254,4 @@ These are deliberate fixes, so expect some different picks:
 - **Formation callsigns** restart at the first FormCallsigns pair each day.
 - **Teams day sheets** are replaced when a day is exported again (they used to keep the old lines too).
 - **SimDebt** is written to the MasterData column headed `SimDebt` (column P only when there is no such heading).
+- **Discontinuity score** (new): a Continue String also gets the student's DiscontinuityScore, so students with a lot of 1-strings and counters are kept with an IP first (see *Discontinuity score*).
