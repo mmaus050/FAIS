@@ -4548,7 +4548,8 @@ function Add-MasterDataAbsences {
                                 $lastRow = if ($null -ne $ws.Dimension) { $ws.Dimension.End.Row } else { 1 }
                                 for ($r = $lastRow; $r -ge 2 -and $last -eq 1; $r--) {
                                                 for ($c = 1; $c -le $lastCol; $c++) {
-                                                                if (-not [string]::IsNullOrWhiteSpace([string]$ws.Cells[$r, $c].Value)) { $last = $r; break }
+                                                                $cellValue = $ws.Cells[$r, $c].Value
+                                                                if (-not [string]::IsNullOrWhiteSpace([string]$cellValue)) { $last = $r; break }
                                                 }
                                 }
 
@@ -32896,6 +32897,21 @@ Describe 'Source file <Name>' -ForEach $script:SourceFiles {
                                                 $n.Index.Left -is [System.Management.Automation.Language.ArrayLiteralAst]
                                 }, $true)
                                 @($bad | ForEach-Object { "$($_.Extent.StartLineNumber): $($_.Extent.Text)" }) | Should -BeNullOrEmpty
+                }
+
+                It 'never puts a comma index straight into a method call''s arguments (Windows PowerShell 5.1 cannot parse [string]::IsNullOrWhiteSpace($ws.Cells[$r, $c].Value))' {
+                                # Brackets of their own ( (...) $(...) @(...) {...} ) make it parse again
+                                $safe = @('ParenExpressionAst', 'SubExpressionAst', 'ArrayExpressionAst', 'ScriptBlockExpressionAst', 'ScriptBlockAst')
+                                $bad = foreach ($ix in $parsed.Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.IndexExpressionAst] -and $n.Index -is [System.Management.Automation.Language.ArrayLiteralAst] }, $true)) {
+                                                $child = $ix
+                                                $node = $ix.Parent
+                                                while ($null -ne $node -and $safe -notcontains $node.GetType().Name) {
+                                                                if ($node -is [System.Management.Automation.Language.InvokeMemberExpressionAst] -and @($node.Arguments) -contains $child) { "$($ix.Extent.StartLineNumber): $($ix.Extent.Text)"; break }
+                                                                $child = $node
+                                                                $node = $node.Parent
+                                                }
+                                }
+                                @($bad) | Should -BeNullOrEmpty
                 }
 
                 It 'never wraps the board''s Lines list in @() (it is a generic List[object])' {
