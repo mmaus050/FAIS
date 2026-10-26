@@ -1040,6 +1040,51 @@ Describe 'Invoke-FillSchedule' {
                                 }
                 }
 
+                Context 'DiscontinuityScore' {
+
+                                It 'moves for pins, engine picks, wingmen and return legs, keeping a hand-set score' {
+                                                $students = @(
+                                                                New-TestStudent -Name 'Able, Amy' -Done @('FI3101|2026-10-15 08:00') -DiscontinuityScore 1
+                                                                New-TestStudent -Name 'Dunn, Di' -Done @('FI3101|2026-10-14 08:00')
+                                                                New-TestStudent -Name 'Adams, Al' -Done $script:FormDone -DiscontinuityScore 5
+                                                                New-TestStudent -Name 'Brown, Bea' -Done $script:FormDone
+                                                )
+                                                $rows = @(
+                                                                New-TestRow -ETD '2026-10-20 06:00' -SortieType 'OFT' -Id 'P1' -Student 'Able, Amy' -Mission 'FE3102'
+                                                                New-TestRow -ETD '2026-10-20 05:00' -SortieType 'O&B' -Instructor 'Ortiz, Sam' -Id 'OB1' -LinkedLineId 'RT1'
+                                                                New-TestRow -ETD '2026-10-20 08:00' -SortieType 'O&B Return' -Instructor 'Ortiz, Sam' -Id 'RT1'
+                                                                New-TestRow -ETD '2026-10-20 08:00' -Instructor 'Jones, Bob' -Id 'F1'
+                                                                New-TestRow -ETD '2026-10-20 08:10' -Instructor 'Lee, Ann' -Id 'F2'
+                                                )
+                                                $r = Invoke-TFill -Schedule $rows -Students $students
+
+                                                Get-NameText (Get-TRow $r 'OB1').Student | Should -Be 'Dunn, Di'
+                                                Get-NameText (Get-TRow $r 'F1').Student | Should -Be 'Adams, Al'
+                                                Get-NameText (Get-TRow $r 'F2').Student | Should -Be 'Brown, Bea'
+
+                                                (Get-TStudent $r 'Able, Amy').DiscontinuityScore | Should -Be 1     # pinned sim: no strings
+                                                (Get-TStudent $r 'Dunn, Di').DiscontinuityScore | Should -Be 1      # O&B + return with Ortiz: one 2-string, one counter
+                                                (Get-TStudent $r 'Adams, Al').DiscontinuityScore | Should -Be 7     # lead FF5201 with Jones: a 1-string and a counter
+                                                (Get-TStudent $r 'Brown, Bea').DiscontinuityScore | Should -Be 2    # wing FF5201 with Lee: the same
+                                }
+
+                                It 'puts the student with the higher score on the line that continues their string' {
+                                                $done = @('FI3101|2026-10-15 08:00', 'FT5001|2026-10-16 08:00|Jones, Bob')
+                                                $students = @(
+                                                                New-TestStudent -Name 'Able, Amy' -Done $done
+                                                                New-TestStudent -Name 'Zane, Zoe' -Done $done -DiscontinuityScore 4
+                                                )
+                                                $rows = @(New-TestRow -ETD '2026-10-20 08:00' -Instructor 'Jones, Bob' -Id 'F1')
+                                                $r = Invoke-TFill -Schedule $rows -Students $students
+                                                Get-NameText (Get-TRow $r 'F1').Student | Should -Be 'Zane, Zoe'
+
+                                                # Level, the tie goes to the name
+                                                $students = @(New-TestStudent -Name 'Able, Amy' -Done $done; New-TestStudent -Name 'Zane, Zoe' -Done $done)
+                                                $r = Invoke-TFill -Schedule @(New-TestRow -ETD '2026-10-20 08:00' -Instructor 'Jones, Bob' -Id 'F1') -Students $students
+                                                Get-NameText (Get-TRow $r 'F1').Student | Should -Be 'Able, Amy'
+                                }
+                }
+
                 Context 'unsat clean-up' {
 
                                 It 'an OFT re-sim earlier in the day lets an UnsatSim student fly a later line' {

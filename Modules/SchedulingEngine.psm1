@@ -809,6 +809,15 @@ function SoftRules {
                                                                                 $Score += $pts
                                                                                 $Breakdown['Continue String'] = $pts
                                                                                 $Reasons['Continue String'] = $StringText
+                                                                                # A student with a lot of 1-strings and counters gets more for keeping this IP
+                                                                                $disc = 0.0
+                                                                                $discRaw = Get-OptionalProperty $Student 'DiscontinuityScore' $null
+                                                                                if ($null -ne $discRaw -and [string]$discRaw -ne '') { $disc = [double]$discRaw }
+                                                                                if ($disc -ne 0) {
+                                                                                                $Score += $disc
+                                                                                                $Breakdown['Discontinuity (string)'] = $disc
+                                                                                                $Reasons['Discontinuity (string)'] = "Discontinuity $(Format-Number $disc), $StringText"
+                                                                                }
                                                                                 if ($isCap) {
                                                                                                 $pts2 = Get-Weight $Config 'CAPBonus'
                                                                                                 $Score += $pts2
@@ -1016,7 +1025,7 @@ function Process-HardcodedSortie {
                 $Sortie.FilledBy = 'Pin'
 
                 if ($null -ne $Mission) {
-                                [void](Complete-StudentMission -Student $Student -Mission $Mission -InstructorName (Get-NameText $ip) -ETD $Sortie.ETD -SoftWeights $SoftWeights -Sortie $Sortie)
+                                [void](Complete-StudentMission -Student $Student -Mission $Mission -InstructorName (Get-NameText $ip) -ETD $Sortie.ETD -SoftWeights $SoftWeights -Sortie $Sortie -Instructors $Instructors)
                                 Write-Host " [PINNED] '$($Student.Name)' on '$($Mission.Mission)' (ETD: $($Sortie.ETD))" -ForegroundColor Cyan
                 }
                 else {
@@ -1149,7 +1158,7 @@ function Pair-FormationWingman {
                                                                                 $w.Callsign = $WingEntry.Callsign
                                                                                 $w.Num = $WingEntry.Num
                                                                 }
-                                                                [void](Complete-StudentMission -Student $best.Student -Mission $best.Event -InstructorName (Get-NameText $w.Instructor) -ETD $w.ETD -SoftWeights $SoftWeights -Sortie $w)
+                                                                [void](Complete-StudentMission -Student $best.Student -Mission $best.Event -InstructorName (Get-NameText $w.Instructor) -ETD $w.ETD -SoftWeights $SoftWeights -Sortie $w -Instructors $Instructors)
                                                                 Add-SortieNote -Sortie $w -Note "Wingman to $leadName"
                                                                 foreach ($n in (Get-ChosenEventNotes -Hard $best.Hard -Evt $best.Event -Soft $best.Soft)) { Add-SortieNote -Sortie $w -Note $n }
                                                                 Add-SortieNote -Sortie $PrimarySortie -Note "Wingman: $($best.Student.Name)"
@@ -1242,7 +1251,7 @@ function Schedule-ReturnLeg {
                 $ValidEvents = @(Get-ValidOptedEvents -Student $Student -Sortie $OBReturn -NoLookahead)
                 if ($ValidEvents.Count -gt 0) {
                                 $OBReturn.Mission = $ValidEvents[0]
-                                [void](Complete-StudentMission -Student $Student -Mission $ValidEvents[0] -InstructorName (Get-NameText $OBReturn.Instructor) -ETD $OBReturn.ETD -SoftWeights $SoftWeights -Sortie $OBReturn)
+                                [void](Complete-StudentMission -Student $Student -Mission $ValidEvents[0] -InstructorName (Get-NameText $OBReturn.Instructor) -ETD $OBReturn.ETD -SoftWeights $SoftWeights -Sortie $OBReturn -Instructors $Instructors)
                 }
                 else {
                                 $OBReturn.Mission = $null
@@ -1550,7 +1559,7 @@ function Invoke-OpenLine {
                 $Sortie.Student = $best.Student
                 $Sortie.Mission = $best.Event
                 $Sortie.FilledBy = 'Engine'
-                [void](Complete-StudentMission -Student $best.Student -Mission $best.Event -InstructorName (Get-NameText $Sortie.Instructor) -ETD $Sortie.ETD -SoftWeights $SoftWeights -Sortie $Sortie)
+                [void](Complete-StudentMission -Student $best.Student -Mission $best.Event -InstructorName (Get-NameText $Sortie.Instructor) -ETD $Sortie.ETD -SoftWeights $SoftWeights -Sortie $Sortie -Instructors $Instructors)
                 foreach ($note in (Get-ChosenEventNotes -Hard $best.Hard -Evt $best.Event -Soft $best.Soft)) { Add-SortieNote -Sortie $Sortie -Note $note }
 
                 if ([string]$best.Event.Type -like '*Form*') {

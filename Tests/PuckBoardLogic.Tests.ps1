@@ -1023,7 +1023,7 @@ Describe 'Puck board: Add Student Absence (no window)' {
         $abs = @([PSCustomObject]@{ Student = 'Adams, Al'; StartTime = [datetime]'2026-10-20 13:00'; EndTime = [datetime]'2026-10-20 15:30'; Reason = 'Dentist'; InMasterData = $false })
         $s = Get-FaisExportSummary -Ok $true -FillResult $fill -Days @($script:D1) -OutputPath 'C:\o.xlsx' -MasterDataPath 'C:\m.xlsx' -Absences $abs
         $texts = @($s.Lines | ForEach-Object { "$($_.Kind)|$($_.Text)" })
-        $texts | Should -Contain 'Text|MasterData: SimDebt; StudentAbsences: 1 line(s) Add Student Absence could not save'
+        $texts | Should -Contain 'Text|MasterData: SimDebt, DiscontinuityScore; StudentAbsences: 1 line(s) Add Student Absence could not save'
         $texts | Should -Contain 'Head|Student absences'
         $texts | Should -Contain 'Text|Adams, Al: Tue 20 Oct 1300-1530 (Dentist)'
         @((Get-FaisExportSummary -Ok $true -FillResult $fill -Days @($script:D1)).Lines | Where-Object { $_.Text -like '*absence*' }).Count | Should -Be 0
