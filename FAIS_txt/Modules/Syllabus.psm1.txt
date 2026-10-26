@@ -8,6 +8,7 @@
 # Get-UnsatSimKind / Get-LastSimType / Clear-CleanedUnsat / Restore-PlannedUnsat
 # Add-StudentReservation / Remove-StudentReservation / Get-ReservedMissionNames
 # Get-StudentTimeline
+# Measure-String / Get-StringLength / Get-StringLengths / Get-StringCounts (String Tracker)
 
 
 # =================================================================================
@@ -523,4 +524,117 @@ function Get-StudentTimeline {
                 }
 
                 return @($items | Sort-Object -Property Start)
+}
+
+
+# =================================================================================
+#  STRINGS AND COUNTERS (String Tracker)
+#    - Each category (FT, FF, AA) is its own sequence, in mission order: FT5001, FT5002, ...
+#      even when rides from another category were flown in between
+#    - Non-counters are skipped, any number in a row, unless they flew the student two
+#      rides in a row (strictly back to back): then they are a counter for that student
+#    - One different counter between two of an IP's rides does not break that IP's string;
+#      two different counters in a row end it
+#    - Sims, solos and check rides (IsCheck) are left out entirely
+# =================================================================================
+
+# Walks back one ride at a time; each step is a recursive call.
+# $History is newest first: $History[0] is IP1 (current ride), $History[1] is IP2, ...
+# $SkippedOne is True once a different counter has been passed over since IP1's last ride.
+function Measure-String {
+                param ([string[]]$History, [string[]]$NonCounters, [int]$n, [bool]$SkippedOne)
+
+                $ip = $History[$n]  # $null once we run out of rides, which answers False to everything
+
+                # IP1 = IPn?  True: one more ride in the string, and the skip resets
+                if ($ip -eq $History[0]) { return 1 + (Measure-String $History $NonCounters ($n + 1) $false) }
+
+                # Is IPn a non-counter?  True: skip it
+                if ($ip -in $NonCounters) { return Measure-String $History $NonCounters ($n + 1) $SkippedOne }
+
+                # First different counter: look past it
+                if ($null -ne $ip -and -not $SkippedOne) { return Measure-String $History $NonCounters ($n + 1) $true }
+
+                # Second different counter in a row, or no more rides: the string ends
+                return 0
+}
+
+# Length of the last ride's string. $Sorties is IP names oldest to newest: A,A,B,A,A,A -> 5
+function Get-StringLength {
+                param ([string[]]$Sorties, [string[]]$NonCounters = @())
+
+                if ($Sorties.Count -eq 0) { return 0 }
+                $History = $Sorties[($Sorties.Count - 1)..0]
+                if ($History[0] -in $NonCounters) { return 0 }  # a non-counter's ride is not part of a string
+                return 1 + (Measure-String $History $NonCounters 1 $false)
+}
+
+# Length of every string in one category's rides (IP names in mission order). A,A,B,A,A,A -> 5, 1
+function Get-StringLengths {
+                param ([string[]]$Sorties, [string[]]$NonCounters = @())
+
+                # String length at each ride, counted back from that ride
+                $Length = @(for ($i = 0; $i -lt $Sorties.Count; $i++) { Get-StringLength $Sorties[0..$i] $NonCounters })
+
+                # A string is finished at a ride when that IP's next ride starts over at 1, or the IP never flies the category again
+                for ($i = 0; $i -lt $Sorties.Count; $i++) {
+                                if ($Length[$i] -eq 0) { continue }  # non-counter
+                                $next = $null
+                                for ($j = $i + 1; $j -lt $Sorties.Count; $j++) {
+                                                if ($Sorties[$j] -eq $Sorties[$i]) { $next = $j; break }
+                                }
+                                if ($null -eq $next -or $Length[$next] -eq 1) { $Length[$i] }
+                }
+}
+
+# A student's strings and counters from their syllabus and the Instructors list.
+# Returns @(5-strings, 4-strings, 3-strings, 2-strings, 1-strings, counters). Strings longer than 5 count as 5-strings.
+# Counters are the unique IPs who are not non-counters.
+function Get-StringCounts {
+                param ([array]$Syllabus, [array]$Instructors = @())
+
+                # Completed rides with an IP in the cockpit, by category (FT5001 -> FT, 5001) and in mission order inside each
+                $Flights = @(
+                                $Syllabus | Where-Object {
+                                                (Test-MissionComplete $_) -and
+                                                -not (ConvertTo-FaisBool $_.IsCheck) -and
+                                                [string]$_.Type -notlike '*Solo*' -and
+                                                (Get-MissionKind -Mission $_ -InstructorName (Get-NameText $_.Instructor)) -eq 'Flight' -and
+                                                -not [string]::IsNullOrWhiteSpace((Get-NameText $_.Instructor))
+                                } | ForEach-Object {
+                                                $null = ([string]$_.Mission).Trim() -match '^(\D*)(\d*)'
+                                                [PSCustomObject]@{
+                                                                Category = $Matches[1].ToUpper()
+                                                                Number   = if ($Matches[2] -ne '') { [double]$Matches[2] } else { [double]::MaxValue }
+                                                                ID       = Get-SyllabusSortKey $_
+                                                                IP       = Get-BaseName (Get-NameText $_.Instructor)
+                                                }
+                                } | Sort-Object Category, Number, ID
+                )
+
+                # IPs who flew the student two rides in a row in a category (strictly back to back, not zippered)
+                $BackToBack = @(
+                                for ($i = 1; $i -lt $Flights.Count; $i++) {
+                                                if ($Flights[$i].Category -eq $Flights[$i - 1].Category -and $Flights[$i].IP -eq $Flights[$i - 1].IP) { $Flights[$i].IP }
+                                }
+                )
+
+                # Non-counters from the Instructors sheet (a blank IsCounter counts as a counter), except back-to-back ones
+                $NonCounters = @(
+                                $Instructors | Where-Object { -not (ConvertTo-FaisBool $_.IsCounter -Default $true) } |
+                                                ForEach-Object { Get-BaseName (Get-NameText $_.Name) } |
+                                                Where-Object { $_ -notin $BackToBack }
+                )
+
+                # Strings, counted inside each category
+                $Strings = @{ 5 = 0; 4 = 0; 3 = 0; 2 = 0; 1 = 0 }
+                foreach ($Group in ($Flights | Group-Object Category)) {
+                                foreach ($Len in (Get-StringLengths ([string[]]@($Group.Group | ForEach-Object { $_.IP })) $NonCounters)) {
+                                                $Strings[[Math]::Min($Len, 5)]++
+                                }
+                }
+
+                $Counters = @($Flights | ForEach-Object { $_.IP } | Where-Object { $_ -notin $NonCounters } | Sort-Object -Unique).Count
+
+                return @($Strings[5], $Strings[4], $Strings[3], $Strings[2], $Strings[1], $Counters)
 }

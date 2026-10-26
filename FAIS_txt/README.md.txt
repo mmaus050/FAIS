@@ -14,13 +14,14 @@ Add `-Trace` to print every scheduling decision to the console. FAIS restarts it
 **You can leave Excel open.** If MasterData or OutputSchedule is open in Excel, FAIS saves it before reading it (so edits you have not saved yet are read too), and saves and closes it before writing it (so there is no "file is open" error), then opens it again afterwards. You only see a "file is open" box if Excel can't be reached, for example while a cell is still being edited.
 
 **What happens:**
-1. **Pre-run pop-ups.** Log any hooked (unsat) or incomplete events from the last schedule, and put students on or off hold with **Change Student HOLD status** (checked = on hold), then click **Open Puck Board**. These are saved right away (see *Data in and out*).
-2. **Puck board.** Each day on MasterData's **Schedule** sheet opens as its own tab with its lines (or you type them), and you hardcode whoever you want. **Add Student Absence** blocks a student off for a stretch of time. *(details below)*
+1. **Pre-run pop-ups.** Log any hooked (unsat) or incomplete events from the last schedule, put students on or off hold with **Change Student HOLD status** (checked = on hold), and block students off with **Add Student Absence**, then click **Open Puck Board**. These are saved right away (see *Data in and out*).
+2. **Puck board.** Each day on MasterData's **Schedule** sheet opens as its own tab with its lines (or you type them), and you hardcode whoever you want. **Add Student Absence** is on the board too. *(details below)*
 3. **Fill.** The scheduler fills every open line: formation wingmen, direct support, O&B return legs and For Sale lines included. **Fill <day>** fills just the day on screen; **Fill all N days** (shown when the board has more than one day) fills them all. You review the result on the board.
 4. **Export.** All or nothing: if any part fails, none of the files change. It writes the days you filled:
    - OutputSchedule: the **MasterSchedule** sheet (first tab). Only the filled days are replaced; other days already exported (today onward) are kept, so you can update **one day at a time**,
    - OutputSchedule: **each student's syllabus tab** (tomorrow's run starts from it),
-   - MasterData: **SimDebt**, and **UnsatSim / UnsatFlight** reset to FALSE for students whose schedule cleans up the unsat.
+   - MasterData: **SimDebt**, and **UnsatSim / UnsatFlight** reset to FALSE for students whose schedule cleans up the unsat,
+   - MasterData: the **String Tracker** sheet, one row per student: 5+, 4, 3, 2 and 1-strings and unique counters, counted from each student's syllabus (the exported rides included). Each category (FT, FF, AA) is counted in mission order; sims, solos and check rides are left out; a non-counter counts only for a student they flew two rides in a row.
 
    It also writes **ATIS.xlsx**: one tab per day (named like `Wednesday. October 21, 2026`). Each tab lists that day's flights in ETD order, then a thick border, then that day's sims (OFT / IFT) in ETD order, in the same columns as MasterSchedule. Each export rebuilds the tabs for the days it covers and keeps every other day's tab, so ATIS builds up a day-by-day history. The file opens on the first day you just exported. Set `WriteAtis = $false` in `$OutputSettings` to turn it off.
 
@@ -39,7 +40,7 @@ Closing the board without exporting writes nothing (only the pre-run pop-ups hav
 | Puck board and fill | MasterData's Schedule sheet again whenever MasterData is saved; **Load a day...** reads it (or the last exported MasterSchedule) fresh | Nothing (the board's own autosave in `Boards\` aside) |
 | **Update Syllabi** | The training file you pick (flying schedule or Big Board) | OutputSchedule: the changed events' cells on the students' tabs (a student with no tab gets one). MasterData: SimDebt |
 | **Add Student Absence** | | MasterData: a line on StudentAbsences for each student (Student, StartTime, EndTime, Reason, IsActive = TRUE) |
-| **Export** | | OutputSchedule: MasterSchedule (the filled days), student tabs. MasterData: SimDebt, unsat resets, and any absence **Add Student Absence** could not save. ATIS: the exported days' tabs |
+| **Export** | | OutputSchedule: MasterSchedule (the filled days), student tabs. MasterData: SimDebt, unsat resets, String Tracker, and any absence **Add Student Absence** could not save. ATIS: the exported days' tabs |
 
 - **MasterSchedule is the only sheet of OutputSchedule that is rewritten**, and only the filled days in it change (ATIS rebuilds the tabs of the days it exports). A student's tab is updated in place: only the Instructor, ETD and IsComplete cells of events that changed are written, so your own columns, notes and formatting stay. A student with no tab gets a new one.
 - **MasterData Students sheet:** students are matched by the column headed SPName and SimDebt goes to the column headed SimDebt (columns B and P when those headings are missing). UnsatSim and UnsatFlight are written to the columns with those headings.
@@ -99,7 +100,7 @@ Both files are saved or neither. If they can't be saved (still open), the change
 
 ## Add Student Absence
 
-**Add Student Absence** (toolbar, or File > Add student absence...) blocks students off for a stretch of time: an appointment, leave, a duty. It does the same as typing a line on MasterData's **StudentAbsences** sheet, without opening Excel.
+**Add Student Absence** (on the Pre-Run menu, and on the puck board's toolbar and File menu) blocks students off for a stretch of time: an appointment, leave, a duty. It does the same as typing a line on MasterData's **StudentAbsences** sheet, without opening Excel.
 
 1. **Put the students in the box.** Any of these, as many students as you like:
    - drag a student from the list on the right into the box;
@@ -108,7 +109,7 @@ Both files are saved or neither. If they can't be saved (still open), the change
    - copy names (a column in Excel, a list in an email) and press **Ctrl+V**, or **Paste names**. One name per line or cell. Names are matched like *Update Syllabi* does (`Casey B. Quill` or `Quill, Casey [2d Lt]` is `Quill, Casey`); a name that is no one, or more than one student, is listed under the box.
 
    A student you were holding on the board starts in the box. Drag a student back to the list, or press their **x**, to take them out.
-2. **Pick the day** on the calendar. It starts on the day on screen.
+2. **Pick the day** on the calendar. It starts on the day on screen (from the Pre-Run menu: the board's first day).
 3. **Type the times** in **From** and **To**: 24-hour (`0730`, `1530`) or 12-hour with AM / PM (`0730 AM`, `0330 PM`; `330pm` and `3:30 p.m.` work too). **on** is the day it ends: the same day unless you change it, for an absence past midnight or over several days.
 4. A **Reason** is optional (it shows on the student's puck and in the rule flag).
 

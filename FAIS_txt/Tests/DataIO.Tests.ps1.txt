@@ -96,6 +96,55 @@ Describe 'Get-UnsatFlagUpdates' {
                 }
 }
 
+Describe 'Get-StringCounts' {
+                BeforeAll {
+                                # One completed ride per letter, in mission order per category (FT5001, FT5002, ...),
+                                # with ETDs running backwards so only mission order can give the right answer
+                                function New-TStringSyllabus {
+                                                param ([hashtable]$Rides, [array]$Extra = @())
+                                                $id = 0
+                                                $etd = [datetime]'2026-06-01'
+                                                $rows = @(foreach ($cat in $Rides.Keys) {
+                                                                $num = 5000
+                                                                foreach ($ip in $Rides[$cat].ToCharArray()) {
+                                                                                $id++; $num++; $etd = $etd.AddDays(-1)
+                                                                                [PSCustomObject]@{ SyllabusID = $id; Mission = "$cat$num"; Instructor = "IP $ip [Capt]"; ETD = $etd.ToString('yyyy-MM-dd HH:mm:ss'); Type = 'Single'; IsCheck = $false; IsComplete = $true }
+                                                                }
+                                                })
+                                                return @($rows + $Extra)
+                                }
+                                function New-TStringIPs {
+                                                param ([string]$NonCounters = '')
+                                                foreach ($c in 'ABCDS'.ToCharArray()) { [PSCustomObject]@{ Name = "IP $c [Capt]"; IsCounter = -not $NonCounters.Contains([string]$c) } }
+                                }
+                }
+
+                It 'returns 5+, 4, 3, 2, 1-strings and counters (<Case>)' -ForEach @(
+                                @{ Case = 'AABABB'; Rides = @{ FT = 'AABABB' }; NC = ''; Expected = @(0, 0, 2, 0, 0, 2) }
+                                @{ Case = 'ABABAB'; Rides = @{ FT = 'ABABAB' }; NC = ''; Expected = @(0, 0, 2, 0, 0, 2) }
+                                @{ Case = 'AABAAA'; Rides = @{ FT = 'AABAAA' }; NC = ''; Expected = @(1, 0, 0, 0, 1, 2) }
+                                @{ Case = 'AAABCA, single non-counters'; Rides = @{ FT = 'AAABCA' }; NC = 'BC'; Expected = @(0, 1, 0, 0, 0, 1) }
+                                @{ Case = 'AAAAAAA counts as a 5-string'; Rides = @{ FT = 'AAAAAAA' }; NC = ''; Expected = @(1, 0, 0, 0, 0, 1) }
+                                @{ Case = 'ASSA, non-counter back to back'; Rides = @{ FT = 'ASSA' }; NC = 'S'; Expected = @(0, 0, 0, 1, 2, 2) }
+                                @{ Case = 'ASAS, non-counter zippered'; Rides = @{ FT = 'ASAS' }; NC = 'S'; Expected = @(0, 0, 0, 1, 0, 1) }
+                                @{ Case = 'categories counted apart'; Rides = @{ FT = 'AAA'; AA = 'AAA' }; NC = ''; Expected = @(0, 0, 2, 0, 0, 1) }
+                                @{ Case = 'nothing flown'; Rides = @{}; NC = ''; Expected = @(0, 0, 0, 0, 0, 0) }
+                ) {
+                                $counts = @(Get-StringCounts -Syllabus (New-TStringSyllabus -Rides $Rides) -Instructors @(New-TStringIPs -NonCounters $NC))
+                                $counts | Should -Be $Expected
+                }
+
+                It 'leaves out sims, solos, check rides and rides not flown' {
+                                $extra = @(
+                                                [PSCustomObject]@{ SyllabusID = 90; Mission = 'FE4001'; Instructor = 'IP B'; ETD = '2026-05-30 08:00:00'; Type = 'OFT'; IsCheck = $false; IsComplete = $true }
+                                                [PSCustomObject]@{ SyllabusID = 91; Mission = 'FT5003'; Instructor = 'IP B'; ETD = '2026-05-30 09:00:00'; Type = 'SingleSolo'; IsCheck = $false; IsComplete = $true }
+                                                [PSCustomObject]@{ SyllabusID = 92; Mission = 'FT5390'; Instructor = 'IP C'; ETD = '2026-05-30 10:00:00'; Type = 'Single'; IsCheck = $true; IsComplete = $true }
+                                                [PSCustomObject]@{ SyllabusID = 93; Mission = 'FT5004'; Instructor = 'IP D'; ETD = ''; Type = 'Single'; IsCheck = $false; IsComplete = $false }
+                                )
+                                @(Get-StringCounts -Syllabus (New-TStringSyllabus -Rides @{ FT = 'AA' } -Extra $extra) -Instructors @(New-TStringIPs)) | Should -Be @(0, 0, 0, 1, 0, 1)
+                }
+}
+
 Describe 'Update-StudentHoldStatus' {
                 It 'changes only the students whose box changed and returns them for MasterData' {
                                 $a = New-TestStudent -Name 'Adams, Al'
@@ -273,6 +322,33 @@ Describe 'Update-MasterDataStudents' -Skip:(-not $script:HasExcel) {
                                 $path = Join-Path $TestDrive 'NoStudents.xlsx'
                                 New-TMasterData -Path $path -Students @(New-TStudentRow -Name 'Adams, Al') -NoStudentsSheet
                                 { Update-MasterDataStudents -MasterDataPath $path -SimDebtByName @{ 'Adams, Al' = 1 } } | Should -Throw "*'Students' not found*"
+                }
+}
+
+Describe 'Update-StringTracker' -Skip:(-not $script:HasExcel) {
+                It 'rewrites the sheet: headings, one row per student, old rows cleared' {
+                                $path = Join-Path $TestDrive 'Strings.xlsx'
+                                New-TMasterData -Path $path -Students @(New-TStudentRow -Name 'Adams, Al')
+                                @('Old1', 'Old2', 'Old3') | ForEach-Object { [PSCustomObject][ordered]@{ StudentName = $_; TotalUniqueCounters = 9; '1-Strings' = 9 } } | Export-Excel -Path $path -WorksheetName 'String Tracker' 3>$null
+                                $a = New-TestStudent -Name 'Adams, Al' -Done 'FI3101|2026-02-20 08:00', 'FT5001|2026-02-21 08:00|Jones, Bob', 'FT5102|2026-02-22 08:00|Jones, Bob'
+                                $b = New-TestStudent -Name 'Brown, Bea'
+                                Update-StringTracker -MasterDataPath $path -Students @($a, $b) -Instructors @() 6>$null
+                                $rows = @(Import-Excel -Path $path -WorksheetName 'String Tracker')
+                                @($rows[0].PSObject.Properties.Name) | Should -Be @('StudentName', '5+ Strings', '4-Strings', '3-Strings', '2-Strings', '1-Strings', 'TotalUniqueCounters')
+                                $rows.Count | Should -Be 2
+                                $rows[0].StudentName | Should -Be 'Adams, Al'
+                                @($rows[0].'5+ Strings', $rows[0].'4-Strings', $rows[0].'3-Strings', $rows[0].'2-Strings', $rows[0].'1-Strings', $rows[0].TotalUniqueCounters) | Should -Be @(0, 0, 0, 1, 0, 1)
+                                $rows[1].StudentName | Should -Be 'Brown, Bea'
+                                $rows[1].TotalUniqueCounters | Should -Be 0
+                                # The other sheets are untouched
+                                @(Import-Excel -Path $path -WorksheetName 'Students')[0].SPName | Should -Be 'Adams, Al'
+                }
+
+                It 'makes the sheet when MasterData has none' {
+                                $path = Join-Path $TestDrive 'NoStrings.xlsx'
+                                New-TMasterData -Path $path -Students @(New-TStudentRow -Name 'Adams, Al')
+                                Update-StringTracker -MasterDataPath $path -Students @(New-TestStudent -Name 'Adams, Al') 6>$null
+                                @(Import-Excel -Path $path -WorksheetName 'String Tracker')[0].StudentName | Should -Be 'Adams, Al'
                 }
 }
 

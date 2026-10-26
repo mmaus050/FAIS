@@ -959,6 +959,25 @@ Describe 'Puck board: Add Student Absence (no window)' {
         @((Get-FaisExportSummary -Ok $true -FillResult $fill -Days @($script:D1)).Lines | Where-Object { $_.Text -like '*absence*' }).Count | Should -Be 0
     }
 
+    It 'from the pre-run menu: the same window over every student, the absence goes on them and is saved' {
+        Mock -ModuleName PuckBoard Initialize-PuckBoardAssemblies { }
+        Mock -ModuleName PuckBoard Show-PBAbsenceDialog { New-AbsAsk -Students @('Brown, Bea') -From '1300' -To '0200 PM' -Reason 'Dentist' }
+        $stu = @((New-TestStudent -Name 'Adams, Al'), (New-TestStudent -Name 'Brown, Bea'))
+        $text = Invoke-FaisAddAbsence -Students $stu -MasterDataPath 'C:\m.xlsx' -Day '2026-10-20' -LockedPrompt { $true }
+        $text | Should -BeExactly "Brown, Bea blocked off Tue 20 Oct 1300-1400 (Dentist). Saved to MasterData's StudentAbsences sheet."
+        Should -Invoke -ModuleName PuckBoard Show-PBAbsenceDialog -Times 1 -Exactly -ParameterFilter { $Day -eq '2026-10-20' -and @($Roster).Count -eq 2 }
+        Should -Invoke -ModuleName PuckBoard Save-StudentAbsences -Times 1 -Exactly -ParameterFilter { $MasterDataPath -eq 'C:\m.xlsx' -and @($Students).Count -eq 2 }
+        @($stu[1].Absences).Count | Should -Be 1
+        @($stu[0].Absences).Count | Should -Be 0
+
+        Invoke-FaisAddAbsence -Students $stu -MasterDataPath 'C:\m.xlsx' -Day '2026-10-20' | Should -BeExactly 'Brown, Bea already blocked off Tue 20 Oct 1300-1400 - nothing was added.'
+        Mock -ModuleName PuckBoard Show-PBAbsenceDialog { New-AbsAsk -Students @('Adams, Al') -From '1300' -To '1400' }
+        Mock -ModuleName PuckBoard Save-StudentAbsences { [PSCustomObject]@{ Saved = $false; Count = 0; Message = 'MasterData.xlsx is still open' } }
+        Invoke-FaisAddAbsence -Students $stu -MasterDataPath 'C:\m.xlsx' -Day '2026-10-20' | Should -BeExactly 'Adams, Al blocked off Tue 20 Oct 1300-1400 for this run only: MasterData could not be saved (MasterData.xlsx is still open). Export writes it with the schedule.'
+        Mock -ModuleName PuckBoard Show-PBAbsenceDialog { $null }
+        Invoke-FaisAddAbsence -Students $stu -MasterDataPath 'C:\m.xlsx' -Day '2026-10-20' | Should -BeExactly ''
+    }
+
     Context 'the window (plain objects stand in for its boxes)' {
         BeforeEach {
             Mock -ModuleName PuckBoard Get-PBBrush { $Color }
@@ -966,7 +985,7 @@ Describe 'Puck board: Add Student Absence (no window)' {
             & (Get-Module PuckBoard) {
                 $o = { param($h) [PSCustomObject]$h }
                 $script:PBAbs = @{ Window = (& $o @{ DialogResult = $null }); Result = $null; Chosen = (New-Object System.Collections.Generic.List[string])
-                    Held = ''; Press = $null; Drag = $null; PendingDrop = $null; LastDay = [datetime]'2026-10-20' }
+                    Held = ''; Press = $null; Drag = $null; PendingDrop = $null; LastDay = [datetime]'2026-10-20'; Students = @($script:PB.Data.Students) }
                 foreach ($box in @('SearchBox', 'FromBox', 'ToBox', 'ReasonBox', 'HoldText', 'PasteText', 'PreviewText')) { $script:PBAbs[$box] = & $o @{ Text = ''; Foreground = '' } }
                 $script:PBAbs.StudentPool = & $o @{ ItemsSource = $null }
                 $script:PBAbs.ChosenList = & $o @{ ItemsSource = $null }
