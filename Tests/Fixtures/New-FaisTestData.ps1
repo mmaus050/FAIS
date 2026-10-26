@@ -58,6 +58,7 @@ function New-TestStudent {
                                 [switch]$UnsatFlight,
                                 [double]$Priority = 0,
                                 [double]$SimDebt = 0,
+                                [double]$DiscontinuityScore = 0,
                                 [array]$Absences = @()
                 )
 
@@ -72,19 +73,20 @@ function New-TestStudent {
                 }
 
                 return [PSCustomObject]@{
-                                ID              = $Name
-                                Name            = $Name
-                                IsCap           = [bool]$IsCap
-                                IsInternational = [bool]$IsInternational
-                                Priority        = $Priority
-                                UnsatSim        = [bool]$UnsatSim
-                                UnsatSimType    = $UnsatSimType
-                                UnsatFlight     = [bool]$UnsatFlight
-                                OnHold          = [bool]$OnHold
-                                SimDebt         = $SimDebt
-                                Syllabus        = $syl
-                                Absences        = $Absences
-                                Reservations    = @()
+                                ID                 = $Name
+                                Name               = $Name
+                                IsCap              = [bool]$IsCap
+                                IsInternational    = [bool]$IsInternational
+                                Priority           = $Priority
+                                UnsatSim           = [bool]$UnsatSim
+                                UnsatSimType       = $UnsatSimType
+                                UnsatFlight        = [bool]$UnsatFlight
+                                OnHold             = [bool]$OnHold
+                                SimDebt            = $SimDebt
+                                DiscontinuityScore = $DiscontinuityScore
+                                Syllabus           = $syl
+                                Absences           = $Absences
+                                Reservations       = @()
                 }
 }
 

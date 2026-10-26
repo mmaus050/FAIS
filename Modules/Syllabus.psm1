@@ -4,13 +4,14 @@
 # Test-MissionComplete / Get-SyllabusSortKey / Find-SyllabusMission / Get-MissionKind
 # Get-OptedEvents / Get-AllowedEventTypes / Get-ValidOptedEvents
 # Get-SimDebtDelta / Get-MissionSimDebtDelta / Update-StudentSimDebtFromSyllabus
-# Complete-StudentMission / Undo-StudentMission / Reset-PlannedCompletions
+# Complete-StudentMission / Undo-StudentMission / Reset-PlannedCompletions / Test-ChangesStrings
 # Get-UnsatSimKind / Get-LastSimType / Clear-CleanedUnsat / Restore-PlannedUnsat
 # Add-StudentReservation / Remove-StudentReservation / Get-ReservedMissionNames
 # Get-StudentTimeline
 # Measure-String / Get-StringLength / Get-StringLengths / Get-StringCounts (String Tracker)
 # Get-MissionCategory / Get-MissionPhase / Get-StringFlights / Get-StudentNonCounters
 # Get-StringOutlook / Get-StringPlacement (string and counter rules for the scheduler)
+# Get-DiscontinuityWeight / Get-DiscontinuityScore / Add-StudentDiscontinuity / Initialize-StudentDiscontinuity
 
 
 # =================================================================================
@@ -233,6 +234,8 @@ function Update-StudentSimDebtFromSyllabus {
 
 # The one place a scheduled event is written onto a student's syllabus.
 # Marks it complete with the IP name and ETD, and applies its sim debt once.
+# A ride that counts toward strings moves the discontinuity score when it is flown or its IP
+# changes (-Instructors says who the non-counters are; -NoDiscontinuity leaves it alone).
 # -SortieType (or -Sortie) is the line it is flown on: an unsat that line cleans up is
 # cleared, and -Sortie gets a note saying so.
 function Complete-StudentMission {
@@ -244,13 +247,19 @@ function Complete-StudentMission {
                                 $SoftWeights,
                                 [string]$SortieType = '',
                                 $Sortie,
-                                [switch]$NoSimDebt
+                                [array]$Instructors = @(),
+                                [switch]$NoSimDebt,
+                                [switch]$NoDiscontinuity
                 )
 
                 $entry = Find-SyllabusMission -Student $Student -Mission $Mission
                 if ($null -eq $entry) { return $null }
 
                 $wasComplete = Test-MissionComplete $entry
+                $discBefore = $null
+                if (-not $NoDiscontinuity -and $null -ne $SoftWeights -and (Test-ChangesStrings $entry $InstructorName)) {
+                                $discBefore = Get-DiscontinuityScore -Syllabus $Student.Syllabus -Instructors $Instructors -SoftWeights $SoftWeights
+                }
                 $entry.IsComplete = $true
                 $entry.Instructor = $InstructorName
                 $dt = Parse-ETD $ETD
@@ -260,6 +269,9 @@ function Complete-StudentMission {
                                 $current = 0.0
                                 if ($null -ne $Student.SimDebt -and [string]$Student.SimDebt -ne '') { $current = [double]$Student.SimDebt }
                                 $Student.SimDebt = [math]::Round($current + (Get-MissionSimDebtDelta -MissionName ([string]$entry.Mission) -SoftWeights $SoftWeights), 2)
+                }
+                if ($null -ne $discBefore) {
+                                Add-StudentDiscontinuity -Student $Student -Delta ((Get-DiscontinuityScore -Syllabus $Student.Syllabus -Instructors $Instructors -SoftWeights $SoftWeights) - $discBefore)
                 }
 
                 if ($SortieType -eq '' -and $null -ne $Sortie) { $SortieType = [string]$Sortie.SortieType }
@@ -274,13 +286,16 @@ function Complete-StudentMission {
 }
 
 # Takes a completed event back off a student's syllabus (logged incomplete, or a planned
-# event being re-planned) and backs out only that event's sim debt, so the SimDebt read
-# from MasterData keeps any hand adjustment. Returns $true when the event was complete.
+# event being re-planned) and backs out only that event's sim debt and discontinuity, so the
+# SimDebt and DiscontinuityScore read from MasterData keep any hand adjustment
+# (-NoDiscontinuity leaves the discontinuity alone). Returns $true when the event was complete.
 function Undo-StudentMission {
                 param (
                                 [Parameter(Mandatory)] $Student,
                                 [Parameter(Mandatory)] $Mission,
-                                $SoftWeights
+                                $SoftWeights,
+                                [array]$Instructors = @(),
+                                [switch]$NoDiscontinuity
                 )
 
                 # The exact syllabus entry when one is passed, else the first with that name
@@ -289,6 +304,10 @@ function Undo-StudentMission {
                 if ($null -eq $entry) { $entry = Find-SyllabusMission -Student $Student -Mission $Mission }
                 if ($null -eq $entry -or -not (Test-MissionComplete $entry)) { return $false }
 
+                $discBefore = $null
+                if (-not $NoDiscontinuity -and $null -ne $SoftWeights -and (Test-ChangesStrings $entry -Undo)) {
+                                $discBefore = Get-DiscontinuityScore -Syllabus $Student.Syllabus -Instructors $Instructors -SoftWeights $SoftWeights
+                }
                 $entry.IsComplete = $false
                 $entry.Instructor = ''
                 $entry.ETD = ''
@@ -296,6 +315,9 @@ function Undo-StudentMission {
                                 $current = 0.0
                                 if ($null -ne $Student.SimDebt -and [string]$Student.SimDebt -ne '') { $current = [double]$Student.SimDebt }
                                 $Student.SimDebt = [math]::Round($current - (Get-MissionSimDebtDelta -MissionName ([string]$entry.Mission) -SoftWeights $SoftWeights), 2)
+                }
+                if ($null -ne $discBefore) {
+                                Add-StudentDiscontinuity -Student $Student -Delta ((Get-DiscontinuityScore -Syllabus $Student.Syllabus -Instructors $Instructors -SoftWeights $SoftWeights) - $discBefore)
                 }
 
                 $rev = [int](Get-OptionalProperty $Student 'SyllabusRevision' 0)
@@ -305,26 +327,35 @@ function Undo-StudentMission {
 
 # Clears completions dated on/after a day. A previous run that scheduled these days
 # wrote them as complete; they are plans, not flown events, when the days are re-built.
-# Their sim debt is backed out, and an unsat that one of those planned lines cleaned up
-# (its "Clears Unsat" note in -PrevSchedule) goes back on the student.
+# Their sim debt and discontinuity are backed out (each student's discontinuity once, for all
+# of their events), and an unsat that one of those planned lines cleaned up (its
+# "Clears Unsat" note in -PrevSchedule) goes back on the student.
 # Returns the students that changed.
 function Reset-PlannedCompletions {
                 param (
                                 [array]$Students,
                                 [datetime]$FromDate,
                                 $SoftWeights,
-                                [array]$PrevSchedule = @()
+                                [array]$PrevSchedule = @(),
+                                [array]$Instructors = @()
                 )
 
                 $changed = New-Object System.Collections.Generic.List[object]
                 foreach ($s in @($Students)) {
                                 $hit = $false
+                                $discBefore = $null
                                 foreach ($m in @($s.Syllabus)) {
                                                 if (-not (Test-MissionComplete $m)) { continue }
                                                 $dt = Parse-ETD $m.ETD
                                                 if ($null -ne $dt -and $dt.Date -ge $FromDate.Date) {
-                                                                if (Undo-StudentMission -Student $s -Mission $m -SoftWeights $SoftWeights) { $hit = $true }
+                                                                if ($null -eq $discBefore -and $null -ne $SoftWeights -and (Test-ChangesStrings $m -Undo)) {
+                                                                                $discBefore = Get-DiscontinuityScore -Syllabus $s.Syllabus -Instructors $Instructors -SoftWeights $SoftWeights
+                                                                }
+                                                                if (Undo-StudentMission -Student $s -Mission $m -SoftWeights $SoftWeights -NoDiscontinuity) { $hit = $true }
                                                 }
+                                }
+                                if ($null -ne $discBefore) {
+                                                Add-StudentDiscontinuity -Student $s -Delta ((Get-DiscontinuityScore -Syllabus $s.Syllabus -Instructors $Instructors -SoftWeights $SoftWeights) - $discBefore)
                                 }
                                 if ($hit) { $changed.Add($s) }
                 }
@@ -339,6 +370,19 @@ function Reset-PlannedCompletions {
                                 if ($null -ne $s -and (Restore-PlannedUnsat -Student $s -Notes ([string]$row.Notes)) -and -not $changed.Contains($s)) { $changed.Add($s) }
                 }
                 return $changed.ToArray()
+}
+
+# True when marking the event complete with -InstructorName (or, with -Undo, taking it back)
+# can change the student's strings and counters, and so their discontinuity score
+function Test-ChangesStrings {
+                param ($Mission, [string]$InstructorName, [switch]$Undo)
+
+                $wasComplete = Test-MissionComplete $Mission
+                $oldIP = Get-NameText $Mission.Instructor
+                $wasRide = $wasComplete -and (Test-StringRide $Mission $oldIP)
+                if ($Undo) { return $wasRide }
+                if ($wasComplete -and $oldIP -eq $InstructorName) { return $false }
+                return ($wasRide -or (Test-StringRide $Mission $InstructorName))
 }
 
 
@@ -797,4 +841,65 @@ function Get-StringPlacement {
                                 CounterCount = ($counters.Count + [int]$newCounter)
                                 Limit        = $script:CounterLimits[$ride.Phase]
                 }
+}
+
+
+# =================================================================================
+#  DISCONTINUITY SCORE
+#    How broken up a student's rides have been, from the String Tracker counts:
+#    Disc1String per 1-string + DiscCounter per counter + Disc3PlusString per 3+ string
+#    (SoftWeights; +1, +1 and -1 when blank). The Continue String rule adds it, so a
+#    student with a lot of 1-strings and counters is the one kept with an IP.
+#    Kept like SimDebt: read from MasterData's Students sheet (counted from the syllabus
+#    when the cell is blank), moved by each ride that is flown or taken back, written back.
+# =================================================================================
+
+# One discontinuity weight from SoftWeights, or its default when the cell is blank
+function Get-DiscontinuityWeight {
+                param ($SoftWeights, [string]$Name, [double]$Default)
+
+                $v = ([string](Get-OptionalProperty $SoftWeights $Name '')).Trim()
+                $num = 0.0
+                if ($v -ne '' -and [double]::TryParse($v, [System.Globalization.NumberStyles]::Any, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$num)) { return $num }
+                return $Default
+}
+
+# A student's discontinuity score, counted from their syllabus (Get-StringCounts)
+function Get-DiscontinuityScore {
+                param ([array]$Syllabus, [array]$Instructors = @(), $SoftWeights)
+
+                # @(5+, 4, 3, 2, 1-strings, counters)
+                $c = @(Get-StringCounts -Syllabus $Syllabus -Instructors $Instructors)
+                $score = (Get-DiscontinuityWeight $SoftWeights 'Disc1String' 1) * $c[4] +
+                                (Get-DiscontinuityWeight $SoftWeights 'DiscCounter' 1) * $c[5] +
+                                (Get-DiscontinuityWeight $SoftWeights 'Disc3PlusString' -1) * ($c[0] + $c[1] + $c[2])
+                return [math]::Round($score, 2)
+}
+
+# Moves the student's DiscontinuityScore by -Delta (a blank score counts as 0)
+function Add-StudentDiscontinuity {
+                param ($Student, [double]$Delta)
+
+                $current = 0.0
+                $v = Get-OptionalProperty $Student 'DiscontinuityScore' $null
+                if ($null -ne $v -and [string]$v -ne '') { $current = [double]$v }
+                $Student | Add-Member -MemberType NoteProperty -Name 'DiscontinuityScore' -Value ([math]::Round($current + $Delta, 2)) -Force
+}
+
+# Counts the score from the syllabus for each student whose DiscontinuityScore is blank (no
+# DiscontinuityScore column in MasterData yet, or a cell cleared so FAIS counts it again).
+# Returns the names of the students it counted.
+function Initialize-StudentDiscontinuity {
+                param ([array]$Students, [array]$Instructors = @(), $SoftWeights)
+
+                $counted = New-Object System.Collections.Generic.List[string]
+                foreach ($s in @($Students)) {
+                                if ($null -eq $s) { continue }
+                                $v = Get-OptionalProperty $s 'DiscontinuityScore' $null
+                                if ($null -ne $v -and [string]$v -ne '') { continue }
+                                $score = Get-DiscontinuityScore -Syllabus @($s.Syllabus) -Instructors $Instructors -SoftWeights $SoftWeights
+                                $s | Add-Member -MemberType NoteProperty -Name 'DiscontinuityScore' -Value $score -Force
+                                $counted.Add([string]$s.Name)
+                }
+                return $counted.ToArray()
 }
