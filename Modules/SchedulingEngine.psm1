@@ -1003,7 +1003,9 @@ function Process-HardcodedSortie {
                                 [array]$Instructors = @(),
                                 $SoftWeights,
                                 [array]$Formations = @(),
-                                [int]$FormIndex = 0
+                                [int]$FormIndex = 0,
+                                # Never pick a student wingman for an open line (direct support is still claimed)
+                                [switch]$NoWingSearch
                 )
 
                 $ip = Resolve-SortieInstructor -Instructors $Instructors -Instructor $Sortie.Instructor
@@ -1032,7 +1034,7 @@ function Process-HardcodedSortie {
                                 $existingWing = Get-PinnedWingRow -Sortie $Sortie -Schedule $Schedule
                                 $FormIndex = Pair-FormationWingman -PrimarySortie $Sortie -PrimaryStudent $Student -PrimaryMission $Mission `
                                                 -Schedule $Schedule -Students $Students -Instructors $Instructors -SoftWeights $SoftWeights `
-                                                -FormIndex $FormIndex -Formations $Formations -ExistingWingSortie $existingWing
+                                                -FormIndex $FormIndex -Formations $Formations -ExistingWingSortie $existingWing -NoWingSearch:$NoWingSearch
                 }
 
                 # O&B second leg
@@ -1062,7 +1064,8 @@ function Pair-FormationWingman {
                                 $SoftWeights,
                                 [int]$FormIndex = 0,
                                 [array]$Formations = @(),
-                                $ExistingWingSortie
+                                $ExistingWingSortie,
+                                [switch]$NoWingSearch
                 )
 
                 try {
@@ -1105,7 +1108,8 @@ function Pair-FormationWingman {
                                                 })
 
                                                 $best = $null
-                                                foreach ($WingSortie in $openLines) {
+                                                $searchLines = if ($NoWingSearch) { @() } else { $openLines }
+                                                foreach ($WingSortie in $searchLines) {
                                                                 $WingSortie.Instructor = Resolve-SortieInstructor -Instructors $Instructors -Instructor $WingSortie.Instructor
                                                                 foreach ($FormStudent in $Students) {
                                                                                 if ([string]::IsNullOrWhiteSpace([string]$FormStudent.Name) -or [string]$FormStudent.Name -eq $leadName) { continue }
@@ -1268,7 +1272,9 @@ function Invoke-FillSchedule {
                                 $SoftWeights,
                                 [array]$Formations = @(),
                                 [scriptblock]$OnProgress,
-                                [switch]$Trace
+                                [switch]$Trace,
+                                # Export as the board stands: nobody is picked for an open line (it goes out as NEED SP)
+                                [switch]$NoAutoFill
                 )
 
                 $log = New-Object System.Collections.Generic.List[string]
@@ -1339,7 +1345,16 @@ function Invoke-FillSchedule {
                                 # ---------------- HARDCODED (PINNED) ----------------
                                 if ((Get-NameText $Sortie.Student) -ne '') {
                                                 $FormIndex = Invoke-PinnedLine -Sortie $Sortie -Student $pinStudent[[string]$Sortie.BoardLineId] -Rows $rows -Students $Students `
-                                                                -Instructors $Instructors -SoftWeights $SoftWeights -Formations $Formations -FormIndex $FormIndex -FormLookAhead $FormLookAhead -Overrides $overrides
+                                                                -Instructors $Instructors -SoftWeights $SoftWeights -Formations $Formations -FormIndex $FormIndex -FormLookAhead $FormLookAhead -Overrides $overrides -NoWingSearch:$NoAutoFill
+                                                continue
+                                }
+
+                                # ---------------- NOT FILLING: OPEN LINES GO OUT AS NEED SP ----------------
+                                # (a return leg whose O&B is open too)
+                                if ($NoAutoFill) {
+                                                $Sortie.Student = 'NEED SP'
+                                                $Sortie.Mission = $null
+                                                $Sortie.FilledBy = 'NeedSP'
                                                 continue
                                 }
 
@@ -1357,7 +1372,7 @@ function Invoke-FillSchedule {
                                                 -Formations $Formations -FormIndex $FormIndex -FormLookAhead $FormLookAhead -Trace:$Trace
                 }
 
-                $stats = [ordered]@{ Lines = $n; Pinned = 0; Filled = 0; Wing = 0; Return = 0; DS = 0; ForSale = 0; Overrides = $overrides.Count }
+                $stats = [ordered]@{ Lines = $n; Pinned = 0; Filled = 0; Wing = 0; Return = 0; DS = 0; ForSale = 0; NeedSP = 0; Overrides = $overrides.Count }
                 foreach ($r in $rows) {
                                 switch ([string]$r.FilledBy) {
                                                 'Pin' { $stats.Pinned++ }
@@ -1366,6 +1381,7 @@ function Invoke-FillSchedule {
                                                 'Return' { $stats.Return++ }
                                                 'DS' { $stats.DS++ }
                                                 'ForSale' { $stats.ForSale++ }
+                                                'NeedSP' { $stats.NeedSP++ }
                                 }
                 }
 
@@ -1425,7 +1441,7 @@ function Select-PinnedMission {
 }
 
 function Invoke-PinnedLine {
-                param ($Sortie, $Student, [array]$Rows, [array]$Students, [array]$Instructors, $SoftWeights, [array]$Formations, [int]$FormIndex, [double]$FormLookAhead, $Overrides)
+                param ($Sortie, $Student, [array]$Rows, [array]$Students, [array]$Instructors, $SoftWeights, [array]$Formations, [int]$FormIndex, [double]$FormLookAhead, $Overrides, [switch]$NoWingSearch)
 
                 $name = Get-NameText $Sortie.Student
                 if ($null -eq $Student) {
@@ -1450,7 +1466,7 @@ function Invoke-PinnedLine {
                 $soft = $pick.Soft
 
                 $FormIndex = Process-HardcodedSortie -Sortie $Sortie -Student $Student -Mission $mission -Schedule $Rows -Students $Students `
-                                -Instructors $Instructors -SoftWeights $SoftWeights -Formations $Formations -FormIndex $FormIndex
+                                -Instructors $Instructors -SoftWeights $SoftWeights -Formations $Formations -FormIndex $FormIndex -NoWingSearch:$NoWingSearch
                 if ($null -eq $mission -and $explicitName -ne '') {
                                 # A typed mission that isn't in the syllabus: kept as typed. The student still flies an O&B's
                                 # return leg (the next event they can fly home, or a note that there is none).

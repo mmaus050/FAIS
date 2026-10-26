@@ -328,7 +328,7 @@ function Test-IsSentinelStudent {
 
                 $text = Get-NameText $Value
                 if ([string]::IsNullOrWhiteSpace($text)) { return $true }
-                return ($text -in @('For Sale', 'Need Form SP', 'NEED IP', 'SIM IP'))
+                return ($text -in @('For Sale', 'Need Form SP', 'NEED SP', 'NEED IP', 'SIM IP'))
 }
 
 # Deep-enough copy of a student so rules can be run "what if" without touching the original.

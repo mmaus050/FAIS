@@ -153,7 +153,7 @@ if (-not (Invoke-PreRunMenu -Schedule $PrevSchedule -Students $Students -SoftWei
 #      PUCK BOARD
 # ==========================================
 # Build the lines, hardcode anyone, then "Fill this day" / "Fill all days" runs the scheduler
-# (Invoke-FillSchedule) and shows the result for review
+# (Invoke-FillSchedule) and puts its picks on the board to change; Export writes the board as it stands
 $BoardData = @{
     Students       = $Students
     Instructors    = $Instructors
@@ -211,8 +211,8 @@ if (-not $Exported) {
 $Stats = $FillResult.Stats
 Write-Host ""
 Write-Host ("Schedule written to {0} ({1})" -f $excelOutputPath, (@($BoardResult.Days | ForEach-Object { Format-BoardDayLabel $_ }) -join ', ')) -ForegroundColor Green
-Write-Host ("  {0} lines: {1} hardcoded, {2} filled by the scheduler, {3} wingmen, {4} return legs, {5} direct support, {6} for sale" -f `
-        $Stats.Lines, $Stats.Pinned, $Stats.Filled, $Stats.Wing, $Stats.Return, $Stats.DS, $Stats.ForSale) -ForegroundColor Green
+Write-Host ("  {0} lines: {1} hardcoded, {2} filled by the scheduler, {3} wingmen, {4} return legs, {5} direct support, {6} for sale, {7} NEED SP" -f `
+        $Stats.Lines, $Stats.Pinned, $Stats.Filled, $Stats.Wing, $Stats.Return, $Stats.DS, $Stats.ForSale, $Stats.NeedSP) -ForegroundColor Green
 foreach ($o in $FillResult.Overrides) {
     Write-Host ("  OVERRIDE {0} {1}: {2}" -f (Format-EtdShort $o.ETD), $o.Student, ($o.Violations -join '; ')) -ForegroundColor Yellow
 }

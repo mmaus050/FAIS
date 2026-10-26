@@ -10,6 +10,7 @@
 #         New-BulkBoardLines (Add Bulk Lines)
 # Absences: ConvertTo-ClockTime / Resolve-PastedStudents / New-StudentAbsences / Add-StudentAbsences
 # Engine: ConvertTo-ScheduleRows / ConvertFrom-ScheduleRows / Get-FillOverlay / Test-BoardReadyToFill
+#         Set-BoardFill / Clear-BoardFill (a fill's picks put on the board, and taken off again)
 # One day at a time: Resolve-SheetRowDays / ConvertFrom-SheetRows / Import-BoardDayLines / Get-BoardSheetState / Get-SheetBannerInfo / Get-SheetDaysToAdd
 #         Set-BoardSheetSync / ConvertFrom-PublishedRows / Get-PublishedContextRows / Split-FillResult
 # Files:  Save-BoardState / Open-BoardState / Get-SavedBoardDays
@@ -84,7 +85,9 @@ function New-BoardLine {
                                 [string]$Source = 'Manual',
                                 [string]$Id = '',
                                 [string]$LinkedLineId = '',
-                                [string]$WingOfLineId = ''
+                                [string]$WingOfLineId = '',
+                                # What the last fill did here: Engine / Wing (it put this student on), ForSale / DS (open line). Blank = typed or dropped.
+                                [string]$Filled = ''
                 )
 
                 if ($Id -eq '') { $Id = New-BoardId }
@@ -102,6 +105,7 @@ function New-BoardLine {
                                 LinkedLineId = $LinkedLineId
                                 WingOfLineId = $WingOfLineId
                                 Source       = $Source
+                                Filled       = $Filled
                 }
 }
 
@@ -409,6 +413,7 @@ function Set-BoardPin {
                 if ($line.Student -ne $Student) { $line.WingOfLineId = '' }
                 $line.Student = $Student
                 $line.Mission = $Mission
+                $line.Filled = ''
                 Step-BoardVersion $Board
                 return $true
 }
@@ -422,6 +427,7 @@ function Clear-BoardPin {
                 $line.Student = ''
                 $line.Mission = ''
                 $line.WingOfLineId = ''
+                $line.Filled = ''
                 foreach ($l in $Board.Lines) { if ($l.WingOfLineId -eq $Id) { $l.WingOfLineId = '' } }
                 Step-BoardVersion $Board
 }
@@ -446,7 +452,7 @@ function Move-BoardPin {
                                 $to.Student = $s
                                 $to.Mission = $m
                 }
-                foreach ($l in @($from, $to)) { $l.WingOfLineId = '' }
+                foreach ($l in @($from, $to)) { $l.WingOfLineId = ''; $l.Filled = '' }
                 foreach ($l in $Board.Lines) { if ($l.WingOfLineId -eq $FromId -or $l.WingOfLineId -eq $ToId) { $l.WingOfLineId = '' } }
                 Step-BoardVersion $Board
                 return $true
@@ -459,6 +465,7 @@ function Set-BoardMission {
                 if ($null -eq $line -or [string]$line.Mission -ceq $Mission) { return }
                 Save-BoardUndoPoint $Board
                 $line.Mission = $Mission
+                $line.Filled = ''
                 Step-BoardVersion $Board
 }
 
@@ -1031,6 +1038,64 @@ function Get-FillOverlay {
                 return $map
 }
 
+# Puts a fill's picks on the board so they can be edited like any other line: each student the
+# scheduler picked (and each wingman, paired to their lead) goes on their line with the mission it
+# chose, marked Filled. Open lines it could not fill are marked ForSale (or DS: direct support).
+# Marks an earlier fill left on these days' open lines are cleared first. Lines hardcoded by hand
+# are left as they are. One undo point, so Ctrl+Z takes the whole fill off.
+# Returns the number of students put on.
+function Set-BoardFill {
+                param ($Board, $FillResult, [string[]]$Days = @())
+
+                $rows = @($FillResult.Schedule)
+                # "Wingman to <lead>" notes -> WingOfLineId on the engine rows
+                Set-WingLinksFromNotes -Items $rows -IdProperty 'BoardLineId'
+                Save-BoardUndoPoint $Board
+                foreach ($l in $Board.Lines) {
+                                if ($Days -contains $l.Day -and [string]::IsNullOrWhiteSpace($l.Student)) { $l.Filled = '' }
+                }
+                $put = 0
+                foreach ($r in $rows) {
+                                $line = Get-BoardLine $Board ([string](Get-OptionalProperty $r 'BoardLineId' ''))
+                                if ($null -eq $line -or (Test-BoardLineIsReturn $line) -or -not [string]::IsNullOrWhiteSpace($line.Student)) { continue }
+                                $by = [string]$r.FilledBy
+                                if ($by -eq 'Engine' -or $by -eq 'Wing') {
+                                                $line.Student = Get-NameText $r.Student
+                                                $line.Mission = Get-NameText $r.Mission
+                                                $line.Filled = $by
+                                                $line.WingOfLineId = ''
+                                                if ($by -eq 'Wing' -and $r.WingOfLineId -and $null -ne (Get-BoardLine $Board ([string]$r.WingOfLineId))) { $line.WingOfLineId = [string]$r.WingOfLineId }
+                                                $put++
+                                }
+                                elseif ($by -eq 'ForSale' -or $by -eq 'DS') { $line.Filled = $by }
+                }
+                Step-BoardVersion $Board
+                return $put
+}
+
+# Takes the scheduler's picks back off these days (the students Set-BoardFill put on, and its marks
+# on open lines). Students hardcoded by hand, or picks changed since, stay. Returns how many came off.
+function Clear-BoardFill {
+                param ($Board, [string[]]$Days = @())
+
+                $lines = @($Board.Lines | Where-Object { $Days -contains $_.Day -and $_.Filled })
+                if ($lines.Count -eq 0) { return 0 }
+                Save-BoardUndoPoint $Board
+                $off = 0
+                foreach ($line in $lines) {
+                                if ($line.Filled -eq 'Engine' -or $line.Filled -eq 'Wing') {
+                                                $line.Student = ''
+                                                $line.Mission = ''
+                                                $line.WingOfLineId = ''
+                                                foreach ($l in $Board.Lines) { if ($l.WingOfLineId -eq $line.Id) { $l.WingOfLineId = '' } }
+                                                $off++
+                                }
+                                $line.Filled = ''
+                }
+                Step-BoardVersion $Board
+                return $off
+}
+
 # Things worth a second look before filling. Returns a list of strings.
 # -Days limits the checks to the days being filled (default: every board day).
 function Test-BoardReadyToFill {
@@ -1413,7 +1478,7 @@ function Split-FillResult {
                 foreach ($r in $mine) { $ids[[string]$r.BoardLineId] = $true }
                 $ov = @($FillResult.Overrides | Where-Object { $null -ne $_ -and $ids.ContainsKey([string]$_.LineId) })
                 $ctxOv = @($FillResult.Overrides | Where-Object { $null -ne $_ -and -not $ids.ContainsKey([string]$_.LineId) })
-                $stats = [ordered]@{ Lines = $mine.Count; Pinned = 0; Filled = 0; Wing = 0; Return = 0; DS = 0; ForSale = 0; Overrides = $ov.Count }
+                $stats = [ordered]@{ Lines = $mine.Count; Pinned = 0; Filled = 0; Wing = 0; Return = 0; DS = 0; ForSale = 0; NeedSP = 0; Overrides = $ov.Count }
                 foreach ($r in $mine) {
                                 switch ([string]$r.FilledBy) {
                                                 'Pin' { $stats.Pinned++ }
@@ -1422,6 +1487,7 @@ function Split-FillResult {
                                                 'Return' { $stats.Return++ }
                                                 'DS' { $stats.DS++ }
                                                 'ForSale' { $stats.ForSale++ }
+                                                'NeedSP' { $stats.NeedSP++ }
                                 }
                 }
                 return [PSCustomObject]@{
@@ -1458,6 +1524,7 @@ function ConvertTo-LineDto {
                                 LinkedLineId = [string]$Line.LinkedLineId
                                 WingOfLineId = [string]$Line.WingOfLineId
                                 Source       = [string]$Line.Source
+                                Filled       = [string]$Line.Filled
                 }
 }
 
@@ -1467,7 +1534,8 @@ function ConvertFrom-LineDto {
                 $etd = [datetime]::ParseExact([string]$Dto.ETD, 'yyyy-MM-ddTHH:mm', [System.Globalization.CultureInfo]::InvariantCulture)
                 return (New-BoardLine -ETD $etd -SortieType ([string]$Dto.SortieType) -Instructor ([string]$Dto.Instructor) -Student ([string]$Dto.Student) `
                                 -Mission ([string]$Dto.Mission) -Callsign ([string]$Dto.Callsign) -Num ([string]$Dto.Num) -Notes ([string]$Dto.Notes) `
-                                -Source ([string]$Dto.Source) -Id ([string]$Dto.Id) -LinkedLineId ([string]$Dto.LinkedLineId) -WingOfLineId ([string]$Dto.WingOfLineId))
+                                -Source ([string]$Dto.Source) -Id ([string]$Dto.Id) -LinkedLineId ([string]$Dto.LinkedLineId) -WingOfLineId ([string]$Dto.WingOfLineId) `
+                                -Filled ([string](Get-OptionalProperty $Dto 'Filled' '')))
 }
 
 # Write-then-rename so a crash never leaves a half-written file

@@ -1987,6 +1987,70 @@ Describe 'Get-FillOverlay' {
 }
 
 
+Describe 'Set-BoardFill / Clear-BoardFill' {
+    BeforeEach {
+        $script:FB = New-TB -Days @($script:D1, $script:D2)
+        $script:FPin = New-TL -At '2026-10-20 07:30' -IP 'Jones, Bob' -Student 'Cruz, Cal'
+        $script:FLead = New-TL -At '2026-10-20 08:00' -IP 'Jones, Bob'
+        $script:FWing = New-TL -At '2026-10-20 08:10' -IP 'Lee, Ann'
+        $script:FOpen = New-TL -At '2026-10-20 13:00' -IP 'Lee, Ann'
+        $script:FWed = New-TL -At '2026-10-21 08:00' -IP 'Lee, Ann'
+        Add-TL $script:FB @($script:FPin, $script:FLead, $script:FWing, $script:FOpen, $script:FWed)
+        $stu = $script:Stu[0]
+        $msn = $stu.Syllabus | Where-Object { $_.Mission -eq 'FT5103' }
+        $pin = New-TestRow -ETD '2026-10-20 07:30' -Id $script:FPin.Id -Student 'Cruz, Cal'; $pin.FilledBy = 'Pin'
+        $lead = New-TestRow -ETD '2026-10-20 08:00' -Id $script:FLead.Id -Student $stu -Mission $msn -Notes 'Wingman: Baker, Ben'; $lead.FilledBy = 'Engine'
+        $wing = New-TestRow -ETD '2026-10-20 08:10' -Id $script:FWing.Id -Student 'Baker, Ben' -Mission 'FF5201' -Notes 'Wingman to Adams, Amy'; $wing.FilledBy = 'Wing'
+        $sale = New-TestRow -ETD '2026-10-20 13:00' -Id $script:FOpen.Id -Student 'For Sale'; $sale.FilledBy = 'ForSale'
+        $script:FFill = [PSCustomObject]@{ Schedule = @($pin, $lead, $wing, $sale) }
+    }
+
+    It "puts the scheduler's picks on the board, marked, with the wingman paired to its lead" {
+        Set-BoardFill -Board $script:FB -FillResult $script:FFill -Days @($script:D1) | Should -Be 2
+        "$($script:FLead.Student)|$($script:FLead.Mission)|$($script:FLead.Filled)" | Should -BeExactly 'Adams, Amy|FT5103|Engine'
+        "$($script:FWing.Student)|$($script:FWing.Mission)|$($script:FWing.Filled)" | Should -BeExactly 'Baker, Ben|FF5201|Wing'
+        $script:FWing.WingOfLineId | Should -BeExactly $script:FLead.Id
+        "$($script:FOpen.Student)|$($script:FOpen.Filled)" | Should -BeExactly '|ForSale'
+        "$($script:FPin.Student)|$($script:FPin.Filled)" | Should -BeExactly 'Cruz, Cal|' -Because 'a line hardcoded by hand stays as it is'
+        $script:FWed.Filled | Should -BeExactly ''
+    }
+
+    It 'is one undo step, and Clear-BoardFill takes only the picks off' {
+        $v = $script:FB.Version
+        [void](Set-BoardFill -Board $script:FB -FillResult $script:FFill -Days @($script:D1))
+        $script:FB.Version | Should -BeGreaterThan $v
+        Clear-BoardFill -Board $script:FB -Days @($script:D1) | Should -Be 2
+        "$($script:FLead.Student)|$($script:FLead.Filled)|$($script:FWing.Student)|$($script:FWing.WingOfLineId)|$($script:FOpen.Filled)" | Should -BeExactly '||||'
+        $script:FPin.Student | Should -BeExactly 'Cruz, Cal'
+        Clear-BoardFill -Board $script:FB -Days @($script:D1) | Should -Be 0
+        [void](Undo-Board $script:FB)
+        (Get-BoardLine $script:FB $script:FLead.Id).Filled | Should -BeExactly 'Engine' -Because 'Ctrl+Z puts the picks back'
+        [void](Undo-Board $script:FB)
+        (Get-BoardLine $script:FB $script:FLead.Id).Student | Should -BeExactly '' -Because 'and once more takes the fill off'
+    }
+
+    It 'a pick changed by hand is the user''s: it loses its mark and Clear-BoardFill leaves it' {
+        [void](Set-BoardFill -Board $script:FB -FillResult $script:FFill -Days @($script:D1))
+        Set-BoardMission -Board $script:FB -Id $script:FLead.Id -Mission 'FT5001'
+        $script:FLead.Filled | Should -BeExactly ''
+        [void](Set-BoardPin -Board $script:FB -Id $script:FOpen.Id -Student 'Cruz, Cal')
+        $script:FOpen.Filled | Should -BeExactly ''
+        [void](Clear-BoardFill -Board $script:FB -Days @($script:D1))
+        $script:FLead.Student | Should -BeExactly 'Adams, Amy'
+        $script:FWing.Student | Should -BeExactly ''
+    }
+
+    It 'the mark is saved with the board and read back' {
+        [void](Set-BoardFill -Board $script:FB -FillResult $script:FFill -Days @($script:D1))
+        $dir = Join-Path $TestDrive 'fillmark'
+        Save-BoardState -Board $script:FB -Dir $dir
+        $back = Open-BoardState -Dir $dir -Days @($script:D1, $script:D2)
+        (Get-BoardLine $back $script:FLead.Id).Filled | Should -BeExactly 'Engine'
+        (Get-BoardLine $back $script:FPin.Id).Filled | Should -BeExactly ''
+    }
+}
+
+
 Describe 'Test-BoardReadyToFill' {
     It 'an empty board says so' {
         $w = @(Test-BoardReadyToFill -Board (New-TB) -Students $script:Stu -Instructors $script:IPs)

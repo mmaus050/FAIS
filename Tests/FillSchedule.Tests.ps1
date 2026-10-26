@@ -33,7 +33,8 @@ BeforeAll {
                                                 [array]$Schedule,
                                                 [array]$Students,
                                                 $Formations,
-                                                [scriptblock]$OnProgress
+                                                [scriptblock]$OnProgress,
+                                                [switch]$NoAutoFill
                                 )
                                 if ($null -eq $Formations) { $Formations = New-TestFormations }
                                 $splat = @{
@@ -44,6 +45,7 @@ BeforeAll {
                                                 Formations  = $Formations
                                 }
                                 if ($null -ne $OnProgress) { $splat['OnProgress'] = $OnProgress }
+                                if ($NoAutoFill) { $splat['NoAutoFill'] = $true }
                                 $result = Invoke-FillSchedule @splat 3>$null 6>$null
                                 return $result
                 }
@@ -572,6 +574,50 @@ Describe 'Invoke-FillSchedule' {
                                                 (Get-TRow $r 'RT1').Notes | Should -BeExactly 'O&B Leg 1 Not Filled'
                                                 (Get-TRow $r 'RT1').Student | Should -Be 'For Sale'
                                                 $r.Stats.ForSale | Should -Be 2
+                                }
+                }
+
+                Context 'NoAutoFill (Export writes the board as it stands)' {
+
+                                It 'picks nobody for an open line: it goes out as NEED SP, and the hardcoded lines are kept' {
+                                                $students = @(
+                                                                New-TestStudent -Name 'Able, Amy' -Done @('FI3101|2026-10-15 08:00')
+                                                                New-TestStudent -Name 'Baker, Bo' -Done @('FI3101|2026-10-15 08:00')
+                                                )
+                                                $rows = @(
+                                                                New-TestRow -ETD '2026-10-20 07:30' -Instructor 'Jones, Bob' -Id 'L1' -Student 'Able, Amy'
+                                                                New-TestRow -ETD '2026-10-20 08:30' -Instructor 'Lee, Ann' -Id 'L2'
+                                                                New-TestRow -ETD '2026-10-20 11:00' -SortieType 'O&B Return' -Instructor 'Ortiz, Sam' -Id 'RT1'
+                                                )
+                                                $r = Invoke-TFill -Schedule $rows -Students $students -NoAutoFill
+
+                                                $l1 = Get-TRow $r 'L1'
+                                                Get-NameText $l1.Student | Should -BeExactly 'Able, Amy'
+                                                $l1.FilledBy | Should -Be 'Pin'
+                                                $l2 = Get-TRow $r 'L2'
+                                                $l2.Student | Should -BeExactly 'NEED SP'
+                                                $l2.Mission | Should -BeNullOrEmpty
+                                                $l2.FilledBy | Should -Be 'NeedSP'
+                                                (Get-TRow $r 'RT1').Student | Should -BeExactly 'NEED SP' -Because 'a return whose O&B is open has nobody either'
+                                                (Get-TEntry $students[1] 'FT5001').IsComplete | Should -BeFalse -Because 'Baker was not picked'
+                                                $r.Stats.NeedSP | Should -Be 2
+                                                $r.Stats.Filled | Should -Be 0
+                                }
+
+                                It 'gives a hardcoded formation lead no student wingman, only direct support' {
+                                                $students = @(
+                                                                New-TestStudent -Name 'Adams, Al' -Done $script:FormDone
+                                                                New-TestStudent -Name 'Brown, Bea' -Done $script:FormDone
+                                                )
+                                                $rows = @(
+                                                                New-TestRow -ETD '2026-10-20 08:00' -Instructor 'Jones, Bob' -Id 'F1' -Student 'Adams, Al' -Mission 'FF5201'
+                                                                New-TestRow -ETD '2026-10-20 08:10' -Instructor 'Lee, Ann' -Id 'F2'
+                                                )
+                                                $r = Invoke-TFill -Schedule $rows -Students $students -NoAutoFill
+
+                                                (Get-TRow $r 'F2').FilledBy | Should -Be 'DS'
+                                                (Get-TRow $r 'F2').Student | Should -BeExactly 'Need Form SP'
+                                                (Get-TEntry $students[1] 'FF5201').IsComplete | Should -BeFalse
                                 }
                 }
 

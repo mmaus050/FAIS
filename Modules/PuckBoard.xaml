@@ -244,8 +244,8 @@
                     <MenuItem x:Name="MenuFillDay" Header="Fill _this day" InputGestureText="Ctrl+Shift+Enter"/>
                     <MenuItem x:Name="MenuFillAll" Header="Fill _all days" InputGestureText="Ctrl+Enter"/>
                     <Separator/>
-                    <MenuItem x:Name="MenuRefill" Header="_Re-fill"/>
-                    <MenuItem x:Name="MenuBackToEdit" Header="_Back to edit (throw the fill away)"/>
+                    <MenuItem x:Name="MenuRefill" Header="_Re-fill this day (take the scheduler's picks off, then fill)"/>
+                    <MenuItem x:Name="MenuBackToEdit" Header="_Clear this day's fill (take the scheduler's picks off)"/>
                     <MenuItem x:Name="MenuExport" Header="_Export to OutputSchedule..."/>
                 </MenuItem>
                 <MenuItem Header="_View">
@@ -309,17 +309,20 @@
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                         <Button x:Name="CancelButton" Content="Close" Style="{StaticResource BarButton}" Padding="12,6"/>
-                        <Button x:Name="BackToEditButton" Content="Back to edit" Style="{StaticResource BarButton}" Padding="12,6" Visibility="Collapsed"/>
-                        <Button x:Name="RefillButton" Content="Re-fill" Style="{StaticResource BarButton}" Padding="12,6" Visibility="Collapsed"/>
-                        <Button x:Name="ExportButton" Content="Export to OutputSchedule" Style="{StaticResource BarButton}" Visibility="Collapsed"
-                                Background="#1D4ED8" Foreground="White" FontWeight="Bold" Padding="16,6"/>
+                        <!-- Clear fill / Re-fill only show when the day on screen has students the scheduler put on -->
+                        <Button x:Name="BackToEditButton" Content="Clear fill" Style="{StaticResource BarButton}" Padding="12,6" Visibility="Collapsed"
+                                ToolTip="Take the scheduler's picks off the day on screen. Students you hardcoded (or moved) stay."/>
+                        <Button x:Name="RefillButton" Content="Re-fill" Style="{StaticResource BarButton}" Padding="12,6" Visibility="Collapsed"
+                                ToolTip="Take the scheduler's picks off the day on screen and fill it again."/>
                         <!-- Fill all days only shows when the board has more than one day -->
                         <Button x:Name="FillAllButton" Content="Fill all days" Style="{StaticResource BarButton}"
                                 Background="White" Foreground="#15803D" BorderBrush="#16A34A" FontWeight="Bold" Padding="16,6"
-                                ToolTip="Fill the open lines on every day on the board, then review and export them all (Ctrl+Enter)."/>
+                                ToolTip="Fill the open lines on every day on the board (Ctrl+Enter). The picks go on the board: move or change them, then Export."/>
                         <Button x:Name="FillDayButton" Content="Fill this day" Style="{StaticResource BarButton}"
                                 Background="#16A34A" Foreground="White" FontWeight="Bold" Padding="16,6"
-                                ToolTip="Fill the open lines on the day you are looking at, then review and export just that day. Days already exported stay as they are (Ctrl+Shift+Enter)."/>
+                                ToolTip="Fill the open lines on the day you are looking at (Ctrl+Shift+Enter). The picks go on the board: move or change them, then Export."/>
+                        <Button x:Name="ExportButton" Content="Export to OutputSchedule" Style="{StaticResource BarButton}"
+                                Background="#1D4ED8" Foreground="White" FontWeight="Bold" Padding="16,6"/>
                     </StackPanel>
                     <StackPanel VerticalAlignment="Center">
                         <TextBlock x:Name="StatusText" Text="Ready" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
@@ -419,6 +422,8 @@
                                     <DockPanel DockPanel.Dock="Top">
                                         <Button x:Name="DetailsPlaceButton" DockPanel.Dock="Right" Content="Put on this line" Padding="8,1" Cursor="Hand" IsEnabled="False"
                                                 ToolTip="Hardcode the student picked in the list on the selected line (or double-click them)"/>
+                                        <Button x:Name="DetailsOptionsButton" DockPanel.Dock="Right" Content="See options" Padding="8,1" Margin="0,0,8,0" Cursor="Hand" IsEnabled="False"
+                                                FontWeight="SemiBold" ToolTip="Check every student against this line's hard and soft rules and rank them"/>
                                         <CheckBox x:Name="DetailsHideHardCheck" DockPanel.Dock="Right" Content="Hide rule breaks" VerticalAlignment="Center" Margin="0,0,8,0"
                                                   ToolTip="Leave out the students who break a hard rule on this line"/>
                                         <TextBlock x:Name="DetailsListTitle" Text="Every student on this line" FontWeight="SemiBold" VerticalAlignment="Center"/>
