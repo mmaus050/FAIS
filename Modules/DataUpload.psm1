@@ -397,10 +397,13 @@ function Format-TabEtd {
 
 # ==========================================
 # Writes student values into the MasterData Students sheet, matched by SPName (the column
-# headed SPName, else B): SimDebt into the column headed SimDebt (else P), UnsatSim /
-# UnsatFlight into the columns with those headings.
+# headed SPName, else B): SimDebt into the column headed SimDebt (else P), DiscontinuityScore
+# into the column headed DiscontinuityScore (added after the last heading when there is none),
+# UnsatSim / UnsatFlight into the columns with those headings.
 # Only the cells passed in change. Throws when MasterData can't be written.
 #   -SimDebtDeltaByName: name -> amount added to the SimDebt already there (Update Syllabi)
+#   -DiscontinuityDeltaByName: the same for DiscontinuityScore. A blank cell stays blank: FAIS
+#    counts it from the syllabus at the next start
 #   -FlagsByName: name -> @{ UnsatSim = $true/$false; UnsatFlight = $true/$false; OnHold = $true/$false } (any of the keys)
 # ==========================================
 function Update-MasterDataStudents {
@@ -408,11 +411,14 @@ function Update-MasterDataStudents {
                                 [Parameter(Mandatory)] [string]$MasterDataPath,
                                 [hashtable]$SimDebtByName = @{},
                                 [hashtable]$SimDebtDeltaByName = @{},
+                                [hashtable]$DiscontinuityByName = @{},
+                                [hashtable]$DiscontinuityDeltaByName = @{},
                                 [hashtable]$FlagsByName = @{}
                 )
 
                 if (-not (Test-Path -LiteralPath $MasterDataPath)) { throw "MasterData.xlsx not found at: $MasterDataPath" }
-                if ($SimDebtByName.Count -eq 0 -and $SimDebtDeltaByName.Count -eq 0 -and $FlagsByName.Count -eq 0) { return }
+                if ($SimDebtByName.Count -eq 0 -and $SimDebtDeltaByName.Count -eq 0 -and $DiscontinuityByName.Count -eq 0 -and
+                                $DiscontinuityDeltaByName.Count -eq 0 -and $FlagsByName.Count -eq 0) { return }
 
                 $package = $null
                 try {
@@ -424,6 +430,7 @@ function Update-MasterDataStudents {
                                 # when those headings are missing
                                 $nameCol = 2
                                 $debtCol = 16
+                                $discCol = 0
                                 $flagCol = @{}
                                 $lastCol = if ($null -ne $ws.Dimension) { $ws.Dimension.End.Column } else { 0 }
                                 $seenName = $false; $seenDebt = $false
@@ -432,6 +439,11 @@ function Update-MasterDataStudents {
                                                 if ($heading -in @('UnsatSim', 'UnsatFlight', 'OnHold') -and -not $flagCol.ContainsKey($heading)) { $flagCol[$heading] = $c }
                                                 elseif ($heading -ieq 'SPName' -and -not $seenName) { $nameCol = $c; $seenName = $true }
                                                 elseif ($heading -ieq 'SimDebt' -and -not $seenDebt) { $debtCol = $c; $seenDebt = $true }
+                                                elseif ($heading -ieq 'DiscontinuityScore' -and $discCol -eq 0) { $discCol = $c }
+                                }
+                                if ($discCol -eq 0 -and $DiscontinuityByName.Count -gt 0) {
+                                                $discCol = [math]::Max($lastCol, $debtCol) + 1
+                                                $ws.Cells[1, $discCol].Value = 'DiscontinuityScore'
                                 }
                                 foreach ($flags in $FlagsByName.Values) {
                                                 foreach ($key in $flags.Keys) {
@@ -458,6 +470,19 @@ function Update-MasterDataStudents {
                                                                 $ws.Cells[$row, $debtCol].Value = [math]::Round($current + [double]$SimDebtDeltaByName[$studentName], 2)
                                                                 $found[$studentName] = $true
                                                 }
+                                                if ($DiscontinuityByName.ContainsKey($studentName)) {
+                                                                $ws.Cells[$row, $discCol].Value = [double]$DiscontinuityByName[$studentName]
+                                                                $found[$studentName] = $true
+                                                }
+                                                elseif ($DiscontinuityDeltaByName.ContainsKey($studentName)) {
+                                                                $old = if ($discCol -gt 0) { $ws.Cells[$row, $discCol].Value } else { $null }
+                                                                if ($null -ne $old -and ([string]$old).Trim() -ne '') {
+                                                                                $current = 0.0
+                                                                                try { $current = [double]$old } catch { [void][double]::TryParse([string]$old, [ref]$current) }
+                                                                                $ws.Cells[$row, $discCol].Value = [math]::Round($current + [double]$DiscontinuityDeltaByName[$studentName], 2)
+                                                                }
+                                                                $found[$studentName] = $true
+                                                }
                                                 if ($FlagsByName.ContainsKey($studentName)) {
                                                                 $flags = $FlagsByName[$studentName]
                                                                 foreach ($key in $flags.Keys) { $ws.Cells[$row, $flagCol[$key]].Value = [bool]$flags[$key] }
@@ -469,12 +494,14 @@ function Update-MasterDataStudents {
                                 Close-ExcelPackage -ExcelPackage $package
                                 $package = $null
 
-                                $missing = @(@($SimDebtByName.Keys) + @($SimDebtDeltaByName.Keys) + @($FlagsByName.Keys) | Sort-Object -Unique | Where-Object { -not $found.ContainsKey($_) })
+                                $missing = @(@($SimDebtByName.Keys) + @($SimDebtDeltaByName.Keys) + @($DiscontinuityByName.Keys) + @($DiscontinuityDeltaByName.Keys) + @($FlagsByName.Keys) |
+                                                Sort-Object -Unique | Where-Object { -not $found.ContainsKey($_) })
                                 if ($missing.Count -gt 0) {
                                                 Write-Warning "Not found in the SPName column of the MasterData Students sheet (above the first blank name), so nothing was written for: $($missing -join '; ')"
                                 }
                                 $debtNames = @(@($SimDebtByName.Keys) + @($SimDebtDeltaByName.Keys) | Sort-Object -Unique | Where-Object { $found.ContainsKey($_) })
-                                Write-Host ("MasterData updated: SimDebt for {0} student(s), unsat / HOLD flags for {1}." -f $debtNames.Count, @($FlagsByName.Keys | Where-Object { $found.ContainsKey($_) }).Count) -ForegroundColor Green
+                                $discNames = @(@($DiscontinuityByName.Keys) + @($DiscontinuityDeltaByName.Keys) | Sort-Object -Unique | Where-Object { $found.ContainsKey($_) })
+                                Write-Host ("MasterData updated: SimDebt for {0} student(s), DiscontinuityScore for {1}, unsat / HOLD flags for {2}." -f $debtNames.Count, $discNames.Count, @($FlagsByName.Keys | Where-Object { $found.ContainsKey($_) }).Count) -ForegroundColor Green
                 }
                 catch {
                                 if ($null -ne $package) { Close-ExcelPackage -ExcelPackage $package -NoSave }
@@ -902,7 +929,7 @@ function Get-OutputSetting {
 }
 
 # Writes everything a run produces, or nothing: MasterSchedule, each student's syllabus
-# tab, SimDebt, the unsat flags that changed and the String Tracker to MasterData, ATIS, then the optional Teams
+# tab, SimDebt, DiscontinuityScore, the unsat flags that changed and the String Tracker to MasterData, ATIS, then the optional Teams
 # copy. If any write fails, all of them are put back as they were.
 # Only the days that were filled (-Days; default: every day in the fill) are written:
 # MasterSchedule keeps the other days already exported (from today on, plus KeepPastDays),
@@ -928,8 +955,12 @@ function Export-FaisOutput {
                 $rows = @($allRows | Where-Object { $Days -contains (Get-ExportRowDay $_) })
 
                 $debts = @{}
+                $discs = @{}
                 foreach ($s in $FillResult.Students) {
-                                if (-not [string]::IsNullOrWhiteSpace([string]$s.Name)) { $debts[([string]$s.Name).Trim()] = [double]$s.SimDebt }
+                                if ([string]::IsNullOrWhiteSpace([string]$s.Name)) { continue }
+                                $debts[([string]$s.Name).Trim()] = [double]$s.SimDebt
+                                $disc = Get-OptionalProperty $s 'DiscontinuityScore' $null
+                                if ($null -ne $disc -and [string]$disc -ne '') { $discs[([string]$s.Name).Trim()] = [double]$disc }
                 }
                 $flags = Get-UnsatFlagUpdates -Students $FillResult.Students
                 $absences = @(Get-PendingStudentAbsences -Students $FillResult.Students)
@@ -972,7 +1003,7 @@ function Export-FaisOutput {
                                                                 Export-FormattedMasterSchedule -ScheduleData $merged -FilePath $OutputPath -WorksheetName 'MasterSchedule'
                                                                 Export-StudentSyllabusTabs -Students $FillResult.Students -FilePath $OutputPath
                                                                 Set-MasterScheduleFirst -FilePath $OutputPath
-                                                                Update-MasterDataStudents -MasterDataPath $MasterDataPath -SimDebtByName $debts -FlagsByName $flags
+                                                                Update-MasterDataStudents -MasterDataPath $MasterDataPath -SimDebtByName $debts -DiscontinuityByName $discs -FlagsByName $flags
                                                                 Update-StringTracker -MasterDataPath $MasterDataPath -Students $FillResult.Students -Instructors $Instructors
                                                                 if ($absences.Count -gt 0) { Add-MasterDataAbsences -MasterDataPath $MasterDataPath -Absences $absences }
                                                                 if ($writeAtis) { Export-AtisWorkbook -ScheduleData $rows -FilePath $AtisPath }
