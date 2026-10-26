@@ -36,7 +36,7 @@
 
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
             <Button x:Name="AddButton" Content="Add absence" Padding="18,4" Margin="3,0" FontWeight="Bold" IsDefault="True"/>
-            <Button x:Name="CancelButton" Content="Cancel" Padding="10,3" Margin="3,0" IsCancel="True"/>
+            <Button x:Name="CancelButton" Content="Cancel" Padding="10,4" Margin="3,0" IsCancel="True"/>
         </StackPanel>
 
         <!-- Right: every student -->
@@ -44,7 +44,7 @@
                 Padding="6" Tag="AbsencePool" AllowDrop="True">
             <DockPanel>
                 <TextBlock DockPanel.Dock="Top" Text="STUDENTS" FontWeight="Bold" Foreground="#14532D" Margin="2,0,0,4"/>
-                <TextBox DockPanel.Dock="Top" x:Name="SearchBox" Margin="0,0,0,4" Padding="3" ToolTip="Filter students by name"/>
+                <TextBox DockPanel.Dock="Top" x:Name="SearchBox" Height="26" Margin="0,0,0,4" Padding="3,0" VerticalContentAlignment="Center" ToolTip="Filter students by name"/>
                 <TextBlock DockPanel.Dock="Top" FontSize="10" Foreground="#64748B" TextWrapping="Wrap" Margin="2,0,0,6"
                            Text="Drag a student into the box, or click them and then click the box. Double-click adds them straight away."/>
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -75,9 +75,9 @@
                 </Border>
                 <DockPanel Margin="0,4,0,0">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                        <Button x:Name="PasteButton" Content="Paste names" Padding="10,2" Margin="3,0"
+                        <Button x:Name="PasteButton" Content="Paste names" Padding="10,4" Margin="3,0"
                                 ToolTip="Add the students named in what you copied: one name per line or cell (Ctrl+V does the same)"/>
-                        <Button x:Name="ClearButton" Content="Clear" Padding="10,2" Margin="3,0,0,0" ToolTip="Take every student out of the box"/>
+                        <Button x:Name="ClearButton" Content="Clear" Padding="10,4" Margin="3,0,0,0" ToolTip="Take every student out of the box"/>
                     </StackPanel>
                     <TextBlock x:Name="HoldText" TextWrapping="Wrap" Foreground="#1E3A8A" FontWeight="SemiBold" VerticalAlignment="Center"/>
                 </DockPanel>
@@ -96,27 +96,27 @@
                     </Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0" Text="Day:" VerticalAlignment="Center"/>
-                    <DatePicker x:Name="DayPicker" Grid.Row="0" Grid.Column="1" Width="150" HorizontalAlignment="Left" Margin="0,3"
+                    <DatePicker x:Name="DayPicker" Grid.Row="0" Grid.Column="1" Width="150" Height="26" HorizontalAlignment="Left" VerticalContentAlignment="Center" Margin="0,3"
                                 ToolTip="The day the absence starts"/>
 
                     <TextBlock Grid.Row="1" Text="From:" VerticalAlignment="Center"/>
                     <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="0,3">
-                        <TextBox x:Name="FromBox" Width="90" FontFamily="Consolas" FontSize="13" Padding="3,2" MaxLength="12"
+                        <TextBox x:Name="FromBox" Width="90" Height="26" FontFamily="Consolas" FontSize="13" Padding="3,0" VerticalContentAlignment="Center" MaxLength="12"
                                  ToolTip="24-hour time (0730, 1530) or 12-hour time with AM or PM (0730 AM, 0330 PM)"/>
                         <TextBlock Text="e.g. 0730, 1530 or 0330 PM" Foreground="#94A3B8" VerticalAlignment="Center" Margin="8,0,0,0"/>
                     </StackPanel>
 
                     <TextBlock Grid.Row="2" Text="To:" VerticalAlignment="Center"/>
                     <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="0,3">
-                        <TextBox x:Name="ToBox" Width="90" FontFamily="Consolas" FontSize="13" Padding="3,2" MaxLength="12"
+                        <TextBox x:Name="ToBox" Width="90" Height="26" FontFamily="Consolas" FontSize="13" Padding="3,0" VerticalContentAlignment="Center" MaxLength="12"
                                  ToolTip="24-hour time (1130, 1700) or 12-hour time with AM or PM (1130 AM, 0500 PM)"/>
                         <TextBlock Text="on" VerticalAlignment="Center" Margin="10,0,6,0"/>
-                        <DatePicker x:Name="EndDayPicker" Width="150"
+                        <DatePicker x:Name="EndDayPicker" Width="150" Height="26" VerticalContentAlignment="Center"
                                     ToolTip="The same day as the start, unless the absence runs past midnight or over several days"/>
                     </StackPanel>
 
                     <TextBlock Grid.Row="3" Text="Reason:" VerticalAlignment="Center"/>
-                    <TextBox x:Name="ReasonBox" Grid.Row="3" Grid.Column="1" Padding="3,2" Margin="0,3" MaxLength="120"
+                    <TextBox x:Name="ReasonBox" Grid.Row="3" Grid.Column="1" Height="26" Padding="3,0" VerticalContentAlignment="Center" Margin="0,3" MaxLength="120"
                              ToolTip="Optional, e.g. Dentist, Leave, Medical. It shows on the board and in the rule flag."/>
                 </Grid>
 
