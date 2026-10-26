@@ -321,16 +321,17 @@ Describe 'Get-PlacementAssessment: auto mission and explicit -MissionName' {
 
                 It 'AutoMission is the best-scoring passing event, not the lowest syllabus ID' {
                                 # FF5201 (ID 7) passes with a DS note; the checkride FT5190 (ID 10) scores +50 with a Check IP
+                                # (FF starts its own string, and a checkride is never part of one)
                                 $a = Get-Assess $board 'C1' 'Chk, Cal' $chkData
                                 (Get-Detail $a 'FF5201').Passed | Should -BeTrue
                                 (Get-Detail $a 'FT5190').Passed | Should -BeTrue
-                                (Get-Detail $a 'FF5201').Score | Should -Be -1
-                                (Get-Detail $a 'FT5190').Score | Should -Be 49
+                                (Get-Detail $a 'FF5201').Score | Should -Be 4
+                                (Get-Detail $a 'FT5190').Score | Should -Be 54
                                 Get-Points (Get-Detail $a 'FT5190') 'Checkride Priority' | Should -Be 50
                                 $a.AutoMission | Should -Be 'FT5190'
                                 $a.Mission | Should -Be 'FT5190'
-                                $a.BestScore | Should -Be 49
-                                $a.Score | Should -Be 49
+                                $a.BestScore | Should -Be 54
+                                $a.Score | Should -Be 54
                                 (@($a.EligibleEvents) -join ',') | Should -Be 'FF5201,FT5190'
                 }
 
@@ -465,10 +466,10 @@ Describe "Get-PlacementAssessment: the student's other pins" {
                                 (Get-Viol $a 'TURN_TIME').Message | Should -Be 'Turn time 1.5 hr < 3.25 hr minimum (vs 0730 FT5001)'
                                 (@($a.EligibleEvents) -join ',') | Should -Be 'FT5102'
                                 $a.AutoMission | Should -Be 'FT5102'
-                                # the earlier FT5001 added sim debt and a Lee string
+                                # the earlier FT5001 added sim debt, and one ride with Lee is no string to break
                                 $d = Get-Detail $a 'FT5102'
                                 Get-Points $d 'Sim Debt (flight)' | Should -Be -1
-                                Get-Points $d 'Break String' | Should -Be -5
+                                Get-Points $d 'Break String' | Should -BeNullOrEmpty
                 }
 
                 It 'uses the explicit mission of an earlier pin' {

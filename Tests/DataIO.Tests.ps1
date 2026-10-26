@@ -127,6 +127,7 @@ Describe 'Get-StringCounts' {
                                 @{ Case = 'AAAAAAA counts as a 5-string'; Rides = @{ FT = 'AAAAAAA' }; NC = ''; Expected = @(1, 0, 0, 0, 0, 1) }
                                 @{ Case = 'ASSA, non-counter back to back'; Rides = @{ FT = 'ASSA' }; NC = 'S'; Expected = @(0, 0, 0, 1, 2, 2) }
                                 @{ Case = 'ASAS, non-counter zippered'; Rides = @{ FT = 'ASAS' }; NC = 'S'; Expected = @(0, 0, 0, 1, 0, 1) }
+                                @{ Case = 'SAA, non-counter on the first ride'; Rides = @{ FT = 'SAA' }; NC = 'S'; Expected = @(0, 0, 0, 1, 0, 1) }
                                 @{ Case = 'categories counted apart'; Rides = @{ FT = 'AAA'; AA = 'AAA' }; NC = ''; Expected = @(0, 0, 2, 0, 0, 1) }
                                 @{ Case = 'nothing flown'; Rides = @{}; NC = ''; Expected = @(0, 0, 0, 0, 0, 0) }
                 ) {

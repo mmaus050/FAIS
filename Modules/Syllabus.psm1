@@ -9,6 +9,8 @@
 # Add-StudentReservation / Remove-StudentReservation / Get-ReservedMissionNames
 # Get-StudentTimeline
 # Measure-String / Get-StringLength / Get-StringLengths / Get-StringCounts (String Tracker)
+# Get-MissionCategory / Get-MissionPhase / Get-StringFlights / Get-StudentNonCounters
+# Get-StringOutlook / Get-StringPlacement (string and counter rules for the scheduler)
 
 
 # =================================================================================
@@ -528,15 +530,21 @@ function Get-StudentTimeline {
 
 
 # =================================================================================
-#  STRINGS AND COUNTERS (String Tracker)
+#  STRINGS AND COUNTERS (String Tracker, and the scheduler's string rules)
+#    AETCI instructor continuity: an IP who flies a sortie with a student is a counter and
+#    that sortie is part of a string. Three sorties in a row with one counter is the goal;
+#    a 2 or 4-sortie string is acceptable (to prevent BITs).
 #    - Each category (FT, FF, AA) is its own sequence, in mission order: FT5001, FT5002, ...
 #      even when rides from another category were flown in between
-#    - Non-counters are skipped, any number in a row, unless they flew the student two
-#      rides in a row (strictly back to back): then they are a counter for that student
-#    - One different counter between two of an IP's rides does not break that IP's string;
-#      two different counters in a row end it
+#    - Non-counters (supervisors) are skipped, any number in a row, unless they flew the student
+#      two rides in a row (strictly back to back): then they are a counter for that student
+#    - One different counter between two of an IP's rides does not break that IP's string
+#      (A,A,B,A is a 3-string with A); two different counters in a row end it
 #    - Sims, solos and check rides (IsCheck) are left out entirely
+#    - Counter limits per phase: 6 in Fundamental (FT, FF), 3 in Airmanship (AA)
 # =================================================================================
+
+$script:CounterLimits = @{ Fundamental = 6; Airmanship = 3 }
 
 # Walks back one ride at a time; each step is a recursive call.
 # $History is newest first: $History[0] is IP1 (current ride), $History[1] is IP2, ...
@@ -564,7 +572,7 @@ function Get-StringLength {
                 param ([string[]]$Sorties, [string[]]$NonCounters = @())
 
                 if ($Sorties.Count -eq 0) { return 0 }
-                $History = $Sorties[($Sorties.Count - 1)..0]
+                [string[]]$History = $Sorties[($Sorties.Count - 1)..0]  # typed, so one ride stays an array
                 if ($History[0] -in $NonCounters) { return 0 }  # a non-counter's ride is not part of a string
                 return 1 + (Measure-String $History $NonCounters 1 $false)
 }
@@ -587,30 +595,76 @@ function Get-StringLengths {
                 }
 }
 
-# A student's strings and counters from their syllabus and the Instructors list.
-# Returns @(5-strings, 4-strings, 3-strings, 2-strings, 1-strings, counters). Strings longer than 5 count as 5-strings.
-# Counters are the unique IPs who are not non-counters.
-function Get-StringCounts {
-                param ([array]$Syllabus, [array]$Instructors = @())
+# 'FT5103' -> Category FT, Number 5103 (no number sorts last)
+function Get-MissionCategory {
+                param ([string]$Mission)
 
-                # Completed rides with an IP in the cockpit, by category (FT5001 -> FT, 5001) and in mission order inside each
-                $Flights = @(
-                                $Syllabus | Where-Object {
-                                                (Test-MissionComplete $_) -and
-                                                -not (ConvertTo-FaisBool $_.IsCheck) -and
-                                                [string]$_.Type -notlike '*Solo*' -and
-                                                (Get-MissionKind -Mission $_ -InstructorName (Get-NameText $_.Instructor)) -eq 'Flight' -and
-                                                -not [string]::IsNullOrWhiteSpace((Get-NameText $_.Instructor))
-                                } | ForEach-Object {
-                                                $null = ([string]$_.Mission).Trim() -match '^(\D*)(\d*)'
-                                                [PSCustomObject]@{
-                                                                Category = $Matches[1].ToUpper()
-                                                                Number   = if ($Matches[2] -ne '') { [double]$Matches[2] } else { [double]::MaxValue }
-                                                                ID       = Get-SyllabusSortKey $_
-                                                                IP       = Get-BaseName (Get-NameText $_.Instructor)
-                                                }
-                                } | Sort-Object Category, Number, ID
-                )
+                $null = $Mission.Trim() -match '^(\D*)(\d*)'
+                return [PSCustomObject]@{
+                                Category = $Matches[1].ToUpper()
+                                Number   = if ($Matches[2] -ne '') { [double]$Matches[2] } else { [double]::MaxValue }
+                }
+}
+
+# The counter-limit phase of a category: Airmanship for AA, Fundamental for everything else (FT, FF)
+function Get-MissionPhase {
+                param ([string]$Category)
+
+                if ($Category -ieq 'AA') { return 'Airmanship' }
+                return 'Fundamental'
+}
+
+# A ride that can be part of a string: a flight with an IP in the cockpit, not a sim, solo or check ride
+function Test-StringRide {
+                param ($Mission, [string]$Instructor)
+
+                if ($null -eq $Mission) { return $false }
+                $ipName = Get-NameText $Instructor
+                return ((-not (ConvertTo-FaisBool $Mission.IsCheck)) -and
+                                [string]$Mission.Type -notlike '*Solo*' -and
+                                (Get-MissionKind -Mission $Mission -InstructorName $ipName) -eq 'Flight' -and
+                                -not [string]::IsNullOrWhiteSpace($ipName))
+}
+
+function New-StringFlight {
+                param ($Mission, [string]$Instructor)
+
+                $cat = Get-MissionCategory ([string]$Mission.Mission)
+                return [PSCustomObject]@{
+                                Mission  = ([string]$Mission.Mission).Trim()
+                                Category = $cat.Category
+                                Number   = $cat.Number
+                                ID       = Get-SyllabusSortKey $Mission
+                                Phase    = Get-MissionPhase $cat.Category
+                                IP       = Get-BaseName (Get-NameText $Instructor)
+                }
+}
+
+# A student's completed string rides (Test-StringRide), by category and in mission order inside each.
+# -Before keeps only rides with an ETD before then.
+function Get-StringFlights {
+                param ([array]$Syllabus, $Before = $null)
+
+                # A loop, not a pipeline: the rules call this for every student on every line
+                $rides = New-Object System.Collections.Generic.List[object]
+                foreach ($m in $Syllabus) {
+                                if (-not (Test-MissionComplete $m)) { continue }
+                                $ipName = Get-NameText $m.Instructor
+                                if (-not (Test-StringRide $m $ipName)) { continue }
+                                if ($null -ne $Before) {
+                                                $etd = Parse-ETD $m.ETD
+                                                if ($null -eq $etd -or $etd -ge $Before) { continue }
+                                }
+                                $rides.Add((New-StringFlight $m $ipName))
+                }
+                return @($rides | Sort-Object Category, Number, ID)
+}
+
+# A student's non-counters: the Instructors sheet's non-counters (a blank IsCounter counts as a
+# counter) and -Extra, except any who flew the student two rides in a row in a category.
+# $Flights: Get-StringFlights (in order)
+function Get-StudentNonCounters {
+                param ([array]$Flights = @(), [array]$Instructors = @(), [string[]]$Extra = @())
 
                 # IPs who flew the student two rides in a row in a category (strictly back to back, not zippered)
                 $BackToBack = @(
@@ -619,12 +673,18 @@ function Get-StringCounts {
                                 }
                 )
 
-                # Non-counters from the Instructors sheet (a blank IsCounter counts as a counter), except back-to-back ones
-                $NonCounters = @(
-                                $Instructors | Where-Object { -not (ConvertTo-FaisBool $_.IsCounter -Default $true) } |
-                                                ForEach-Object { Get-BaseName (Get-NameText $_.Name) } |
-                                                Where-Object { $_ -notin $BackToBack }
-                )
+                $listed = @($Instructors | Where-Object { -not (ConvertTo-FaisBool $_.IsCounter -Default $true) } | ForEach-Object { Get-BaseName (Get-NameText $_.Name) })
+                return @(@($listed) + @($Extra) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notin $BackToBack } | Sort-Object -Unique)
+}
+
+# A student's strings and counters from their syllabus and the Instructors list.
+# Returns @(5-strings, 4-strings, 3-strings, 2-strings, 1-strings, counters). Strings longer than 5 count as 5-strings.
+# Counters are the unique IPs who are not non-counters.
+function Get-StringCounts {
+                param ([array]$Syllabus, [array]$Instructors = @())
+
+                $Flights = @(Get-StringFlights -Syllabus $Syllabus)
+                $NonCounters = @(Get-StudentNonCounters -Flights $Flights -Instructors $Instructors)
 
                 # Strings, counted inside each category
                 $Strings = @{ 5 = 0; 4 = 0; 3 = 0; 2 = 0; 1 = 0 }
@@ -637,4 +697,110 @@ function Get-StringCounts {
                 $Counters = @($Flights | ForEach-Object { $_.IP } | Where-Object { $_ -notin $NonCounters } | Sort-Object -Unique).Count
 
                 return @($Strings[5], $Strings[4], $Strings[3], $Strings[2], $Strings[1], $Counters)
+}
+
+# What one more ride with counter $IP does to a category's strings. $Sorties is the category's IP
+# names oldest to newest, before this ride.
+#   Length       the IP's string with this ride (1: a new string)
+#   Zipper       the string goes on over one different counter (A,A,B + A)
+#   LastIP       the counter who flew the ride before (the one zippered over)
+#   Alternating  that counter's own ride was a zipper too (A,B,A + B): the pattern the AETCI rules out
+#   Opening      the string began the category (a 3-string should normally begin each category)
+#   Broken       strings this ride ends (two different counters in a row): { IP, Length }
+#   Bridged      strings this ride sits in the middle of, still alive: { IP, Length }
+function Get-StringOutlook {
+                param ([string[]]$Sorties = @(), [string]$IP, [string[]]$NonCounters = @())
+
+                [string[]]$after = @(@($Sorties) + $IP)
+                $length = Get-StringLength $after $NonCounters
+
+                # Positions of the counters' rides (non-counters are skipped, as they never break a string)
+                $counterAt = @(for ($i = 0; $i -lt $Sorties.Count; $i++) { if ($Sorties[$i] -notin $NonCounters) { $i } })
+                $lastIP = if ($counterAt.Count -gt 0) { $Sorties[$counterAt[$counterAt.Count - 1]] } else { '' }
+
+                $zipper = ($length -ge 2 -and $lastIP -ne '' -and $lastIP -ne $IP)
+                $alternating = $false
+                if ($zipper -and $counterAt.Count -ge 2) {
+                                $j = $counterAt[$counterAt.Count - 1]
+                                $alternating = ($Sorties[$counterAt[$counterAt.Count - 2]] -ne $lastIP) -and ((Get-StringLength $Sorties[0..$j] $NonCounters) -ge 2)
+                }
+
+                # Every one of this IP's rides is in this string, and the first of them opened the category
+                $ipRides = @($counterAt | Where-Object { $Sorties[$_] -eq $IP }).Count
+                $opening = ($counterAt.Count -eq 0) -or ($Sorties[$counterAt[0]] -eq $IP -and $ipRides -eq ($length - 1))
+
+                $broken = New-Object System.Collections.Generic.List[object]
+                $bridged = New-Object System.Collections.Generic.List[object]
+                foreach ($other in @($counterAt | ForEach-Object { $Sorties[$_] } | Sort-Object -Unique)) {
+                                if ($other -eq $IP) { continue }
+                                # Still alive before this ride: one more ride with them would add to their string
+                                if ((Get-StringLength ([string[]]@(@($Sorties) + $other)) $NonCounters) -lt 2) { continue }
+                                $lastAt = @($counterAt | Where-Object { $Sorties[$_] -eq $other })[-1]
+                                $entry = [PSCustomObject]@{ IP = $other; Length = (Get-StringLength $Sorties[0..$lastAt] $NonCounters) }
+                                if ((Get-StringLength ([string[]]@(@($after) + $other)) $NonCounters) -lt 2) { $broken.Add($entry) } else { $bridged.Add($entry) }
+                }
+
+                return [PSCustomObject]@{
+                                Length      = $length
+                                Zipper      = $zipper
+                                LastIP      = $lastIP
+                                Alternating = $alternating
+                                Opening     = $opening
+                                Broken      = $broken.ToArray()
+                                Bridged     = $bridged.ToArray()
+                }
+}
+
+# What a student flying $Mission with $Instructor does to their strings and counters (scheduler
+# rules). $IsCounter is the IP's IsCounter on the Instructors sheet. Only rides before -Before count.
+# -Flights: Get-StringFlights for the student, when the caller already has them.
+# $null when the ride is never part of a string (a sim, solo or check ride, or no IP). Otherwise:
+#   Category, Phase, IP     FF5003 with 'Jones, Bob [Capt]' -> FF, Fundamental, Jones, Bob
+#   IsCounter               False for a non-counter who did not fly the category's ride before:
+#                           they break no strings and are not a counter
+#   TwoInRow                a non-counter who flew the ride before too, so now counts
+#   Outlook                 Get-StringOutlook for this ride (counters only)
+#   NewCounter              the IP is not yet one of the phase's counters
+#   CounterCount, Limit     the phase's counters with this ride, and the phase's limit
+function Get-StringPlacement {
+                param (
+                                $Student,
+                                $Mission,
+                                [string]$Instructor,
+                                [bool]$IsCounter = $true,
+                                $Before = $null,
+                                [array]$Instructors = @(),
+                                [array]$Flights
+                )
+
+                if (-not (Test-StringRide $Mission $Instructor)) { return $null }
+                $ride = New-StringFlight $Mission $Instructor
+                if ($null -eq $Flights) { $Flights = @(Get-StringFlights -Syllabus @($Student.Syllabus) -Before $Before) }
+                $past = @($Flights | Where-Object { $_.Mission -ine $ride.Mission })
+
+                # Non-counters with this ride in place, so a non-counter flying the ride before counts now
+                $extra = if ($IsCounter) { @() } else { @($ride.IP) }
+                $listed = @(Get-StudentNonCounters -Instructors $Instructors -Extra $extra)
+                $nonCounters = [string[]]@(Get-StudentNonCounters -Flights @(@($past) + $ride | Sort-Object Category, Number, ID) -Instructors $Instructors -Extra $extra)
+                $counts = $ride.IP -notin $nonCounters
+
+                $counters = @($past | Where-Object { $_.Phase -eq $ride.Phase -and $_.IP -notin $nonCounters } | ForEach-Object { $_.IP } | Sort-Object -Unique)
+                $newCounter = $counts -and $ride.IP -notin $counters
+                $outlook = $null
+                if ($counts) {
+                                $sorties = [string[]]@($past | Where-Object { $_.Category -eq $ride.Category } | ForEach-Object { $_.IP })
+                                $outlook = Get-StringOutlook -Sorties $sorties -IP $ride.IP -NonCounters $nonCounters
+                }
+
+                return [PSCustomObject]@{
+                                Category     = $ride.Category
+                                Phase        = $ride.Phase
+                                IP           = $ride.IP
+                                IsCounter    = $counts
+                                TwoInRow     = ($counts -and $ride.IP -in $listed)
+                                Outlook      = $outlook
+                                NewCounter   = $newCounter
+                                CounterCount = ($counters.Count + [int]$newCounter)
+                                Limit        = $script:CounterLimits[$ride.Phase]
+                }
 }

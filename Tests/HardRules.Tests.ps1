@@ -1119,6 +1119,71 @@ Describe 'Test-HardRules' {
                                 }
                 }
 
+                Context 'counter limits' {
+                                BeforeAll {
+                                                # A student who flew one ride per IP in $Category (AA5001, AA5002, ...), one a day from
+                                                # 1 Feb, with the next ride still to fly
+                                                function New-CounterStudent {
+                                                                param ([string]$Category, [string[]]$IPs)
+                                                                $s = New-TestStudent -Name 'C'
+                                                                $first = [datetime]'2026-02-01 08:00'
+                                                                $s.Syllabus = @(for ($i = 0; $i -le $IPs.Count; $i++) {
+                                                                                $done = $i -lt $IPs.Count
+                                                                                [PSCustomObject]@{
+                                                                                                SyllabusID = $i + 1; Mission = '{0}{1}' -f $Category, (5001 + $i); Prereqs = '0'; Type = 'Single'
+                                                                                                IsCheck = $false; Level = 1; NumOpting = 0; IsComplete = $done
+                                                                                                Instructor = $(if ($done) { $IPs[$i] } else { '' })
+                                                                                                ETD = $(if ($done) { $first.AddDays($i).ToString('yyyy-MM-dd HH:mm:ss') } else { '' })
+                                                                                }
+                                                                })
+                                                                return $s
+                                                }
+                                }
+
+                                It 'COUNTER_LIMIT: a 4th counter in Airmanship (AA)' {
+                                                $s = New-CounterStudent 'AA' @('Ames, A', 'Bell, B', 'Cruz, C')
+                                                $r = Invoke-HR -Student $s -Sortie (New-TestRow -ETD '2026-03-03 08:00' -Instructor 'Diaz, D')
+                                                @($r.Violations).Count | Should -Be 0
+                                                $v = Get-EvtViol $r 'AA5004' 'COUNTER_LIMIT'
+                                                $v.Message | Should -Be 'Diaz, D would be counter 4 of 3 max in Airmanship (SQ/CC deviation, AF Form 4293)'
+                                                $v.Severity | Should -Be 'Hard'
+                                                $r.Passed | Should -BeFalse
+                                }
+
+                                It 'COUNTER_LIMIT: a 7th counter in Fundamental (FT, FF)' {
+                                                $s = New-CounterStudent 'FT' @('Ames, A', 'Bell, B', 'Cruz, C', 'Diaz, D', 'Eddy, E', 'Ford, F')
+                                                $r = Invoke-HR -Student $s -Sortie (New-TestRow -ETD '2026-03-03 08:00' -Instructor 'Gray, G')
+                                                (Get-EvtViol $r 'FT5007' 'COUNTER_LIMIT').Message | Should -Be 'Gray, G would be counter 7 of 6 max in Fundamental (SQ/CC deviation, AF Form 4293)'
+                                                $r.Passed | Should -BeFalse
+                                }
+
+                                It 'an IP who already counts, or a non-counter, passes (<Name>)' -TestCases @(
+                                                @{ Name = 'Bell, B' }
+                                                @{ Name = 'Leech, Tom' }
+                                ) {
+                                                $s = New-CounterStudent 'AA' @('Ames, A', 'Bell, B', 'Cruz, C')
+                                                $r = Invoke-HR -Student $s -Sortie (New-TestRow -ETD '2026-03-03 08:00' -Instructor $Name) -Explain
+                                                Get-EvtViol $r 'AA5004' 'COUNTER_LIMIT' | Should -BeNullOrEmpty
+                                                $r.Passed | Should -BeTrue
+                                }
+
+                                It 'non-counters and check rides do not count toward the limit' {
+                                                # Leech (non-counter) once, and Cruz only on a check ride: Ames and Bell are the only counters
+                                                $s = New-CounterStudent 'AA' @('Ames, A', 'Leech, Tom', 'Bell, B', 'Cruz, C')
+                                                $s.Syllabus[3].IsCheck = $true
+                                                $r = Invoke-HR -Student $s -Sortie (New-TestRow -ETD '2026-03-03 08:00' -Instructor 'Diaz, D') -Explain
+                                                Get-EvtViol $r 'AA5005' 'COUNTER_LIMIT' | Should -BeNullOrEmpty
+                                                $r.Passed | Should -BeTrue
+                                }
+
+                                It 'the Fundamental counters do not count toward Airmanship' {
+                                                $s = New-CounterStudent 'FT' @('Ames, A', 'Bell, B', 'Cruz, C', 'Diaz, D')
+                                                $s.Syllabus[4].Mission = 'AA5001'
+                                                $r = Invoke-HR -Student $s -Sortie (New-TestRow -ETD '2026-03-03 08:00' -Instructor 'Eddy, E') -Explain
+                                                Get-EvtViol $r 'AA5001' 'COUNTER_LIMIT' | Should -BeNullOrEmpty
+                                }
+                }
+
                 Context 'formation lead block' {
                                 BeforeAll {
                                                 $script:LeadRow = New-TestRow -ETD '2026-03-03 08:00' -Instructor 'Jones, Bob' -Id 'L1'
@@ -1457,90 +1522,116 @@ Describe 'SoftRules -Detailed' {
                 }
 
                 Context 'strings and counters' {
-                                It 'Continue String (+ Counter Continuity) when the last IP flies again' {
-                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Lee, Ann', 'FT5102|2026-02-26 08:00|Jones, Bob'
-                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5103'
-                                                $r.Breakdown['Continue String'] | Should -Be 10
-                                                $r.Reasons['Continue String'] | Should -Be '2 String'
-                                                $r.Breakdown['Counter Continuity'] | Should -Be 5
-                                                $r.Reasons['Counter Continuity'] | Should -Be 'Jones already flew 1 of 2 rides'
-                                                foreach ($k in 'String 4', 'String 5', 'Zipper', 'Break String', 'Non-Counter', 'CAP Bonus (string)') { $r.Breakdown.Contains($k) | Should -BeFalse }
+                                BeforeAll {
+                                                # A student who flew FT5001, FT5002, ... in that order, one a day from 1 Feb, with the IPs
+                                                # spelled as letters (J Jones, L Lee, O Ortiz, N Leech the non-counter), and the next
+                                                # ride still to fly. 'JJL' -> FT5001 Jones, FT5002 Jones, FT5003 Lee; FT5004 open
+                                                function New-StringStudent {
+                                                                param ([string]$Rides, [string]$Category = 'FT', [switch]$IsCap)
+                                                                $names = @{ J = 'Jones, Bob'; L = 'Lee, Ann'; O = 'Ortiz, Sam'; N = 'Leech, Tom' }
+                                                                $s = New-TestStudent -Name 'S' -IsCap:$IsCap
+                                                                $first = [datetime]'2026-02-01 08:00'
+                                                                $s.Syllabus = @(for ($i = 0; $i -le $Rides.Length; $i++) {
+                                                                                $done = $i -lt $Rides.Length
+                                                                                [PSCustomObject]@{
+                                                                                                SyllabusID = $i + 1; Mission = '{0}{1}' -f $Category, (5001 + $i); Prereqs = '0'; Type = 'Single'
+                                                                                                IsCheck = $false; Level = 1; NumOpting = 0; IsComplete = $done
+                                                                                                Instructor = $(if ($done) { $names[[string]$Rides[$i]] } else { '' })
+                                                                                                ETD = $(if ($done) { $first.AddDays($i).ToString('yyyy-MM-dd HH:mm:ss') } else { '' })
+                                                                                }
+                                                                })
+                                                                return $s
+                                                }
+
+                                                # SoftRules for the student's next ride (the first one not flown)
+                                                function Get-NextSoft {
+                                                                param ($Student, [string]$Instructor)
+                                                                $next = @($Student.Syllabus | Where-Object { -not $_.IsComplete })[0]
+                                                                return (Get-Soft -Student $Student -Instructor $Instructor -Mission $next.Mission)
+                                                }
+
+                                                $script:StringKeys = @('Non-Counter', 'Continue String', 'String 4', 'String 5', 'Opening String', 'Zipper', 'Alternating', 'Break String', 'Counter Continuity', 'New Counter', 'CAP Bonus (string)')
                                 }
 
-                                It 'Continue String reads 3 String on the third ride in a row' {
-                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Lee, Ann', 'FT5102|2026-02-25 08:00|Jones, Bob', 'FT5103|2026-02-26 08:00|Jones, Bob'
-                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5104'
+                                It 'Continue String, Opening String and Counter Continuity when the last IP flies again' {
+                                                $r = Get-NextSoft (New-StringStudent 'J') 'Jones, Bob'
+                                                $r.Breakdown['Continue String'] | Should -Be 10
+                                                $r.Reasons['Continue String'] | Should -Be '2 String'
+                                                $r.Breakdown['Opening String'] | Should -Be 5
+                                                $r.Reasons['Opening String'] | Should -Be 'Opening FT string, ride 2 of 3'
+                                                $r.Breakdown['Counter Continuity'] | Should -Be 5
+                                                $r.Reasons['Counter Continuity'] | Should -Be 'Jones already counts (1 of 6 Fundamental counters)'
+                                                foreach ($k in 'String 4', 'String 5', 'Zipper', 'Alternating', 'Break String', 'Non-Counter', 'New Counter', 'CAP Bonus (string)') { $r.Breakdown.Contains($k) | Should -BeFalse }
+                                }
+
+                                It 'reads 3 String on the third ride in a row' {
+                                                $r = Get-NextSoft (New-StringStudent 'JJ') 'Jones, Bob'
                                                 $r.Breakdown['Continue String'] | Should -Be 10
                                                 $r.Reasons['Continue String'] | Should -Be '3 String'
-                                                $r.Reasons['Counter Continuity'] | Should -Be 'Jones already flew 2 of 3 rides'
+                                                $r.Reasons['Opening String'] | Should -Be 'Opening FT string, ride 3 of 3'
                                 }
 
                                 It 'CAP Bonus (string) reads the student''s IsCap' {
-                                                $s = New-TestStudent -Name 'A' -IsCap -Done 'FT5001|2026-02-24 08:00|Lee, Ann', 'FT5102|2026-02-26 08:00|Jones, Bob'
-                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5103'
+                                                $r = Get-NextSoft (New-StringStudent 'J' -IsCap) 'Jones, Bob'
                                                 $r.Breakdown['CAP Bonus'] | Should -Be 8
                                                 $r.Breakdown['Continue String'] | Should -Be 10
                                                 $r.Breakdown['CAP Bonus (string)'] | Should -Be 8
                                                 $r.Reasons['CAP Bonus (string)'] | Should -Be 'CAP student, 2 String'
                                 }
 
-                                It 'String 4 after three in a row with the same IP' {
-                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-25 08:00|Jones, Bob', 'FT5103|2026-02-26 08:00|Jones, Bob'
-                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5104'
-                                                $r.Breakdown['String 4'] | Should -Be -10
-                                                $r.Reasons['String 4'] | Should -Be '4 String'
-                                                $r.Breakdown.Contains('Continue String') | Should -BeFalse
-                                                $r.Breakdown.Contains('String 5') | Should -BeFalse
+                                It '<Rides> + Jones is a <Want>' -TestCases @(
+                                                @{ Rides = 'JJJ'; Want = '4 String'; Label = 'String 4'; Points = -10 }
+                                                @{ Rides = 'JJJJ'; Want = '5 String'; Label = 'String 5'; Points = -100 }
+                                                @{ Rides = 'JJJJJ'; Want = '6 String'; Label = 'String 5'; Points = -100 }
+                                                @{ Rides = 'JJLJ'; Want = '4 String'; Label = 'String 4'; Points = -10 }
+                                ) {
+                                                $r = Get-NextSoft (New-StringStudent $Rides) 'Jones, Bob'
+                                                $r.Breakdown[$Label] | Should -Be $Points
+                                                $r.Reasons[$Label] | Should -Be $Want
+                                                foreach ($k in 'Continue String', 'Opening String', 'Break String') { $r.Breakdown.Contains($k) | Should -BeFalse }
                                 }
 
-                                It 'String 5 after four in a row with the same IP' {
-                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-23 08:00|Jones, Bob', 'FT5102|2026-02-24 08:00|Jones, Bob', 'FT5103|2026-02-25 08:00|Jones, Bob', 'FT5104|2026-02-26 08:00|Jones, Bob'
-                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FF5201'
-                                                $r.Breakdown['String 5'] | Should -Be -100
-                                                $r.Reasons['String 5'] | Should -Be '5 String'
-                                                $r.Breakdown.Contains('String 4') | Should -BeFalse
-                                }
-
-                                It 'String 5 counts the whole run past five' {
-                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-22 08:00|Jones, Bob', 'FT5102|2026-02-23 08:00|Jones, Bob', 'FT5103|2026-02-24 08:00|Jones, Bob', 'FT5104|2026-02-25 08:00|Jones, Bob', 'FF5201|2026-02-26 08:00|Jones, Bob'
-                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FF5202'
-                                                $r.Breakdown['String 5'] | Should -Be -100
-                                                $r.Reasons['String 5'] | Should -Be '6 String'
-                                }
-
-                                It 'Zipper when the IP flew the ride before last' {
-                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-26 08:00|Lee, Ann'
-                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5103'
+                                It 'the zipper ride (J,J + L) only costs the Zipper weight: Jones'' string is not broken' {
+                                                $r = Get-NextSoft (New-StringStudent 'JJ') 'Lee, Ann'
                                                 $r.Breakdown['Zipper'] | Should -Be 5
-                                                $r.Reasons['Zipper'] | Should -Be "Zipper: Jones $([char]0x2192) Lee $([char]0x2192) Jones"
+                                                $r.Reasons['Zipper'] | Should -Be "Zipper: Jones's 2 String waits on the next ride"
+                                                foreach ($k in 'Break String', 'Continue String', 'Counter Continuity', 'Non-Counter') { $r.Breakdown.Contains($k) | Should -BeFalse }
+                                }
+
+                                It 'the ride back after a zipper (J,J,L + J) is a 3 String with nothing taken off' {
+                                                $r = Get-NextSoft (New-StringStudent 'JJL') 'Jones, Bob'
+                                                $r.Breakdown['Continue String'] | Should -Be 10
+                                                $r.Reasons['Continue String'] | Should -Be '3 String (zipper over Lee)'
+                                                $r.Reasons['Opening String'] | Should -Be 'Opening FT string, ride 3 of 3'
+                                                $r.Reasons['Counter Continuity'] | Should -Be 'Jones already counts (2 of 6 Fundamental counters)'
+                                                foreach ($k in 'Zipper', 'Break String', 'Alternating') { $r.Breakdown.Contains($k) | Should -BeFalse }
+                                }
+
+                                It 'Break String once a 2-string really ends: two different counters in a row (J,J,L + <Name>)' -TestCases @(
+                                                @{ Name = 'Ortiz, Sam'; Continues = $false }
+                                                @{ Name = 'Lee, Ann'; Continues = $true }
+                                ) {
+                                                $r = Get-NextSoft (New-StringStudent 'JJL') $Name
+                                                $r.Breakdown['Break String'] | Should -Be -5
+                                                $r.Reasons['Break String'] | Should -Be 'Breaks 2 String w/ Jones'
+                                                $r.Breakdown.Contains('Continue String') | Should -Be $Continues
+                                                $r.Breakdown.Contains('Zipper') | Should -BeFalse
+                                }
+
+                                It 'one ride with an IP is no string to break or wait on (<Rides> + <Name>)' -TestCases @(
+                                                @{ Rides = 'J'; Name = 'Lee, Ann' }
+                                                @{ Rides = 'JL'; Name = 'Ortiz, Sam' }
+                                ) {
+                                                $r = Get-NextSoft (New-StringStudent $Rides) $Name
+                                                foreach ($k in $script:StringKeys) { $r.Breakdown.Contains($k) | Should -BeFalse -Because "$k should not score" }
+                                }
+
+                                It 'alternating counters (J,L,J + L) are not a string' {
+                                                $r = Get-NextSoft (New-StringStudent 'JLJ') 'Lee, Ann'
+                                                $r.Breakdown['Alternating'] | Should -Be -10
+                                                $r.Reasons['Alternating'] | Should -Be "Alternating counters: Lee $([char]0x2192) Jones $([char]0x2192) Lee $([char]0x2192) Jones"
+                                                foreach ($k in 'Continue String', 'Zipper', 'Break String') { $r.Breakdown.Contains($k) | Should -BeFalse }
                                                 $r.Breakdown['Counter Continuity'] | Should -Be 5
-                                                $r.Breakdown.Contains('Break String') | Should -BeFalse
-                                }
-
-                                It 'Break String for a new IP (no Counter Continuity)' {
-                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Lee, Ann', 'FT5102|2026-02-26 08:00|Ortiz, Sam'
-                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5103'
-                                                $r.Breakdown['Break String'] | Should -Be -5
-                                                $r.Reasons['Break String'] | Should -Be 'New IP after 1 ride w/ Ortiz'
-                                                $r.Breakdown.Contains('Counter Continuity') | Should -BeFalse
-                                }
-
-                                It 'Break String names the length of the string it breaks' {
-                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Lee, Ann', 'FT5102|2026-02-25 08:00|Lee, Ann', 'FT5103|2026-02-26 08:00|Lee, Ann'
-                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5104'
-                                                $r.Breakdown['Break String'] | Should -Be -5
-                                                $r.Reasons['Break String'] | Should -Be 'Breaks 3 String w/ Lee'
-                                }
-
-                                It 'String texts count the rides in a row, not every ride with that IP' {
-                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-23 08:00|Jones, Bob', 'FT5102|2026-02-24 08:00|Lee, Ann', 'FT5103|2026-02-25 08:00|Jones, Bob'
-                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5104'
-                                                $r.Reasons['Continue String'] | Should -Be '2 String'
-                                                $r.Reasons['Counter Continuity'] | Should -Be 'Jones already flew 2 of 3 rides'
-
-                                                $s = New-TestStudent -Name 'B' -Done 'FT5001|2026-02-23 08:00|Lee, Ann', 'FT5102|2026-02-24 08:00|Jones, Bob', 'FT5103|2026-02-25 08:00|Lee, Ann', 'FT5104|2026-02-26 08:00|Lee, Ann'
-                                                $r = Get-Soft -Student $s -Instructor 'Ortiz, Sam' -Mission 'FT5190'
-                                                $r.Reasons['Break String'] | Should -Be 'Breaks 2 String w/ Lee'
                                 }
 
                                 It 'Get-ShortIPName keeps the last name and drops [tags]' {
@@ -1549,13 +1640,47 @@ Describe 'SoftRules -Detailed' {
                                                 Get-ShortIPName 'Lee, Ann' | Should -Be 'Lee'
                                 }
 
-                                It 'Counter Continuity for an IP who flew the student before (older than the zipper)' {
-                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-25 08:00|Lee, Ann', 'FT5103|2026-02-26 08:00|Ortiz, Sam'
-                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5104'
-                                                $r.Breakdown['Break String'] | Should -Be -5
-                                                $r.Reasons['Break String'] | Should -Be 'New IP after 1 ride w/ Ortiz'
-                                                $r.Breakdown['Counter Continuity'] | Should -Be 5
-                                                $r.Reasons['Counter Continuity'] | Should -Be 'Jones already flew 1 of 3 rides'
+                                It 'a non-counter breaks no strings (J,J + Leech)' {
+                                                $r = Get-NextSoft (New-StringStudent 'JJ') 'Leech, Tom'
+                                                $r.Breakdown['Non-Counter'] | Should -Be -15
+                                                $r.Reasons['Non-Counter'] | Should -Be 'Leech is a non-counter (breaks no strings)'
+                                                foreach ($k in 'Continue String', 'Zipper', 'Break String', 'Counter Continuity', 'New Counter') { $r.Breakdown.Contains($k) | Should -BeFalse }
+                                }
+
+                                It 'a non-counter in between is skipped: J,J,Leech + J is a 3 String' {
+                                                $r = Get-NextSoft (New-StringStudent 'JJN') 'Jones, Bob'
+                                                $r.Reasons['Continue String'] | Should -Be '3 String'
+                                                $r.Breakdown.Contains('Break String') | Should -BeFalse
+                                }
+
+                                It 'a non-counter who flies two in a row counts, and then breaks strings like any counter' {
+                                                $r = Get-NextSoft (New-StringStudent 'JJN') 'Leech, Tom'
+                                                $r.Breakdown.Contains('Non-Counter') | Should -BeFalse
+                                                $r.Reasons['Continue String'] | Should -Be '2 String (non-counter, 2 in a row)'
+                                                $r.Reasons['Break String'] | Should -Be 'Breaks 2 String w/ Jones'
+                                }
+
+                                It 'a non-counter zippered (Leech, J + Leech) is still a non-counter' {
+                                                $r = Get-NextSoft (New-StringStudent 'NJ') 'Leech, Tom'
+                                                $r.Breakdown['Non-Counter'] | Should -Be -15
+                                                $r.Breakdown.Contains('Counter Continuity') | Should -BeFalse
+                                }
+
+                                It 'each category starts its own string; counters carry over inside the phase' {
+                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-25 08:00|Jones, Bob', 'FT5104|2026-02-26 08:00|Jones, Bob'
+                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FF5201'
+                                                foreach ($k in 'Continue String', 'String 4', 'Break String') { $r.Breakdown.Contains($k) | Should -BeFalse }
+                                                $r.Reasons['Counter Continuity'] | Should -Be 'Jones already counts (1 of 6 Fundamental counters)'
+                                }
+
+                                It 'solos and check rides are left out of strings' {
+                                                # FT5103 is a solo: Jones' FT5001, FT5102 and FT5104 are still one string
+                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-25 08:00|Jones, Bob', 'FT5103|2026-02-26 08:00|Lee, Ann'
+                                                (Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5104').Reasons['Continue String'] | Should -Be '3 String'
+                                                # The checkride FT5190 itself never scores here
+                                                $s = New-TestStudent -Name 'B' -Done 'FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-25 08:00|Jones, Bob'
+                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5190'
+                                                foreach ($k in $script:StringKeys) { $r.Breakdown.Contains($k) | Should -BeFalse -Because "$k should not score" }
                                 }
 
                                 It 'a sim flown with a named IP is not a flight for strings (decided by Type)' {
@@ -1566,51 +1691,31 @@ Describe 'SoftRules -Detailed' {
                                                 $r.Breakdown.Contains('Break String') | Should -BeFalse
                                 }
 
-                                It 'Non-Counter for Leech (non-counter) when he did not fly the last two rides' {
-                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-26 08:00|Ortiz, Sam'
-                                                $r = Get-Soft -Student $s -Instructor 'Leech, Tom' -Mission 'FT5103'
-                                                $r.Breakdown['Non-Counter'] | Should -Be -15
-                                                $r.Reasons['Non-Counter'] | Should -Be 'Leech is a non-counter'
-                                                foreach ($k in 'Continue String', 'Zipper', 'Break String', 'Counter Continuity') { $r.Breakdown.Contains($k) | Should -BeFalse }
-                                }
-
-                                It 'Leech becomes a counter if he flew IP1 (Continue String + Counter Continuity)' {
-                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-26 08:00|Leech, Tom'
-                                                $r = Get-Soft -Student $s -Instructor 'Leech, Tom' -Mission 'FT5103'
-                                                $r.Breakdown.Contains('Non-Counter') | Should -BeFalse
-                                                $r.Breakdown['Continue String'] | Should -Be 10
-                                                $r.Reasons['Continue String'] | Should -Be '2 String (non-counter)'
-                                                $r.Breakdown['Counter Continuity'] | Should -Be 5
-                                }
-
-                                It 'Leech becomes a counter if he flew IP2 (Zipper)' {
-                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Leech, Tom', 'FT5102|2026-02-26 08:00|Jones, Bob'
-                                                $r = Get-Soft -Student $s -Instructor 'Leech, Tom' -Mission 'FT5103'
-                                                $r.Breakdown.Contains('Non-Counter') | Should -BeFalse
-                                                $r.Breakdown['Zipper'] | Should -Be 5
-                                                $r.Reasons['Zipper'] | Should -Be "Zipper: Leech $([char]0x2192) Jones $([char]0x2192) Leech (non-counter)"
-                                }
-
-                                It 'Leech stays a non-counter if he only flew IP3' {
-                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Leech, Tom', 'FT5102|2026-02-25 08:00|Jones, Bob', 'FT5103|2026-02-26 08:00|Ortiz, Sam'
-                                                $r = Get-Soft -Student $s -Instructor 'Leech, Tom' -Mission 'FT5104'
-                                                $r.Breakdown['Non-Counter'] | Should -Be -15
-                                                $r.Reasons['Non-Counter'] | Should -Be 'Leech is a non-counter'
-                                                $r.Breakdown.Contains('Counter Continuity') | Should -BeFalse
-                                }
-
                                 It 'IsCounter cell: blank counts as a counter, FALSE text does not' {
                                                 $ips = @(
                                                                 [PSCustomObject]@{ Name = 'Blank, Bo'; IsCounter = ''; IsExperienced = $true; IsCheck = $false; Callsign = 'X'; Num = 1 }
                                                                 [PSCustomObject]@{ Name = 'Text, Ty'; IsCounter = 'FALSE'; IsExperienced = $true; IsCheck = $false; Callsign = 'X'; Num = 2 }
                                                 )
-                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-26 08:00|Ortiz, Sam'
-                                                $blank = Get-Soft -Student $s -Instructor 'Blank, Bo' -Mission 'FT5103' -Instructors $ips
+                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-26 08:00|Blank, Bo'
+                                                $blank = Get-Soft -Student $s -Instructor 'Blank, Bo' -Mission 'FT5104' -Instructors $ips
                                                 $blank.Breakdown.Contains('Non-Counter') | Should -BeFalse
-                                                $blank.Breakdown['Break String'] | Should -Be -5
-                                                $text = Get-Soft -Student $s -Instructor 'Text, Ty' -Mission 'FT5103' -Instructors $ips
+                                                $blank.Reasons['Continue String'] | Should -Be '2 String'
+                                                $s = New-TestStudent -Name 'B' -Done 'FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-26 08:00|Ortiz, Sam'
+                                                $text = Get-Soft -Student $s -Instructor 'Text, Ty' -Mission 'FT5104' -Instructors $ips
                                                 $text.Breakdown['Non-Counter'] | Should -Be -15
-                                                $text.Reasons['Non-Counter'] | Should -Be 'Text is a non-counter'
+                                                $text.Reasons['Non-Counter'] | Should -Be 'Text is a non-counter (breaks no strings)'
+                                }
+
+                                It 'New Counter shows only when it scores, or for the phase''s last counter' {
+                                                $s = New-StringStudent 'JL' -Category 'AA'
+                                                $r = Get-NextSoft $s 'Ortiz, Sam'
+                                                $r.Breakdown['New Counter'] | Should -Be 0
+                                                $r.Reasons['New Counter'] | Should -Be 'Ortiz is a new counter (3 of 3 Airmanship counters)'
+                                                $w = $script:W.PSObject.Copy()
+                                                $w.NewCounter = -2
+                                                $r = Get-Soft -Student (New-StringStudent 'J') -Instructor 'Lee, Ann' -Mission 'FT5002' -Weights $w
+                                                $r.Breakdown['New Counter'] | Should -Be -2
+                                                $r.Reasons['New Counter'] | Should -Be 'Lee is a new counter (2 of 6 Fundamental counters)'
                                 }
 
                                 It 'no string or counter scoring on a sim, even with a named IP (<SortieType> <Mission>)' -TestCases @(
@@ -1619,14 +1724,39 @@ Describe 'SoftRules -Detailed' {
                                 ) {
                                                 $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-26 08:00|Ortiz, Sam'
                                                 $r = Get-Soft -Student $s -SortieType $SortieType -Instructor $Instructor -Mission $Mission
-                                                foreach ($k in 'Non-Counter', 'Continue String', 'String 4', 'String 5', 'Zipper', 'Break String', 'Counter Continuity', 'CAP Bonus (string)') { $r.Breakdown.Contains($k) | Should -BeFalse }
+                                                foreach ($k in $script:StringKeys) { $r.Breakdown.Contains($k) | Should -BeFalse }
                                 }
 
                                 It 'no string or counter scoring with SIM IP or no IP' {
                                                 $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-26 08:00|Jones, Bob'
-                                                foreach ($r in @((Get-Soft -Student $s -SortieType 'OFT' -Mission 'FE3102'), (Get-Soft -Student $s -Instructor '' -Mission 'FT5103'))) {
-                                                                foreach ($k in 'Non-Counter', 'Continue String', 'String 4', 'String 5', 'Zipper', 'Break String', 'Counter Continuity') { $r.Breakdown.Contains($k) | Should -BeFalse }
+                                                foreach ($r in @((Get-Soft -Student $s -SortieType 'OFT' -Mission 'FE3102'), (Get-Soft -Student $s -Instructor '' -Mission 'FT5104'))) {
+                                                                foreach ($k in $script:StringKeys) { $r.Breakdown.Contains($k) | Should -BeFalse }
                                                 }
+                                }
+                }
+
+                Context 'Get-StringOutlook (what one more ride does to a category''s strings)' {
+                                It '<Rides> + <IP>: <Length> String' -TestCases @(
+                                                @{ Rides = 'AA'; IP = 'B'; Length = 1; Zipper = $false; Alternating = $false; Broken = ''; Bridged = 'A2' }
+                                                @{ Rides = 'AAB'; IP = 'A'; Length = 3; Zipper = $true; Alternating = $false; Broken = ''; Bridged = 'B1' }
+                                                @{ Rides = 'AABA'; IP = 'A'; Length = 4; Zipper = $false; Alternating = $false; Broken = 'B1'; Bridged = '' }
+                                                @{ Rides = 'AAB'; IP = 'C'; Length = 1; Zipper = $false; Alternating = $false; Broken = 'A2'; Bridged = 'B1' }
+                                                @{ Rides = 'AAB'; IP = 'B'; Length = 2; Zipper = $false; Alternating = $false; Broken = 'A2'; Bridged = '' }
+                                                @{ Rides = 'ABA'; IP = 'B'; Length = 2; Zipper = $true; Alternating = $true; Broken = ''; Bridged = 'A2' }
+                                                @{ Rides = 'AAS'; IP = 'A'; Length = 3; Zipper = $false; Alternating = $false; Broken = ''; Bridged = '' }
+                                                @{ Rides = ''; IP = 'A'; Length = 1; Zipper = $false; Alternating = $false; Broken = ''; Bridged = '' }
+                                ) {
+                                                $o = Get-StringOutlook -Sorties ([string[]]@($Rides.ToCharArray() | ForEach-Object { [string]$_ })) -IP $IP -NonCounters @('S')
+                                                $o.Length | Should -Be $Length
+                                                $o.Zipper | Should -Be $Zipper
+                                                $o.Alternating | Should -Be $Alternating
+                                                (@($o.Broken | ForEach-Object { "$($_.IP)$($_.Length)" }) -join ',') | Should -Be $Broken
+                                                (@($o.Bridged | ForEach-Object { "$($_.IP)$($_.Length)" }) -join ',') | Should -Be $Bridged
+                                }
+
+                                It 'Opening: the string began the category' {
+                                                (Get-StringOutlook -Sorties @('A', 'B', 'A') -IP 'A').Opening | Should -BeTrue
+                                                (Get-StringOutlook -Sorties @('A', 'A', 'B', 'B') -IP 'B').Opening | Should -BeFalse
                                 }
                 }
 
@@ -1728,13 +1858,14 @@ Describe 'SoftRules -Detailed' {
                                                 # CAP, sim debt 2, Jones flew last ride 3 days ago, plus an older sim
                                                 $s = New-TestStudent -Name 'A' -IsCap -SimDebt 2 -Priority 1 -Done 'FI3101|2026-02-26 08:00', 'FT5001|2026-02-28 08:00|Jones, Bob'
                                                 $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5102'
-                                                @($r.Breakdown.Keys) | Should -Be @('Sim Debt (flight)', 'CAP Bonus', 'Continue String', 'CAP Bonus (string)', 'Exhaustion', 'BIT Tracker', 'Counter Continuity', 'Student Priority')
-                                                @($r.Breakdown.Values) | Should -Be @(-2, 8, 10, 8, -3, 6, 5, 1)
+                                                @($r.Breakdown.Keys) | Should -Be @('Sim Debt (flight)', 'CAP Bonus', 'Continue String', 'CAP Bonus (string)', 'Opening String', 'Counter Continuity', 'Exhaustion', 'BIT Tracker', 'Student Priority')
+                                                @($r.Breakdown.Values) | Should -Be @(-2, 8, 10, 8, 5, 5, -3, 6, 1)
                                                 @($r.Reasons.Values) | Should -Be @(
-                                                                'Sim Debt 2, flight adds to it', 'CAP student', '2 String', 'CAP student, 2 String', '1 Flight and 1 Sim in last 5 Days',
-                                                                '2 days without a flight (last flew Sat 2/28), CAP x2', 'Jones already flew 1 of 1 ride', 'Student Priority'
+                                                                'Sim Debt 2, flight adds to it', 'CAP student', '2 String', 'CAP student, 2 String', 'Opening FT string, ride 2 of 3',
+                                                                'Jones already counts (1 of 6 Fundamental counters)', '1 Flight and 1 Sim in last 5 Days',
+                                                                '2 days without a flight (last flew Sat 2/28), CAP x2', 'Student Priority'
                                                 )
-                                                $r.Score | Should -Be 33
+                                                $r.Score | Should -Be 38
                                 }
 
                                 It 'Get-EventScore scores a copy of the line and leaves the real line alone' {

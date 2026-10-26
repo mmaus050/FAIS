@@ -82,18 +82,6 @@ function Get-ShortIPName {
                 return $base
 }
 
-# How many of the newest flights in a row were with this IP ($Flights newest first)
-function Get-IPRunLength {
-                param ([array]$Flights, [string]$IPBase)
-
-                $n = 0
-                foreach ($f in $Flights) {
-                                if ((Get-BaseName (Get-NameText $f.Instructor)) -ne $IPBase) { break }
-                                $n++
-                }
-                return $n
-}
-
 
 # =================================================================================
 #  CONTEXT LOOKUPS
@@ -455,6 +443,8 @@ function Test-HardRules {
                 }
 
                 $completedReal = @($timeline | Where-Object { -not $_.IsReservation })
+                $hasRealIP = ($ipName -ne '' -and -not $ipIsSim -and $ipName -ne 'NEED IP')
+                $stringFlights = $null
                 # A wingman the board already paired to this line satisfies the formation-lead checks
                 $pinnedWing = if ($IsWingCandidate) { $null } else { Get-PinnedWingRow -Sortie $Sortie -Schedule $Schedule }
 
@@ -500,6 +490,18 @@ function Test-HardRules {
                                                 }
                                                 if (-not (ConvertTo-FaisBool $ip.IsCheck)) {
                                                                 $ev.Add((New-RuleViolation 'CHECK_NEEDS_CHECK_IP' "Checkride needs a Check IP ($ipBase isn't)" -Mission $mName))
+                                                }
+                                }
+
+                                # Counter limits (AETCI instructor continuity): 6 counters in Fundamental (FT, FF), 3 in
+                                # Airmanship (AA). Check rides, solos and non-counters don't count. SQ/CC may approve a
+                                # deviation, documented on an AF Form 4293: a hardcoded line can still override this.
+                                if ($hasRealIP -and -not $isSimLine -and ($Explain -or -not (Test-AnyBlocking $ev))) {
+                                                if ($null -eq $stringFlights) { $stringFlights = @(Get-StringFlights -Syllabus @($Student.Syllabus) -Before $start) }
+                                                $placement = Get-StringPlacement -Student $Student -Mission $evt -Instructor $ipName -IsCounter (ConvertTo-FaisBool $ip.IsCounter -Default $true) `
+                                                                -Before $start -Instructors $Instructors -Flights $stringFlights
+                                                if ($null -ne $placement -and $placement.NewCounter -and $placement.CounterCount -gt $placement.Limit) {
+                                                                $ev.Add((New-RuleViolation 'COUNTER_LIMIT' ("{0} would be counter {1} of {2} max in {3} (SQ/CC deviation, AF Form 4293)" -f $ipBase, $placement.CounterCount, $placement.Limit, $placement.Phase) -Mission $mName))
                                                 }
                                 }
 
@@ -749,9 +751,16 @@ function SoftRules {
                 }
 
                 #####################################
-                # RULE: STRINGS AND COUNTERS
-                # Rewards three strings, penalizes everything else to varying degrees
-                # Flights only: a sim line never scores here, and past sims never count
+                # RULE: STRINGS AND COUNTERS (AETCI instructor continuity)
+                # Three rides in a row with one counter is the goal; 2 and 4-strings are acceptable, 5+ is not.
+                # Counted like the String Tracker (Get-StringPlacement): per category, in mission order, and
+                # one different counter in between does not break a string (A,A,B,A is a 3-string with A).
+                #   - The zipper ride (B) only costs the Zipper weight, and only while a 2-string waits on it
+                #   - The ride back to the string (A) scores like any other ride in the string
+                #   - Break String only when a string really ends short (two different counters in a row)
+                #   - Non-counters break no strings unless they fly two in a row (then they count)
+                #   - Alternating counters (A,B,A,B) are not a string
+                # Flights only: a sim line, solo or check ride never scores here, and past sims never count
                 #####################################
                 $PastFlights = @(
                                 $Student.Syllabus | Where-Object {
@@ -762,75 +771,111 @@ function SoftRules {
                                                 (Parse-ETD $_.ETD) -lt $SortieDate
                                 } | Sort-Object -Property { Parse-ETD $_.ETD } -Descending
                 )
-                $IP1_Base = if ($PastFlights.Count -ge 1) { Get-BaseName (Get-NameText $PastFlights[0].Instructor) } else { '' }
-                $IP2_Base = if ($PastFlights.Count -ge 2) { Get-BaseName (Get-NameText $PastFlights[1].Instructor) } else { '' }
-                $IP3_Base = if ($PastFlights.Count -ge 3) { Get-BaseName (Get-NameText $PastFlights[2].Instructor) } else { '' }
-                $IP4_Base = if ($PastFlights.Count -ge 4) { Get-BaseName (Get-NameText $PastFlights[3].Instructor) } else { '' }
 
-                $IsEffectiveCounter = ConvertTo-FaisBool $ip.IsCounter -Default $true
                 $hasRealIP = ($CurrentIP -ne '' -and $CurrentIP -notmatch 'SIM IP' -and $CurrentIP -ne 'NEED IP')
                 $isFlightSortie = -not (Test-IsSimSortieType $sortieType) -and $missionType -notmatch '(?i)^\s*(IFT|OFT)\s*$'
-
-                if ($hasRealIP -and $isFlightSortie) {
+                $Placement = $null
+                $missionRow = if ($Sortie.Mission -is [string]) { Find-SyllabusMission -Student $Student -Mission $Sortie.Mission } else { $Sortie.Mission }
+                if ($hasRealIP -and $isFlightSortie -and $null -ne $SortieDate -and $null -ne $missionRow) {
                                 $CurrentIP_Base = Get-BaseName $CurrentIP
                                 $CurrentIP_Short = Get-ShortIPName $CurrentIP
-                                $nonCounterTag = ''
+                                $Placement = Get-StringPlacement -Student $Student -Mission $missionRow -Instructor $CurrentIP `
+                                                -IsCounter (ConvertTo-FaisBool $ip.IsCounter -Default $true) -Before $SortieDate -Instructors $Instructors
+                }
 
-                                # A non-counter who flew the student's last ride (or the one before) counts as a counter
-                                if (-not $IsEffectiveCounter -and ($CurrentIP_Base -eq $IP1_Base -or ($CurrentIP_Base -eq $IP2_Base -and $CurrentIP_Base -ne ''))) {
-                                                $IsEffectiveCounter = $true
-                                                $nonCounterTag = ' (non-counter)'
+                if ($null -ne $Placement -and -not $Placement.IsCounter) {
+                                $pts = Get-Weight $Config 'NonCounter'
+                                $Score += $pts
+                                $Breakdown['Non-Counter'] = $pts
+                                $Reasons['Non-Counter'] = "$CurrentIP_Short is a non-counter (breaks no strings)"
+                }
+                elseif ($null -ne $Placement) {
+                                $o = $Placement.Outlook
+                                $arrow = " $([char]0x2192) "
+
+                                if ($o.Alternating) {
+                                                $pts = Get-Weight $Config 'Alternating' -10
+                                                $Score += $pts
+                                                $Breakdown['Alternating'] = $pts
+                                                $last = Get-ShortIPName $o.LastIP
+                                                $Reasons['Alternating'] = "Alternating counters: $CurrentIP_Short$arrow$last$arrow$CurrentIP_Short$arrow$last"
+                                }
+                                elseif ($o.Length -ge 2) {
+                                                $tags = @(
+                                                                if ($o.Zipper) { "zipper over $(Get-ShortIPName $o.LastIP)" }
+                                                                if ($Placement.TwoInRow) { 'non-counter, 2 in a row' }
+                                                )
+                                                $StringText = "$($o.Length) String$(if ($tags.Count -gt 0) { " ($($tags -join ', '))" })"
+                                                if ($o.Length -ge 5) {
+                                                                $pts = Get-Weight $Config 'String5' -100
+                                                                $Score += $pts
+                                                                $Breakdown['String 5'] = $pts
+                                                                $Reasons['String 5'] = $StringText
+                                                }
+                                                elseif ($o.Length -eq 4) {
+                                                                $pts = Get-Weight $Config 'String4' -10
+                                                                $Score += $pts
+                                                                $Breakdown['String 4'] = $pts
+                                                                $Reasons['String 4'] = $StringText
+                                                }
+                                                else {
+                                                                $pts = Get-Weight $Config 'ContString'
+                                                                $Score += $pts
+                                                                $Breakdown['Continue String'] = $pts
+                                                                $Reasons['Continue String'] = $StringText
+                                                                if ($isCap) {
+                                                                                $pts2 = Get-Weight $Config 'CAPBonus'
+                                                                                $Score += $pts2
+                                                                                $Breakdown['CAP Bonus (string)'] = $pts2
+                                                                                $Reasons['CAP Bonus (string)'] = "CAP student, $StringText"
+                                                                }
+                                                                # A 3-sortie string should normally begin each category
+                                                                if ($o.Opening) {
+                                                                                $pts3 = Get-Weight $Config 'OpeningString' 5
+                                                                                $Score += $pts3
+                                                                                $Breakdown['Opening String'] = $pts3
+                                                                                $Reasons['Opening String'] = "Opening $($Placement.Category) string, ride $($o.Length) of 3"
+                                                                }
+                                                }
                                 }
 
-                                if (-not $IsEffectiveCounter) {
-                                                $pts = Get-Weight $Config 'NonCounter'
+                                # Strings this ride ends before they reach 3 (a 1-ride IP has no string to protect)
+                                $ended = @($o.Broken | Where-Object { $_.Length -eq 2 })
+                                if ($ended.Count -gt 0) {
+                                                $pts = (Get-Weight $Config 'BreakString') * $ended.Count
                                                 $Score += $pts
-                                                $Breakdown['Non-Counter'] = $pts
-                                                $Reasons['Non-Counter'] = "$CurrentIP_Short is a non-counter"
+                                                $Breakdown['Break String'] = $pts
+                                                $Reasons['Break String'] = (@($ended | ForEach-Object { "Breaks $($_.Length) String w/ $(Get-ShortIPName $_.IP)" }) -join ', ')
+                                }
+
+                                # The zipper ride: a 2-string goes on only if its IP flies the next ride
+                                $waiting = @($o.Bridged | Where-Object { $_.Length -eq 2 })
+                                if (-not $o.Alternating -and $waiting.Count -gt 0) {
+                                                $pts = Get-Weight $Config 'Zipper'
+                                                $Score += $pts
+                                                $Breakdown['Zipper'] = $pts
+                                                $Reasons['Zipper'] = (@($waiting | ForEach-Object { "Zipper: $(Get-ShortIPName $_.IP)'s $($_.Length) String waits on the next ride" }) -join ', ')
+                                }
+
+                                ##################################################
+                                # RULE : Counter Limit
+                                # Keeps counters to the minimum practical: 6 in Fundamental (FT, FF), 3 in Airmanship (AA).
+                                # Going over is a hard rule (COUNTER_LIMIT); this only scores the counters already flown.
+                                ##################################################
+                                $ofLimit = "$($Placement.CounterCount) of $($Placement.Limit) $($Placement.Phase) counters"
+                                if (-not $Placement.NewCounter) {
+                                                $pts = Get-Weight $Config 'CounterContinuity' 5
+                                                $Score += $pts
+                                                $Breakdown['Counter Continuity'] = $pts
+                                                $Reasons['Counter Continuity'] = "$CurrentIP_Short already counts ($ofLimit)"
                                 }
                                 else {
-                                                if ($IP1_Base -eq $CurrentIP_Base) {
-                                                                # This ride plus the rides in a row this IP already flew
-                                                                $StringText = "$(1 + (Get-IPRunLength -Flights $PastFlights -IPBase $CurrentIP_Base)) String$nonCounterTag"
-                                                                if ($IP1_Base -eq $IP2_Base -and $IP2_Base -eq $IP3_Base -and $IP3_Base -eq $IP4_Base) {
-                                                                                $pts = Get-Weight $Config 'String5' -100
-                                                                                $Score += $pts
-                                                                                $Breakdown['String 5'] = $pts
-                                                                                $Reasons['String 5'] = $StringText
-                                                                }
-                                                                elseif ($IP1_Base -eq $IP2_Base -and $IP2_Base -eq $IP3_Base) {
-                                                                                $pts = Get-Weight $Config 'String4' -10
-                                                                                $Score += $pts
-                                                                                $Breakdown['String 4'] = $pts
-                                                                                $Reasons['String 4'] = $StringText
-                                                                }
-                                                                else {
-                                                                                $pts = Get-Weight $Config 'ContString'
-                                                                                $Score += $pts
-                                                                                $Breakdown['Continue String'] = $pts
-                                                                                $Reasons['Continue String'] = $StringText
-                                                                                if ($isCap) {
-                                                                                                $pts2 = Get-Weight $Config 'CAPBonus'
-                                                                                                $Score += $pts2
-                                                                                                $Breakdown['CAP Bonus (string)'] = $pts2
-                                                                                                $Reasons['CAP Bonus (string)'] = "CAP student, $StringText"
-                                                                                }
-                                                                }
-                                                }
-                                                elseif ($IP2_Base -eq $CurrentIP_Base -and $IP1_Base -ne $CurrentIP_Base -and $IP2_Base -ne '') {
-                                                                $pts = Get-Weight $Config 'Zipper'
+                                                # Shown when it scores, or when this counter is the phase's last one (or past it)
+                                                $pts = Get-Weight $Config 'NewCounter' 0
+                                                if ($pts -ne 0 -or $Placement.CounterCount -ge $Placement.Limit) {
                                                                 $Score += $pts
-                                                                $Breakdown['Zipper'] = $pts
-                                                                $arrow = " $([char]0x2192) "
-                                                                $Reasons['Zipper'] = "Zipper: $CurrentIP_Short$arrow$(Get-ShortIPName (Get-NameText $PastFlights[0].Instructor))$arrow$CurrentIP_Short$nonCounterTag"
-                                                }
-                                                elseif ($IP1_Base -ne '' -and $IP1_Base -ne $CurrentIP_Base) {
-                                                                $pts = Get-Weight $Config 'BreakString'
-                                                                $Score += $pts
-                                                                $Breakdown['Break String'] = $pts
-                                                                $brokenRun = Get-IPRunLength -Flights $PastFlights -IPBase $IP1_Base
-                                                                $lastIP = Get-ShortIPName (Get-NameText $PastFlights[0].Instructor)
-                                                                $Reasons['Break String'] = if ($brokenRun -ge 2) { "Breaks $brokenRun String w/ $lastIP" } else { "New IP after 1 ride w/ $lastIP" }
+                                                                $Breakdown['New Counter'] = $pts
+                                                                $Reasons['New Counter'] = "$CurrentIP_Short is a new counter ($ofLimit)"
                                                 }
                                 }
                 }
@@ -902,21 +947,6 @@ function SoftRules {
                                                                 $Reasons['BIT Tracker (capped)'] = "$daysOff, past the $(Format-Number $BIT_Y)-day BIT limit"
                                                                 [void]$NewNotes.Add("BIT! $daysOff, consider an 86")
                                                 }
-                                }
-                }
-
-                ##################################################
-                # RULE : Counter Limit
-                # Tries to keep the total number of counters low
-                ##################################################
-                if ($IsEffectiveCounter -and $CurrentIP_Base -ne '') {
-                                $AllPastIPs = @($PastFlights | ForEach-Object { Get-BaseName (Get-NameText $_.Instructor) } | Select-Object -Unique)
-                                if ($AllPastIPs -contains $CurrentIP_Base) {
-                                                $pts = Get-Weight $Config 'CounterContinuity' 5
-                                                $Score += $pts
-                                                $Breakdown['Counter Continuity'] = $pts
-                                                $ridesWithIP = @($PastFlights | Where-Object { (Get-BaseName (Get-NameText $_.Instructor)) -eq $CurrentIP_Base }).Count
-                                                $Reasons['Counter Continuity'] = "$CurrentIP_Short already flew $ridesWithIP of $(Format-Count $PastFlights.Count 'ride')"
                                 }
                 }
 

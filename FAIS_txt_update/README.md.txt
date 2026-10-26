@@ -150,7 +150,7 @@ An absence a student already has (same start and end) is not added twice.
 - **When you drop a student,** a pop-up lists:
   - hard-rule flags (red ✖), for example `Turn time 2.8 hr < 3.25 hr minimum (vs 0730 FT5103)` or `Not opted for FE3102: FT5001 isn't complete yet` (a sim whose prerequisite is the dollar ride);
   - warnings, for example `Less than 3.5 hr TT, Flt/CC Approval Required`;
-  - the **+ / −** score reasons, spelled out, for example `3 String +10`, `Breaks 4 String w/ Lee −5` or `2 Flights and 2 Sims in last 5 Days −6`.
+  - the **+ / −** score reasons, spelled out, for example `3 String (zipper over Lee) +10`, `Breaks 2 String w/ Lee −5` or `2 Flights and 2 Sims in last 5 Days −6`.
 - **Rule breaks are allowed.** The line is hardcoded anyway and marked `OVERRIDE: ...` on the output.
 - **Corner marker** on every hardcoded student: green, amber, red, or grey while checking. Hover for the reasons; right-click for more (explain, take off, *Fly wing to...*, duplicate, delete line).
 - **Mission dropdown:** `(auto)` picks the best-scoring event that passes the rules. Choose an event to hardcode it. After the events the student can fly on the line come the next ones they are **not opted for** yet (marked `(not opted)`), then **Type a mission...** for anything else.
@@ -217,6 +217,33 @@ The MasterData **Schedule** sheet is optional: without it, type the lines or use
 powershell.exe -STA -ExecutionPolicy Bypass -File .\Tests\Invoke-SelfTest.ps1
 ```
 This checks the engine, an Excel round trip (temp files only) and the puck board window (it may flash briefly). It prints PASS/FAIL and exits 0 when everything passes. The developer suites (`Tests\*.Tests.ps1`) need Pester 5. `DataIO.Tests.ps1` also needs ImportExcel and is skipped without it.
+
+## Strings and counters
+
+The scheduler follows the AETCI instructor continuity rules, counted the same way as the **String Tracker**:
+
+- **An IP who flies a sortie with a student is a counter**, and that sortie is part of a string. Three sorties in a row with one counter is the goal; a 2 or 4-sortie string is acceptable (to prevent BITs); 5 or more is not.
+- **Each category (FT, FF, AA) is its own string**, in mission order. A new category starts a new string; a 3-sortie string should begin each one.
+- **One different counter in between doesn't break a string.** `Lee, Lee, Ortiz, Lee` is a 3-string with Lee. Two different counters in a row end it.
+- **Non-counters** (supervisors, `IsCounter` FALSE on the Instructors sheet) break no strings and aren't counters, unless they fly the student two rides in a row: then they count, for that student.
+- **Sims, solos and check rides** are left out entirely.
+- **Counter limit:** at most **6 counters in Fundamental** (FT, FF) and **3 in Airmanship** (AA). A new counter past the limit is a hard rule (`... would be counter 4 of 3 max in Airmanship (SQ/CC deviation, AF Form 4293)`): the fill won't do it, and a hardcoded line is flagged OVERRIDE.
+
+How a ride with that IP scores (SoftWeights column in brackets):
+
+| The ride | Score |
+|---|---|
+| Continues a string to 2 or 3 rides, a zipper return (`Lee, Lee, Ortiz` + Lee) included | **Continue String** (`ContString`) |
+| Ride 2 or 3 of the category's first string | also **Opening String** (`OpeningString`, default +5) |
+| Makes it a 4-string / 5+ string | **String 4** (`String4`) / **String 5** (`String5`) |
+| The zipper ride itself (`Lee, Lee` + Ortiz): Lee's 2-string waits on the next ride | **Zipper** (`Zipper`) only. Not Break String |
+| Really ends a 2-string (two different counters in a row: `Lee, Lee, Ortiz` + anyone but Lee) | **Break String** (`BreakString`). A one-ride IP has no string to break |
+| Alternating counters (`Lee, Ortiz, Lee` + Ortiz) | **Alternating** (`Alternating`, default −10), instead of Continue String |
+| A non-counter who didn't fly the ride before | **Non-Counter** (`NonCounter`), nothing else |
+| An IP who already counts in this phase | **Counter Continuity** (`CounterContinuity`) |
+| A new counter | **New Counter** (`NewCounter`, default 0; shown when it scores or for the phase's last counter) |
+
+`Alternating`, `OpeningString` and `NewCounter` are optional SoftWeights columns: leave them out and the defaults apply.
 
 ## Scoring changes from the old version
 These are deliberate fixes, so expect some different picks:
