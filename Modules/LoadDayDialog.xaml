@@ -13,16 +13,16 @@
         <TextBlock DockPanel.Dock="Top" x:Name="SourceInfoText" TextWrapping="Wrap" Foreground="#475569" Margin="0,2,0,8"/>
 
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
-            <Button x:Name="RefreshButton" Content="Read the file again" Padding="10,3" Margin="3,0"/>
+            <Button x:Name="RefreshButton" Content="Read the file again" Padding="10,4" Margin="3,0"/>
             <Button x:Name="LoadButton" Content="Load" Padding="18,4" Margin="3,0" FontWeight="Bold" IsDefault="True"/>
-            <Button x:Name="CancelButton" Content="Cancel" Padding="10,3" Margin="3,0" IsCancel="True"/>
+            <Button x:Name="CancelButton" Content="Cancel" Padding="10,4" Margin="3,0" IsCancel="True"/>
         </StackPanel>
 
         <Border DockPanel.Dock="Bottom" Background="White" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,10,0,0">
             <StackPanel>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                     <TextBlock Text="Put the lines on:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <DatePicker x:Name="TargetDayPicker" Width="140"/>
+                    <DatePicker x:Name="TargetDayPicker" Width="140" Height="26" VerticalContentAlignment="Center"/>
                     <TextBlock x:Name="TargetInfoText" VerticalAlignment="Center" Foreground="#64748B" Margin="10,0,0,0"/>
                 </StackPanel>
                 <RadioButton x:Name="ReplaceRadio" GroupName="Mode" Content="Replace that day's lines on the board" IsChecked="True" Margin="0,0,0,2"/>

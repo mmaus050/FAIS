@@ -848,4 +848,33 @@ Describe 'Puck board: click and place, Line details, fill buttons, export result
             }
         }
     }
+
+    It 'a non-counter IP puck has its own fill, in the pool and on a line' {
+        $r = & (Get-Module PuckBoard) {
+            @{
+                K          = $script:PBColors
+                Counter    = Get-PBIPPuckColors (Find-PBInstructor 'jones, bob')
+                NonCounter = Get-PBIPPuckColors (Find-PBInstructor 'Leech, Tom')
+                TextFalse  = Get-PBIPPuckColors ([PSCustomObject]@{ Name = 'Text, Ty'; IsCounter = 'FALSE' })
+                Blank      = Get-PBIPPuckColors ([PSCustomObject]@{ Name = 'Blank, Bo'; IsCounter = '' })
+                Unknown    = Get-PBIPPuckColors (Find-PBInstructor 'Nobody, Ned')
+            }
+        }
+        $r.K.IPPuckNC | Should -Not -Be $r.K.IPPuck
+        $r.Counter.Background | Should -Be $r.K.IPPuck
+        $r.Counter.Border | Should -Be $r.K.IPPuckBorder
+        $r.NonCounter.Background | Should -Be $r.K.IPPuckNC
+        $r.NonCounter.Border | Should -Be $r.K.IPPuckNCBorder
+        $r.TextFalse.Background | Should -Be $r.K.IPPuckNC
+        $r.Blank.Background | Should -Be $r.K.IPPuck -Because 'a blank IsCounter counts as a counter'
+        $r.Unknown.Background | Should -Be $r.K.IPPuck
+
+        Invoke-PB @{ Cmd = 'SetIP'; LineId = 'L1'; Name = 'Leech, Tom' }
+        $vm = & (Get-Module PuckBoard) { param($l) New-PBLineVM $l } (Get-Line 'L1')
+        $vm.IPBackground | Should -Be $r.K.IPPuckNC
+        $vm.IPBorder | Should -Be $r.K.IPPuckNCBorder
+        Invoke-PB @{ Cmd = 'SetIP'; LineId = 'L1'; Name = 'Lee, Ann' }
+        $vm = & (Get-Module PuckBoard) { param($l) New-PBLineVM $l } (Get-Line 'L1')
+        $vm.IPBackground | Should -Be $r.K.IPPuck
+    }
 }

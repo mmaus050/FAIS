@@ -46,6 +46,10 @@ $script:PBColors = @{
                 HeatClean      = '#BBF7D0'
                 HeatWarn       = '#FDE68A'
                 HeatHard       = '#FECACA'
+                IPPuck         = '#DBEAFE'
+                IPPuckBorder   = '#93C5FD'
+                IPPuckNC       = '#EDE9FE'
+                IPPuckNCBorder = '#C4B5FD'
 }
 
 # Runs queued board commands after the WPF event that asked for them has finished
@@ -770,9 +774,10 @@ function New-PBLineVM {
 
                 $stripe = if ($isReturn) { $K.StripeReturn } elseif ($isOB) { $K.StripeOB } elseif ($isSim) { $K.StripeSim } elseif ($Line.SortieType -like '*Day Local*') { $K.StripeDayLocal } else { $K.StripeOther }
 
-                # IP slot
+                # IP slot (a non-counter keeps its puck color on the line)
                 $ipText = [string]$Line.Instructor
-                $ipFg = '#1E3A8A'; $ipBg = '#DBEAFE'; $ipBorder = '#93C5FD'; $ipStyle = 'Normal'
+                $ipColors = Get-PBIPPuckColors (Find-PBInstructor $ipText)
+                $ipFg = '#1E3A8A'; $ipBg = $ipColors.Background; $ipBorder = $ipColors.Border; $ipStyle = 'Normal'
                 $ipTip = 'Drag an IP puck here. Drag it to another line to move it (Ctrl = copy).'
                 if ([string]::IsNullOrWhiteSpace($ipText)) {
                                 $ipFg = '#94A3B8'; $ipBg = '#F8FAFC'; $ipBorder = '#CBD5E1'; $ipStyle = 'Italic'
@@ -917,6 +922,26 @@ function Get-PBRowColors {
                 return @{ Background = $bg; Border = $border }
 }
 
+# An IP puck's fill and outline, in the pool and on a line: non-counters get their own color
+function Get-PBIPPuckColors {
+                param ($Instructor)
+
+                $K = $script:PBColors
+                if ($null -ne $Instructor -and -not (ConvertTo-FaisBool $Instructor.IsCounter -Default $true)) {
+                                return @{ Background = $K.IPPuckNC; Border = $K.IPPuckNCBorder }
+                }
+                return @{ Background = $K.IPPuck; Border = $K.IPPuckBorder }
+}
+
+# The IP with that name (capital letters aside), or $null
+function Find-PBInstructor {
+                param ([string]$Name)
+
+                if ([string]::IsNullOrWhiteSpace($Name)) { return $null }
+                foreach ($ip in @($script:PB.Data.Instructors)) { if ([string]$ip.Name -ieq $Name) { return $ip } }
+                return $null
+}
+
 function Update-PBPools {
                 $day = Get-PBActiveDay
                 $board = $script:PB.Board
@@ -930,13 +955,15 @@ function Update-PBPools {
                                 if ($ipFilter -and ([string]$ip.Name -notlike "*$ipFilter*") -and ([string]$ip.Callsign -notlike "*$ipFilter*")) { continue }
                                 $info = Get-InstructorPuckInfo -Instructor $ip -Board $board -Day $day
                                 $isHeld = ($null -ne $held -and $held.Kind -eq 'IP' -and [string]$held.Name -eq [string]$info.Name)
+                                $colors = Get-PBIPPuckColors $ip
                                 [PSCustomObject]@{
                                                 Name            = $info.Name
                                                 SubText         = ("{0}  {1}" -f $info.Callsign, ($info.Badges -join ' ')).Trim()
                                                 CountText       = "x$($info.Lines)"
                                                 CountVisibility = $(if ($info.Lines -gt 0) { 'Visible' } else { 'Collapsed' })
                                                 ToolTipText     = $(if ($info.Lines -gt 0) { "On $($info.Lines) line(s) this day: $($info.Times -join ', ')" } else { 'Not on any line this day' }) + $clickTip
-                                                BorderBrush     = $(if ($isHeld) { '#1E3A8A' } else { '#93C5FD' })
+                                                Background      = $colors.Background
+                                                BorderBrush     = $(if ($isHeld) { '#1E3A8A' } else { $colors.Border })
                                                 PuckBorderThickness = $(if ($isHeld) { '3' } else { '1' })
                                 }
                 }
@@ -2517,8 +2544,9 @@ function Get-PBColorKey {
                                                 (& $item 'Badge' '#D97706' '2 turns that day' '' 1 '2 turns')
                                                 (& $item 'Badge' '#DC2626' '3 or more turns that day' '' 1 '3 turns')
                                                 (& $item 'None' '' 'CAP: one flight a day, no O&Bs, needs an experienced IP. INTL: international, needs an experienced IP. U-SIM / U-FLT: unsat sim / flight. ABS: absent at those times.')) }
-                                @{ Title = 'IP pucks (left)'; Items = @(
-                                                (& $item 'Pill' '#DBEAFE' 'IP' '#93C5FD')
+                                @{ Title = 'IP pucks (left, and the IP slot on a line)'; Items = @(
+                                                (& $item 'Pill' $K.IPPuck 'Counter IP' $K.IPPuckBorder)
+                                                (& $item 'Pill' $K.IPPuckNC 'Non-counter IP (NC)' $K.IPPuckNCBorder)
                                                 (& $item 'Badge' '#1D4ED8' 'Lines that IP has that day' '' 1 'x2')
                                                 (& $item 'None' '' 'EXP: experienced IP. CHK: check IP. NC: non-counter.')) }
                                 @{ Title = 'Picking and holding'; Items = @(

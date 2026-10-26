@@ -116,7 +116,7 @@ Both files are saved or neither. If they can't be saved (still open), the change
 | **Line details** (under the days) | The selected line's student against every rule, and every student ranked for that line. See *Line details* below. |
 | **Colors** (top right) | A small window that says what every color on the board means (also Help > What the colors mean). |
 | **Day tabs** | One tab per day. **Add day** builds several days at once; crew rest is checked across them. |
-| **IP pucks** (left) | Drag onto a line's IP slot. The badge shows how many lines that IP has that day. |
+| **IP pucks** (left) | Drag onto a line's IP slot. The badge shows how many lines that IP has that day. Non-counter IPs (NC) are purple instead of blue, in the pool and on the lines. |
 | **Student pucks** (right) | Drag onto a line's student slot to hardcode them. Badges: CAP, INTL, HOLD, U-SIM, U-FLT, ABS times, turns that day. |
 
 - **Two ways to put a puck on a line:** drag it onto the slot, or **click it to pick it up** (it gets a thick outline and a dark banner says what you are holding) and then **click the slot**. Hold **Ctrl** as you click the slot to keep holding the puck for another line; **Esc** or **Let go** puts it down. **Double-click** a puck to put it straight on the selected line.

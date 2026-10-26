@@ -21,18 +21,18 @@
 
             <TextBlock Grid.Row="0" Text="Start time:" VerticalAlignment="Center"/>
             <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Margin="0,3">
-                <TextBox x:Name="StartTimeBox" Width="70" FontFamily="Consolas" FontSize="13" Padding="3,2"/>
+                <TextBox x:Name="StartTimeBox" Width="100" Height="26" FontFamily="Consolas" FontSize="13" Padding="3,0" VerticalContentAlignment="Center"/>
                 <TextBlock Text="e.g. 0730" Foreground="#94A3B8" VerticalAlignment="Center" Margin="8,0,0,0"/>
             </StackPanel>
 
             <TextBlock Grid.Row="1" Text="Number of lines:" VerticalAlignment="Center"/>
-            <TextBox x:Name="CountBox" Grid.Row="1" Grid.Column="1" Width="70" HorizontalAlignment="Left" FontFamily="Consolas" FontSize="13" Padding="3,2" Margin="0,3"/>
+            <TextBox x:Name="CountBox" Grid.Row="1" Grid.Column="1" Width="100" Height="26" HorizontalAlignment="Left" FontFamily="Consolas" FontSize="13" Padding="3,0" VerticalContentAlignment="Center" Margin="0,3"/>
 
             <TextBlock Grid.Row="2" Text="Minutes between lines:" VerticalAlignment="Center"/>
-            <TextBox x:Name="IntervalBox" Grid.Row="2" Grid.Column="1" Width="70" HorizontalAlignment="Left" FontFamily="Consolas" FontSize="13" Padding="3,2" Margin="0,3"/>
+            <TextBox x:Name="IntervalBox" Grid.Row="2" Grid.Column="1" Width="100" Height="26" HorizontalAlignment="Left" FontFamily="Consolas" FontSize="13" Padding="3,0" VerticalContentAlignment="Center" Margin="0,3"/>
 
             <TextBlock Grid.Row="3" Text="Line type:" VerticalAlignment="Center"/>
-            <ComboBox x:Name="TypeCombo" Grid.Row="3" Grid.Column="1" Width="140" HorizontalAlignment="Left" Margin="0,3"/>
+            <ComboBox x:Name="TypeCombo" Grid.Row="3" Grid.Column="1" Width="100" Height="26" HorizontalAlignment="Left" VerticalContentAlignment="Center" Margin="0,3"/>
         </Grid>
 
         <Border Background="White" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,12,0,0">
@@ -41,7 +41,7 @@
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
             <Button x:Name="AddButton" Content="Add lines" Padding="18,4" Margin="3,0" FontWeight="Bold" IsDefault="True"/>
-            <Button x:Name="CancelButton" Content="Cancel" Padding="10,3" Margin="3,0" IsCancel="True"/>
+            <Button x:Name="CancelButton" Content="Cancel" Padding="10,4" Margin="3,0" IsCancel="True"/>
         </StackPanel>
     </StackPanel>
 </Window>
