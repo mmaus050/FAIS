@@ -596,7 +596,8 @@ function Add-MasterDataAbsences {
                                 $lastRow = if ($null -ne $ws.Dimension) { $ws.Dimension.End.Row } else { 1 }
                                 for ($r = $lastRow; $r -ge 2 -and $last -eq 1; $r--) {
                                                 for ($c = 1; $c -le $lastCol; $c++) {
-                                                                if (-not [string]::IsNullOrWhiteSpace([string]$ws.Cells[$r, $c].Value)) { $last = $r; break }
+                                                                $cellValue = $ws.Cells[$r, $c].Value
+                                                                if (-not [string]::IsNullOrWhiteSpace([string]$cellValue)) { $last = $r; break }
                                                 }
                                 }
 

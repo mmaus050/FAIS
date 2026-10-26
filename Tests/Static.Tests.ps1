@@ -91,6 +91,21 @@ Describe 'Source file <Name>' -ForEach $script:SourceFiles {
                                 @($bad | ForEach-Object { "$($_.Extent.StartLineNumber): $($_.Extent.Text)" }) | Should -BeNullOrEmpty
                 }
 
+                It 'never puts a comma index straight into a method call''s arguments (Windows PowerShell 5.1 cannot parse [string]::IsNullOrWhiteSpace($ws.Cells[$r, $c].Value))' {
+                                # Brackets of their own ( (...) $(...) @(...) {...} ) make it parse again
+                                $safe = @('ParenExpressionAst', 'SubExpressionAst', 'ArrayExpressionAst', 'ScriptBlockExpressionAst', 'ScriptBlockAst')
+                                $bad = foreach ($ix in $parsed.Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.IndexExpressionAst] -and $n.Index -is [System.Management.Automation.Language.ArrayLiteralAst] }, $true)) {
+                                                $child = $ix
+                                                $node = $ix.Parent
+                                                while ($null -ne $node -and $safe -notcontains $node.GetType().Name) {
+                                                                if ($node -is [System.Management.Automation.Language.InvokeMemberExpressionAst] -and @($node.Arguments) -contains $child) { "$($ix.Extent.StartLineNumber): $($ix.Extent.Text)"; break }
+                                                                $child = $node
+                                                                $node = $node.Parent
+                                                }
+                                }
+                                @($bad) | Should -BeNullOrEmpty
+                }
+
                 It 'never wraps the board''s Lines list in @() (it is a generic List[object])' {
                                 $bad = foreach ($sub in $parsed.Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.ArrayExpressionAst] }, $true)) {
                                                 if ($sub.SubExpression.Statements.Count -eq 1 -and $sub.SubExpression.Statements[0].Extent.Text.Trim() -match '(?i)board\.(Lines|Undo)$') { "$($sub.Extent.StartLineNumber): $($sub.Extent.Text)" }
