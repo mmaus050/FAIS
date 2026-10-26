@@ -47,6 +47,25 @@ Describe 'Source file <Name>' -ForEach $script:SourceFiles {
                                 @($found | ForEach-Object { "$($_.Extent.StartLineNumber): $($_.Extent.Text)" }) | Should -BeNullOrEmpty
                 }
 
+                It 'has no comma index inside a method call''s brackets (Windows PowerShell 5.1 can''t parse it)' {
+                                # [string]::IsNullOrWhiteSpace($ws.Cells[$r, $c].Value) fails to load on 5.1; read the cell into a variable first
+                                $found = $parsed.Ast.FindAll({
+                                                param($n)
+                                                if (-not ($n -is [System.Management.Automation.Language.IndexExpressionAst] -and $n.Index -is [System.Management.Automation.Language.ArrayLiteralAst])) { return $false }
+                                                for ($p = $n.Parent; $null -ne $p; $p = $p.Parent) {
+                                                                # A script block, $( ) or ( ) starts a fresh expression, where 5.1 is fine
+                                                                if ($p -is [System.Management.Automation.Language.ScriptBlockExpressionAst] -or $p -is [System.Management.Automation.Language.SubExpressionAst] -or $p -is [System.Management.Automation.Language.ParenExpressionAst]) { return $false }
+                                                                if ($p -is [System.Management.Automation.Language.InvokeMemberExpressionAst]) {
+                                                                                foreach ($arg in @($p.Arguments)) {
+                                                                                                if ($arg.Extent.StartOffset -le $n.Extent.StartOffset -and $arg.Extent.EndOffset -ge $n.Extent.EndOffset) { return $true }
+                                                                                }
+                                                                }
+                                                }
+                                                return $false
+                                }, $true)
+                                @($found | ForEach-Object { "$($_.Extent.StartLineNumber): $($_.Extent.Text)" }) | Should -BeNullOrEmpty
+                }
+
                 It 'has no variables that differ only by case inside one function' {
                                 $clashes = foreach ($fn in $parsed.Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
                                                 $names = @{}
@@ -89,21 +108,6 @@ Describe 'Source file <Name>' -ForEach $script:SourceFiles {
                                                 $n.Index.Left -is [System.Management.Automation.Language.ArrayLiteralAst]
                                 }, $true)
                                 @($bad | ForEach-Object { "$($_.Extent.StartLineNumber): $($_.Extent.Text)" }) | Should -BeNullOrEmpty
-                }
-
-                It 'never puts a comma index straight into a method call''s arguments (Windows PowerShell 5.1 cannot parse [string]::IsNullOrWhiteSpace($ws.Cells[$r, $c].Value))' {
-                                # Brackets of their own ( (...) $(...) @(...) {...} ) make it parse again
-                                $safe = @('ParenExpressionAst', 'SubExpressionAst', 'ArrayExpressionAst', 'ScriptBlockExpressionAst', 'ScriptBlockAst')
-                                $bad = foreach ($ix in $parsed.Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.IndexExpressionAst] -and $n.Index -is [System.Management.Automation.Language.ArrayLiteralAst] }, $true)) {
-                                                $child = $ix
-                                                $node = $ix.Parent
-                                                while ($null -ne $node -and $safe -notcontains $node.GetType().Name) {
-                                                                if ($node -is [System.Management.Automation.Language.InvokeMemberExpressionAst] -and @($node.Arguments) -contains $child) { "$($ix.Extent.StartLineNumber): $($ix.Extent.Text)"; break }
-                                                                $child = $node
-                                                                $node = $node.Parent
-                                                }
-                                }
-                                @($bad) | Should -BeNullOrEmpty
                 }
 
                 It 'never wraps the board''s Lines list in @() (it is a generic List[object])' {
