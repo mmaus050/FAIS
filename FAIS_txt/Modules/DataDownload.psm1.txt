@@ -115,6 +115,7 @@ function IngestData {
                                                 # MasterData only says TRUE/FALSE, so the hooked sim is taken to be the latest one flown
                                                 $unsatSim = ConvertTo-FaisBool $Student.UnsatSim
                                                 $unsatFlight = ConvertTo-FaisBool $Student.UnsatFlight
+                                                $onHold = ConvertTo-FaisBool $Student.OnHold
                                                 $unsatSimType = if ($unsatSim) { Get-LastSimType -Student ([PSCustomObject]@{ Syllabus = $cleanSyllabus }) } else { '' }
 
                                                 [PSCustomObject]@{
@@ -126,10 +127,11 @@ function IngestData {
                                                                 UnsatSim                = $unsatSim
                                                                 UnsatSimType            = $unsatSimType
                                                                 UnsatFlight             = $unsatFlight
-                                                                # What MasterData holds now: Export writes UnsatSim / UnsatFlight back only when they differ
+                                                                # What MasterData holds now: Export writes UnsatSim / UnsatFlight / OnHold back only when they differ
                                                                 UnsatSimInMasterData    = $unsatSim
                                                                 UnsatFlightInMasterData = $unsatFlight
-                                                                OnHold                  = (ConvertTo-FaisBool $Student.OnHold)
+                                                                OnHold                  = $onHold
+                                                                OnHoldInMasterData      = $onHold
                                                                 SimDebt                 = $debt
                                                                 Syllabus                = $cleanSyllabus
                                                                 Absences                = @()

@@ -23,9 +23,12 @@
 #  - Clicking a line selects it (PB.SelectedLineId). The Line details panel under the days shows
 #    that line's student against every rule and ranks every student for the line (DetailsTimer).
 #  - The menu bar has every action; the Line menu acts on the selected line.
+#  - "Add Student Absence" blocks students off for a stretch of time: the absence goes on the
+#    students straight away (every line is checked against it) and on MasterData's StudentAbsences sheet.
 
 $script:PB = $null
 $script:PBDlg = $null
+$script:PBAbs = $null
 $script:PBKnownTags = @('IPPuck', 'StudentPuck', 'IPSlot', 'StudentSlot', 'IPPool', 'StudentPool', 'EtdBox', 'TypeBox',
                 'MissionBox', 'CallsignBox', 'NumBox', 'NotesBox', 'DeleteLine', 'Row')
 $script:PBCellTags = @('EtdBox', 'CallsignBox', 'NumBox', 'NotesBox')
@@ -50,6 +53,7 @@ $script:PBColors = @{
 
 # Runs queued board commands after the WPF event that asked for them has finished
 $script:PBDrainAction = { Invoke-PBSafe { Invoke-PBDrain } }
+$script:PBAbsDrainAction = { Invoke-PBSafe { Invoke-PBAbsenceDrain } }
 
 
 # =================================================================================
@@ -118,13 +122,13 @@ function Initialize-PuckBoardWindow {
                 $controls = @{}
                 foreach ($name in @('UndoButton', 'HelpButton', 'QuickEntryBox', 'AddLineButton', 'QuickEntryFeedback', 'TemplateCombo',
                                 'LoadTemplateButton', 'SaveTemplateButton', 'CopyPrevDayButton', 'LoadDayButton', 'AddDayPicker', 'AddDayButton',
-                                'RemoveDayButton', 'BulkLinesButton', 'UpdateSyllabiButton', 'CancelButton', 'BackToEditButton', 'RefillButton', 'ExportButton',
+                                'RemoveDayButton', 'BulkLinesButton', 'UpdateSyllabiButton', 'AddAbsenceButton', 'CancelButton', 'BackToEditButton', 'RefillButton', 'ExportButton',
                                 'FillDayButton', 'FillAllButton', 'ColorKeyButton', 'StatusText',
                                 'CountsText', 'IPSearchBox', 'IPPool', 'StudentSearchBox', 'StudentPool', 'ModeBanner', 'ModeBannerText', 'DayTabs',
                                 'SheetBanner', 'SheetBannerText', 'SheetBannerLoadButton', 'SheetBannerIgnoreButton', 'LogoImage',
                                 'HoldBanner', 'HoldBannerText', 'HoldLetGoButton', 'CenterGrid', 'DetailsSplitter', 'DetailsPanel', 'DetailsHideButton',
                                 'DetailsTitle', 'DetailsChecks', 'DetailsPlaceButton', 'DetailsHideHardCheck', 'DetailsListTitle', 'DetailsListInfo', 'DetailsList',
-                                'MainMenu', 'MenuLoadDay', 'MenuApplyTemplate', 'MenuSaveTemplate', 'MenuCopyPrevDay', 'MenuUpdateSyllabi', 'MenuClose',
+                                'MainMenu', 'MenuLoadDay', 'MenuApplyTemplate', 'MenuSaveTemplate', 'MenuCopyPrevDay', 'MenuUpdateSyllabi', 'MenuAddAbsence', 'MenuClose',
                                 'MenuUndo', 'MenuTypeLines', 'MenuBulkLines', 'MenuRecheck', 'MenuLetGo', 'MenuLine', 'MenuPrevDay', 'MenuNextDay',
                                 'MenuAddNextDay', 'MenuAddPickedDay', 'MenuRemoveDay', 'MenuFillDay', 'MenuFillAll', 'MenuRefill', 'MenuBackToEdit',
                                 'MenuExport', 'MenuShowDetails', 'MenuColorKey', 'MenuHelp', 'MenuHelpColorKey',
@@ -468,6 +472,7 @@ function Register-PBHandlers {
                 $C.AddLineButton.Add_Click({ Invoke-PBSafe { Invoke-PBQuickEntry } })
                 $C.BulkLinesButton.Add_Click({ Invoke-PBSafe { Invoke-PBBulkLines } })
                 $C.UpdateSyllabiButton.Add_Click({ Invoke-PBSafe { Invoke-PBUpdateSyllabi } })
+                $C.AddAbsenceButton.Add_Click({ Invoke-PBSafe { Invoke-PBAddAbsence } })
                 $C.UndoButton.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'Undo' } } })
                 $C.HelpButton.Add_Click({ Invoke-PBSafe { Show-PBHelp } })
                 $C.ColorKeyButton.Add_Click({ Invoke-PBSafe { Show-PBColorKey } })
@@ -509,6 +514,7 @@ function Register-PBMenuHandlers {
                 $C.MenuSaveTemplate.Add_Click({ Invoke-PBSafe { Invoke-PBSaveTemplate } })
                 $C.MenuCopyPrevDay.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'CopyPrevDay' } } })
                 $C.MenuUpdateSyllabi.Add_Click({ Invoke-PBSafe { Invoke-PBUpdateSyllabi } })
+                $C.MenuAddAbsence.Add_Click({ Invoke-PBSafe { Invoke-PBAddAbsence } })
                 $C.MenuClose.Add_Click({ Invoke-PBSafe { Invoke-PBCancel } })
                 $C.MenuUndo.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'Undo' } } })
                 $C.MenuTypeLines.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'FocusQuickEntry' } } })
@@ -2984,6 +2990,486 @@ function Show-PBOpenFileDialog {
 
 
 # =================================================================================
+#  ADD STUDENT ABSENCE
+#  Blocks students off for a stretch of time, the same as a line on MasterData's
+#  StudentAbsences sheet. The window takes the students (dragged from its list, clicked and
+#  placed, or pasted as names), the day from a calendar and the times as typed (0730, 1530
+#  or 0330 PM). The absences go on the students straight away, so every line is checked
+#  against them, and are saved to the sheet right away (else Export writes them).
+#  The window's state lives in $script:PBAbs.
+# =================================================================================
+
+# The "Add Student Absence" button. A student picked up on the board starts in the box.
+function Invoke-PBAddAbsence {
+                $day = Get-PBActiveDay
+                if ($null -eq $day) { $day = (Get-NextFlyingDay).ToString('yyyy-MM-dd') }
+                $held = $script:PB.Held
+                $start = @()
+                if ($null -ne $held -and $held.Kind -eq 'Student') { $start = @([string]$held.Name) }
+                $request = Show-PBAbsenceDialog -Day $day -Students $start
+                if ($null -eq $request) { return }
+                # The student picked up went into the absence, so they are put down
+                if ($start.Count -gt 0 -and @($request.Students) -contains $start[0]) { Clear-PBHeld -Quiet }
+                [void](Add-PBStudentAbsences -Request $request)
+}
+
+# Puts the absences the window asked for on the students, checks every line against them
+# again and saves them to MasterData's StudentAbsences sheet. A fill being reviewed is thrown
+# away: it was made without them. Returns the absences added.
+function Add-PBStudentAbsences {
+                param ([Parameter(Mandatory)] $Request)
+
+                $data = $script:PB.Data
+                $made = New-StudentAbsences -Students @($Request.Students) -Day $Request.Day -From $Request.From -To $Request.To -EndDay $Request.EndDay -Reason $Request.Reason
+                if (@($made.Errors).Count -gt 0) { Set-PBStatus (@($made.Errors) -join ' ') 'Warn'; return @() }
+                $added = @(Add-StudentAbsences -Absences $made.Absences -Students @($data.Students))
+                if ($added.Count -eq 0) {
+                                Set-PBStatus "$(Format-PBNameList @($made.Absences | ForEach-Object { $_.Student })) already blocked off $(Format-AbsenceTime $made.Absences[0]) - nothing was added." 'Warn'
+                                return @()
+                }
+
+                Exit-PBReview
+                Clear-AssessmentCache
+                $script:PB.Assess = @{}
+                Update-PBAll
+                Start-PBAssessQueue
+                Update-PBDetails -Force
+
+                $prompt = {
+                                param($file)
+                                $text = "$file is still open and FAIS could not close it (a cell may be in edit mode, or someone else has it open).`n`nClose it, then press OK to try again."
+                                return ((Show-PBMessage -Text $text -Title 'File is open' -Buttons 'OKCancel' -Icon 'Warning') -eq 'OK')
+                }
+                Show-BusyOverlay 'Saving the absence to MasterData...'
+                try { $saved = Save-StudentAbsences -MasterDataPath ([string]$data.MasterDataPath) -Students @($data.Students) -LockedPrompt $prompt }
+                finally { Hide-BusyOverlay }
+
+                $names = @($added | ForEach-Object { [string]$_.Student })
+                $text = "$(Format-PBNameList $names) blocked off $(Format-AbsenceTime $added[0])"
+                if ($added[0].Reason) { $text += " ($($added[0].Reason))" }
+                $clashes = @(Get-PBAbsenceClashes -Names $names)
+                if ($clashes.Count -gt 0) { $text += ". Already hardcoded inside it (flagged red): $($clashes -join ', ')" }
+                if ($saved.Saved) {
+                                Set-PBStatus "$text. Saved to MasterData's StudentAbsences sheet." $(if ($clashes.Count -gt 0) { 'Warn' } else { 'Good' })
+                }
+                else {
+                                $text += ". It holds for this run only: MasterData could not be saved ($($saved.Message)). Export writes it with the schedule."
+                                [void](Show-PBMessage -Text $text -Title 'Add Student Absence' -Buttons 'OK' -Icon 'Warning')
+                                Set-PBStatus $text 'Warn'
+                }
+                return $added
+}
+
+# The hardcoded lines (any day) of these students that an absence now covers: 'Tue 0730 Adams, Al'
+function Get-PBAbsenceClashes {
+                param ([string[]]$Names = @())
+
+                $out = New-Object System.Collections.Generic.List[string]
+                foreach ($l in @($script:PB.Board.Lines | Sort-Object -Property ETD)) {
+                                if (-not $l.Student -or $Names -notcontains [string]$l.Student -or (Test-IsReturnSortieType ([string]$l.SortieType))) { continue }
+                                $a = Get-PlacementAssessment -Board $script:PB.Board -LineId $l.Id -StudentName $l.Student -MissionName ([string]$l.Mission) -Data $script:PB.Data
+                                if (@($a.Violations | Where-Object { $_.Rule -eq 'ABSENCE' }).Count -gt 0) { $out.Add(('{0} {1}' -f $l.ETD.ToString('ddd HHmm'), $l.Student)) }
+                }
+                return $out.ToArray()
+}
+
+# 'Adams, Al', 'Adams, Al and Brown, Bea', '3 students (Adams, Al; Brown, Bea; Cruz, Cy)'
+function Format-PBNameList {
+                param ([string[]]$Names = @())
+
+                $n = @($Names | Select-Object -Unique)
+                if ($n.Count -le 1) { return ($n -join '') }
+                if ($n.Count -eq 2) { return "$($n[0]) and $($n[1])" }
+                return "$($n.Count) students ($($n -join '; '))"
+}
+
+# The Add student absence window. -Students start in the box. Returns
+# @{ Students; Day; From; To; EndDay; Reason } or $null when cancelled.
+function Show-PBAbsenceDialog {
+                param ([string]$Day, [string[]]$Students = @())
+
+                $win = Initialize-PBAbsenceDialog -Day $Day -Students $Students
+                try { [void]$win.ShowDialog() } catch { Write-PBLog "Add student absence dialog: $($_.Exception.Message)" }
+                $result = $script:PBAbs.Result
+                $script:PBAbs = $null
+                return $result
+}
+
+# Builds the Add student absence window without showing it
+function Initialize-PBAbsenceDialog {
+                param ([string]$Day, [string[]]$Students = @())
+
+                [xml]$xaml = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'AbsenceDialog.xaml') -Raw -Encoding UTF8
+                $win = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
+                $abs = @{ Window = $win; Result = $null; Chosen = (New-Object System.Collections.Generic.List[string]); Held = ''; Press = $null; Drag = $null; PendingDrop = $null; LastDay = $null
+                                Actions = (New-Object System.Collections.Generic.List[object]) }
+                foreach ($item in @('SearchBox', 'StudentPool', 'DropBox', 'DropHint', 'ChosenList', 'PasteButton', 'ClearButton', 'HoldText', 'PasteText',
+                                'DayPicker', 'FromBox', 'ToBox', 'EndDayPicker', 'ReasonBox', 'PreviewText', 'AddButton', 'CancelButton')) {
+                                $c = $win.FindName($item)
+                                if ($null -eq $c) { throw "AbsenceDialog.xaml is missing the element '$item'" }
+                                $abs[$item] = $c
+                }
+                $script:PBAbs = $abs
+                try { if ($script:PB.Window.IsVisible) { $win.Owner = $script:PB.Window } } catch { }
+
+                foreach ($name in $Students) { Add-PBAbsenceStudent -Name $name -NoRefresh }
+                $date = ConvertTo-PBDayDate $Day
+                $abs.LastDay = $date
+                $abs.DayPicker.SelectedDate = $date
+                $abs.EndDayPicker.SelectedDate = $date
+
+                # Mouse, drag and keys are handled once for the whole window, like the board
+                $win.AddHandler([System.Windows.UIElement]::PreviewMouseLeftButtonDownEvent,
+                                [System.Windows.Input.MouseButtonEventHandler]{ param($s, $e) Invoke-PBSafe { Invoke-PBAbsenceMouseDown $e } }, $true)
+                $win.AddHandler([System.Windows.UIElement]::PreviewMouseMoveEvent,
+                                [System.Windows.Input.MouseEventHandler]{ param($s, $e) Invoke-PBSafe { Invoke-PBAbsenceMouseMove $e } }, $true)
+                $win.AddHandler([System.Windows.UIElement]::PreviewMouseLeftButtonUpEvent,
+                                [System.Windows.Input.MouseButtonEventHandler]{ param($s, $e) Invoke-PBSafe { Invoke-PBAbsenceMouseUp $e } }, $true)
+                $win.AddHandler([System.Windows.UIElement]::DragEnterEvent,
+                                [System.Windows.DragEventHandler]{ param($s, $e) Invoke-PBSafe { Invoke-PBAbsenceDragOver $e } }, $true)
+                $win.AddHandler([System.Windows.UIElement]::DragOverEvent,
+                                [System.Windows.DragEventHandler]{ param($s, $e) Invoke-PBSafe { Invoke-PBAbsenceDragOver $e } }, $true)
+                $win.AddHandler([System.Windows.UIElement]::DropEvent,
+                                [System.Windows.DragEventHandler]{ param($s, $e) Invoke-PBSafe { Invoke-PBAbsenceDrop $e } }, $true)
+                $win.AddHandler([System.Windows.UIElement]::PreviewKeyDownEvent,
+                                [System.Windows.Input.KeyEventHandler]{ param($s, $e) Invoke-PBSafe { Invoke-PBAbsenceKeyDown $e } }, $true)
+                $win.AddHandler([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent,
+                                [System.Windows.RoutedEventHandler]{ param($s, $e) Invoke-PBSafe { Invoke-PBAbsenceRemoveClick $e } }, $true)
+                $abs.SearchBox.Add_TextChanged({ Invoke-PBSafe { Update-PBAbsencePool } })
+                $abs.PasteButton.Add_Click({ Invoke-PBSafe { Invoke-PBAbsencePaste } })
+                $abs.ClearButton.Add_Click({ Invoke-PBSafe { Clear-PBAbsenceStudents } })
+                $abs.DayPicker.Add_SelectedDateChanged({ Invoke-PBSafe { Invoke-PBAbsenceDayChanged } })
+                $abs.EndDayPicker.Add_SelectedDateChanged({ Invoke-PBSafe { Update-PBAbsencePreview } })
+                $abs.FromBox.Add_TextChanged({ Invoke-PBSafe { Update-PBAbsencePreview } })
+                $abs.ToBox.Add_TextChanged({ Invoke-PBSafe { Update-PBAbsencePreview } })
+                $abs.ReasonBox.Add_TextChanged({ Invoke-PBSafe { Update-PBAbsencePreview } })
+                $abs.AddButton.Add_Click({ Invoke-PBSafe { Submit-PBAbsenceDialog } })
+                $win.Add_Loaded({ Invoke-PBSafe { if ($script:PBAbs.Chosen.Count -gt 0) { [void]$script:PBAbs.FromBox.Focus() } else { [void]$script:PBAbs.DropBox.Focus() } } })
+                Update-PBAbsenceView
+                return $win
+}
+
+# The student list (without the ones in the box), the box, and what Add absence would do
+function Update-PBAbsenceView {
+                Update-PBAbsencePool
+                Update-PBAbsenceChosen
+                [void](Update-PBAbsencePreview)
+}
+
+# The students on the right: the one picked up gets a thick outline; their HOLD and their
+# absences on the day picked show, like on the board
+function Update-PBAbsencePool {
+                $abs = $script:PBAbs
+                $filter = ([string]$abs.SearchBox.Text).Trim()
+                $picked = $abs.DayPicker.SelectedDate
+                $day = if ($null -ne $picked) { ([datetime]$picked).ToString('yyyy-MM-dd') } else { '' }
+                $vms = foreach ($s in @($script:PB.Data.Students | Sort-Object -Property Name)) {
+                                $name = ([string]$s.Name).Trim()
+                                if ($name -eq '' -or $abs.Chosen.Contains($name)) { continue }
+                                if ($filter -and $name -notlike "*$filter*") { continue }
+                                $away = @(Get-StudentDayAbsences -Student $s -Day $day)
+                                $badges = @(foreach ($a in $away) { "ABS $($a.Times)" })
+                                if (ConvertTo-FaisBool $s.OnHold) { $badges = @('HOLD') + $badges }
+                                $isHeld = ($abs.Held -ieq $name)
+                                $tip = @(foreach ($a in $away) { "Absent $($a.Times) $($a.Reason)".Trim() })
+                                $tip += 'Drag into the box, or click and then click the box. Double-click adds them.'
+                                [PSCustomObject]@{
+                                                Name                = $name
+                                                BadgeText           = ($badges -join '  ')
+                                                BadgeVisibility     = $(if ($badges.Count -gt 0) { 'Visible' } else { 'Collapsed' })
+                                                Background          = $(if ($away.Count -gt 0) { '#FEF3C7' } else { '#DCFCE7' })
+                                                BorderBrush         = $(if ($isHeld) { '#1D4ED8' } elseif ($away.Count -gt 0) { '#FCD34D' } else { '#86EFAC' })
+                                                PuckBorderThickness = $(if ($isHeld) { '3' } else { '1' })
+                                                ToolTipText         = ($tip -join "`n")
+                                }
+                }
+                $abs.StudentPool.ItemsSource = @($vms)
+}
+
+function Update-PBAbsenceChosen {
+                $abs = $script:PBAbs
+                $abs.ChosenList.ItemsSource = @(foreach ($n in $abs.Chosen) { [PSCustomObject]@{ Name = $n } })
+                $abs.DropHint.Visibility = if ($abs.Chosen.Count -gt 0) { 'Collapsed' } else { 'Visible' }
+}
+
+# What the window's boxes ask for right now
+function Get-PBAbsenceRequest {
+                $abs = $script:PBAbs
+                return @{
+                                Students = $abs.Chosen.ToArray()
+                                Day      = $abs.DayPicker.SelectedDate
+                                From     = [string]$abs.FromBox.Text
+                                To       = [string]$abs.ToBox.Text
+                                EndDay   = $abs.EndDayPicker.SelectedDate
+                                Reason   = [string]$abs.ReasonBox.Text
+                }
+}
+
+# Says what Add absence would do, or what is still missing or wrong. Returns $true when it can add.
+function Update-PBAbsencePreview {
+                $abs = $script:PBAbs
+                if ($null -eq $abs) { return $false }
+                $ask = Get-PBAbsenceRequest
+                $made = New-StudentAbsences -Students $ask.Students -Day $ask.Day -From $ask.From -To $ask.To -EndDay $ask.EndDay -Reason $ask.Reason
+                if (@($made.Errors).Count -gt 0) {
+                                # Grey while boxes are still empty, red once something typed is wrong
+                                $empty = ($ask.Students.Count -eq 0 -or [string]::IsNullOrWhiteSpace($ask.From) -or [string]::IsNullOrWhiteSpace($ask.To))
+                                $abs.PreviewText.Text = (@($made.Errors) -join "`n")
+                                $abs.PreviewText.Foreground = Get-PBBrush $(if ($empty) { '#64748B' } else { '#B91C1C' })
+                                $abs.AddButton.IsEnabled = $false
+                                return $false
+                }
+                $first = $made.Absences[0]
+                $text = "$(Format-PBNameList $ask.Students): away $(Format-AbsenceTime $first)"
+                if ($first.Reason) { $text += " ($($first.Reason))" }
+                $text += ". A line for each goes on MasterData's StudentAbsences sheet."
+                $have = @(foreach ($s in @($script:PB.Data.Students)) {
+                                if ($ask.Students -notcontains ([string]$s.Name).Trim()) { continue }
+                                if (@($s.Absences | Where-Object { $null -ne $_ -and $_.StartTime -eq $first.StartTime -and $_.EndTime -eq $first.EndTime }).Count -gt 0) { ([string]$s.Name).Trim() }
+                })
+                if ($have.Count -gt 0) { $text += "`nAlready blocked off then (nothing is added for them): $($have -join '; ')" }
+                if ($script:PB.Mode -eq 'Review') { $text += "`nThe fill you are reviewing is thrown away (it was made without this absence). Fill again afterwards." }
+                $abs.PreviewText.Text = $text
+                $abs.PreviewText.Foreground = Get-PBBrush '#0F172A'
+                $abs.AddButton.IsEnabled = ($have.Count -lt $ask.Students.Count)
+                return $abs.AddButton.IsEnabled
+}
+
+function Submit-PBAbsenceDialog {
+                $abs = $script:PBAbs
+                if (-not (Update-PBAbsencePreview)) { return }
+                $abs.Result = Get-PBAbsenceRequest
+                try { $abs.Window.DialogResult = $true } catch { $abs.Window.Close() }
+}
+
+# Puts a student in the box (once) and lets go of them if they were picked up
+function Add-PBAbsenceStudent {
+                param ([string]$Name, [switch]$NoRefresh)
+
+                $abs = $script:PBAbs
+                $student = @($script:PB.Data.Students | Where-Object { ([string]$_.Name).Trim() -ieq ([string]$Name).Trim() })[0]
+                if ($null -eq $student) { return }
+                $n = ([string]$student.Name).Trim()
+                if (-not $abs.Chosen.Contains($n)) { $abs.Chosen.Add($n) }
+                if ($abs.Held -ieq $n) { Set-PBAbsenceHeld -Name '' -NoRefresh }
+                if (-not $NoRefresh) { Update-PBAbsenceView }
+}
+
+function Remove-PBAbsenceStudent {
+                param ([string]$Name)
+
+                [void]$script:PBAbs.Chosen.Remove($Name)
+                Update-PBAbsenceView
+}
+
+function Clear-PBAbsenceStudents {
+                $script:PBAbs.Chosen.Clear()
+                $script:PBAbs.PasteText.Text = ''
+                Update-PBAbsenceView
+}
+
+# Picks a student up from the list (a click), or lets go when they are the one held (or -Name '')
+function Set-PBAbsenceHeld {
+                param ([string]$Name, [switch]$NoRefresh)
+
+                $abs = $script:PBAbs
+                $abs.Held = if ($Name -and $abs.Held -ine $Name) { $Name } else { '' }
+                $abs.HoldText.Text = if ($abs.Held) { "Holding $($abs.Held): click the box to add them (Esc lets go)." } else { '' }
+                $abs.DropBox.BorderBrush = Get-PBBrush $(if ($abs.Held) { '#1D4ED8' } else { '#94A3B8' })
+                if (-not $NoRefresh) { Update-PBAbsencePool }
+}
+
+# Adds the students named in -Text (what was copied, when -Text is not given). Pieces that
+# are no one, or more than one student, are listed under the box.
+function Invoke-PBAbsencePaste {
+                param ([string]$Text)
+
+                $abs = $script:PBAbs
+                if (-not $PSBoundParameters.ContainsKey('Text')) { $Text = Get-PBClipboardText }
+                if ([string]::IsNullOrWhiteSpace($Text)) {
+                                $abs.PasteText.Text = 'Nothing to paste: copy the names first (one per line or cell, from Excel, an email or a list).'
+                                return
+                }
+                $found = Resolve-PastedStudents -Text $Text -Students @($script:PB.Data.Students)
+                foreach ($s in @($found.Students)) { Add-PBAbsenceStudent -Name ([string]$s.Name) -NoRefresh }
+                $unknown = @($found.Unknown)
+                $abs.PasteText.Text = if ($unknown.Count -eq 0) { '' } else {
+                                $shown = @($unknown | Select-Object -First 8) -join '; '
+                                if ($unknown.Count -gt 8) { $shown += " and $($unknown.Count - 8) more" }
+                                "Not a student (or more than one): $shown"
+                }
+                Update-PBAbsenceView
+}
+
+# What was copied, as text ('' when nothing is, or it can't be read). Wrapped so the tests can answer it.
+function Get-PBClipboardText {
+                try { if ([System.Windows.Clipboard]::ContainsText()) { return [string][System.Windows.Clipboard]::GetText() } } catch { }
+                return ''
+}
+
+# The end day follows the start day, unless it was set to another day
+function Invoke-PBAbsenceDayChanged {
+                $abs = $script:PBAbs
+                $day = $abs.DayPicker.SelectedDate
+                $end = $abs.EndDayPicker.SelectedDate
+                if ($null -eq $end -or ($null -ne $abs.LastDay -and ([datetime]$end).Date -eq ([datetime]$abs.LastDay).Date)) { $abs.EndDayPicker.SelectedDate = $day }
+                $abs.LastDay = $day
+                Update-PBAbsencePool
+                [void](Update-PBAbsencePreview)
+}
+
+# A mouse action in the window (Add / Remove / Hold a student, Paste names) runs after the
+# event that asked for it, so the lists are never rebuilt inside their own events (like
+# Request-PBCommand on the board)
+function Request-PBAbsenceAction {
+                param ([hashtable]$Action)
+
+                $script:PBAbs.Actions.Add($Action)
+                [void]$script:PBAbs.Window.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::Background, [System.Action]$script:PBAbsDrainAction)
+}
+
+function Invoke-PBAbsenceDrain {
+                $abs = $script:PBAbs
+                if ($null -eq $abs) { return }
+                while ($abs.Actions.Count -gt 0) {
+                                $next = $abs.Actions[0]
+                                $abs.Actions.RemoveAt(0)
+                                switch ($next.Action) {
+                                                'Add' { Add-PBAbsenceStudent -Name $next.Name }
+                                                'Remove' { Remove-PBAbsenceStudent -Name $next.Name }
+                                                'Hold' { Set-PBAbsenceHeld -Name $next.Name }
+                                                'Paste' { Invoke-PBAbsencePaste -Text $next.Text }
+                                }
+                }
+}
+
+# A press on a student (list or box) may become a drag or a click; a press on the box gives it
+# the keyboard, so Ctrl+V pastes there
+function Invoke-PBAbsenceMouseDown {
+                param ($e)
+
+                $abs = $script:PBAbs
+                $abs.Press = $null
+                $abs.Drag = $null
+                $src = $e.OriginalSource
+                if (Test-PBInsideInput $src) { return }
+                $el = Find-PBTagged $src @('AbsencePuck', 'AbsenceChosen', 'AbsenceDrop')
+                if ($null -eq $el) { return }
+                $abs.Press = @{ Element = $el; Count = $e.ClickCount }
+                if ([string]$el.Tag -eq 'AbsenceDrop') { [void]$el.Focus(); return }
+                $abs.Drag = @{ Start = $e.GetPosition($abs.Window); Source = $el; Name = [string]$el.DataContext.Name; From = [string]$el.Tag }
+}
+
+# A student from the list goes into the box; one from the box goes back to the list.
+# The payload has its own format, so the board never takes it.
+function Invoke-PBAbsenceMouseMove {
+                param ($e)
+
+                $abs = $script:PBAbs
+                $d = $abs.Drag
+                if ($null -eq $d) { return }
+                if ($e.LeftButton -ne [System.Windows.Input.MouseButtonState]::Pressed) { $abs.Drag = $null; return }
+                $p = $e.GetPosition($abs.Window)
+                if ([math]::Abs($p.X - $d.Start.X) -lt [System.Windows.SystemParameters]::MinimumHorizontalDragDistance -and
+                                [math]::Abs($p.Y - $d.Start.Y) -lt [System.Windows.SystemParameters]::MinimumVerticalDragDistance) { return }
+                $abs.Drag = $null
+                $abs.Press = $null
+                $abs.PendingDrop = $null
+                $data = New-Object System.Windows.DataObject('FAIS.Absence', ('{0}|{1}' -f $d.From, $d.Name))
+                [void][System.Windows.DragDrop]::DoDragDrop($d.Source, $data, [System.Windows.DragDropEffects]::Move)
+                # Applied after the drag, never inside it (the lists are rebuilt)
+                $drop = $abs.PendingDrop
+                $abs.PendingDrop = $null
+                if ($null -ne $drop) { Request-PBAbsenceAction $drop }
+}
+
+# A click (press and release on the same thing, no drag): on a student in the list, pick them
+# up (a double-click adds them); on the box while holding one, add them
+function Invoke-PBAbsenceMouseUp {
+                param ($e)
+
+                $abs = $script:PBAbs
+                $press = $abs.Press
+                $abs.Press = $null
+                $abs.Drag = $null
+                if ($null -eq $press) { return }
+                $el = Find-PBTagged $e.OriginalSource @('AbsencePuck', 'AbsenceChosen', 'AbsenceDrop')
+                if ($null -eq $el -or -not [object]::ReferenceEquals($el, $press.Element)) { return }
+                if ([string]$el.Tag -eq 'AbsencePuck') {
+                                $name = [string]$el.DataContext.Name
+                                Request-PBAbsenceAction @{ Action = $(if ($press.Count -ge 2) { 'Add' } else { 'Hold' }); Name = $name }
+                }
+                elseif ($abs.Held) { Request-PBAbsenceAction @{ Action = 'Add'; Name = $abs.Held } }
+}
+
+# What a drop here would do: @{ Action = 'Add' / 'Remove'; Name } for a student dragged in
+# this window, @{ Action = 'Paste' } for text (names) dragged from another program, or $null
+function Get-PBAbsenceDropAction {
+                param ($e)
+
+                $target = Find-PBTagged $e.OriginalSource @('AbsenceDrop', 'AbsencePool')
+                if ($null -eq $target) { return $null }
+                $tag = [string]$target.Tag
+                if ($e.Data.GetDataPresent('FAIS.Absence')) {
+                                $parts = ([string]$e.Data.GetData('FAIS.Absence')) -split '\|', 2
+                                if ($parts.Count -lt 2) { return $null }
+                                if ($tag -eq 'AbsenceDrop' -and $parts[0] -eq 'AbsencePuck') { return @{ Action = 'Add'; Name = $parts[1] } }
+                                if ($tag -eq 'AbsencePool' -and $parts[0] -eq 'AbsenceChosen') { return @{ Action = 'Remove'; Name = $parts[1] } }
+                                return $null
+                }
+                if ($tag -eq 'AbsenceDrop' -and $e.Data.GetDataPresent([System.Windows.DataFormats]::UnicodeText)) { return @{ Action = 'Paste' } }
+                return $null
+}
+
+function Invoke-PBAbsenceDragOver {
+                param ($e)
+
+                $act = Get-PBAbsenceDropAction $e
+                $e.Effects = if ($null -eq $act) { [System.Windows.DragDropEffects]::None } elseif ($act.Action -eq 'Paste') { [System.Windows.DragDropEffects]::Copy } else { [System.Windows.DragDropEffects]::Move }
+                $e.Handled = $true
+}
+
+function Invoke-PBAbsenceDrop {
+                param ($e)
+
+                $act = Get-PBAbsenceDropAction $e
+                $e.Handled = $true
+                if ($null -eq $act) { $e.Effects = [System.Windows.DragDropEffects]::None; return }
+                if ($act.Action -eq 'Paste') {
+                                $e.Effects = [System.Windows.DragDropEffects]::Copy
+                                Request-PBAbsenceAction @{ Action = 'Paste'; Text = [string]$e.Data.GetData([System.Windows.DataFormats]::UnicodeText) }
+                                return
+                }
+                $e.Effects = [System.Windows.DragDropEffects]::Move
+                $script:PBAbs.PendingDrop = $act
+}
+
+# Ctrl+V pastes names (in a text box it pastes there as usual); Esc lets go of a student
+# picked up before it closes the window
+function Invoke-PBAbsenceKeyDown {
+                param ($e)
+
+                $abs = $script:PBAbs
+                if ($e.Key -eq [System.Windows.Input.Key]::Escape -and $abs.Held) { Set-PBAbsenceHeld -Name ''; $e.Handled = $true; return }
+                $ctrl = ([System.Windows.Input.Keyboard]::Modifiers -band [System.Windows.Input.ModifierKeys]::Control) -eq [System.Windows.Input.ModifierKeys]::Control
+                if ($ctrl -and $e.Key -eq [System.Windows.Input.Key]::V -and [System.Windows.Input.Keyboard]::FocusedElement -isnot [System.Windows.Controls.Primitives.TextBoxBase]) {
+                                Invoke-PBAbsencePaste
+                                $e.Handled = $true
+                }
+}
+
+# The x on a student in the box takes them out
+function Invoke-PBAbsenceRemoveClick {
+                param ($e)
+
+                $btn = Find-PBTagged $e.OriginalSource @('AbsenceRemove')
+                if ($null -eq $btn -or $null -eq $btn.DataContext) { return }
+                Request-PBAbsenceAction @{ Action = 'Remove'; Name = [string]$btn.DataContext.Name }
+                $e.Handled = $true
+}
+
+
+# =================================================================================
 #  TOOLBAR ACTIONS
 # =================================================================================
 
@@ -3287,6 +3773,15 @@ UPDATE SYLLABI
     no entry makes sure it is not complete (an event FAIS has planned for later stays).
   Only events in a student's syllabus change. You see what will change first; Yes saves
   each student's tab in OutputSchedule and their SimDebt in MasterData right away.
+
+ADD STUDENT ABSENCE
+  Blocks students off for a stretch of time: the same as a line on MasterData's
+  StudentAbsences sheet. Drag students into the box, click one and then click the box, or
+  copy their names (from Excel, an email...) and press Ctrl+V. Pick the day on the calendar
+  and type the times: 0730 or 1530 (24-hour), or 0730 AM / 0330 PM (12-hour). "on" is the
+  day it ends: the same day, unless it runs past midnight or over several days.
+  The board and the scheduler keep them off every line inside it straight away (a line they
+  are already hardcoded on turns red), and the line is saved to MasterData right away.
 "@
                 [void][System.Windows.MessageBox]::Show($text, 'FAIS Puck Board help', [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
 }
@@ -3693,7 +4188,8 @@ function Submit-PBDialog {
 
 # What the export result window says: {Ok; Title; Subtitle; Lines = @({Kind; Text})}.
 # Kind: Head, Text, Path, Good, Warn, Hard.
-#   -UnsatChanges: Get-UnsatFlagUpdates from before the export (name -> @{ UnsatSim; UnsatFlight })
+#   -UnsatChanges: Get-UnsatFlagUpdates from before the export (name -> @{ UnsatSim; UnsatFlight; OnHold })
+#   -Absences: Get-PendingStudentAbsences from before the export (ones Add Student Absence could not save)
 #   -Warnings: the export's warning messages (why it failed, or names MasterData didn't have)
 function Get-FaisExportSummary {
                 param (
@@ -3704,6 +4200,7 @@ function Get-FaisExportSummary {
                                 [string]$MasterDataPath = '',
                                 [string]$AtisPath = '',
                                 [hashtable]$UnsatChanges = @{},
+                                [array]$Absences = @(),
                                 [string[]]$Warnings = @()
                 )
 
@@ -3736,7 +4233,10 @@ function Get-FaisExportSummary {
                 & $add 'Text' "OutputSchedule: the MasterSchedule tab for $dayText (other days already exported are kept), and each student's syllabus tab"
                 & $add 'Path' $OutputPath
                 $unsatCount = @($UnsatChanges.Keys).Count
-                & $add 'Text' $(if ($unsatCount -gt 0) { "MasterData: SimDebt, and the unsat flags of $unsatCount student(s)" } else { 'MasterData: SimDebt' })
+                $absenceRows = @($Absences | Where-Object { $null -ne $_ })
+                $mdText = if ($unsatCount -gt 0) { "MasterData: SimDebt, and the unsat / HOLD flags of $unsatCount student(s)" } else { 'MasterData: SimDebt' }
+                if ($absenceRows.Count -gt 0) { $mdText += "; StudentAbsences: $($absenceRows.Count) line(s) Add Student Absence could not save" }
+                & $add 'Text' $mdText
                 & $add 'Path' $MasterDataPath
                 if ($AtisPath) {
                                 & $add 'Text' "ATIS: one tab per day for $dayText, flights then sims"
@@ -3744,14 +4244,20 @@ function Get-FaisExportSummary {
                 }
 
                 if ($unsatCount -gt 0) {
-                                & $add 'Head' 'Unsats'
+                                & $add 'Head' 'Unsats and HOLD status'
                                 foreach ($name in @($UnsatChanges.Keys | Sort-Object)) {
                                                 $flags = $UnsatChanges[$name]
                                                 foreach ($key in @($flags.Keys | Sort-Object)) {
-                                                                if ($flags[$key]) { & $add 'Warn' "$key set for $name" }
+                                                                if ($key -eq 'OnHold') { & $add 'Text' $(if ($flags[$key]) { "$name put on hold" } else { "$name taken off hold" }) }
+                                                                elseif ($flags[$key]) { & $add 'Warn' "$key set for $name" }
                                                                 else { & $add 'Good' "$key cleared for $name (cleaned up on this schedule)" }
                                                 }
                                 }
+                }
+
+                if ($absenceRows.Count -gt 0) {
+                                & $add 'Head' 'Student absences'
+                                foreach ($a in $absenceRows) { & $add 'Text' ("$($a.Student): $(Format-AbsenceTime $a)" + $(if ($a.Reason) { " ($($a.Reason))" } else { '' })) }
                 }
 
                 $overrides = @($FillResult.Overrides)
@@ -4084,6 +4590,38 @@ function Test-PuckBoardWindow {
                                 & $check ((Get-BoardLine $script:PB.Board $open.Id).Instructor -eq $ipName) 'double-clicking an IP puts them on the selected line'
                                 Invoke-PBCommand @{ Cmd = 'Undo' }
                                 Close-PBPopup
+
+                                $step = 'add student absence dialog'
+                                $absName = [string]$Data.Students[0].Name
+                                $absOther = [string]$Data.Students[1].Name
+                                [void](Initialize-PBAbsenceDialog -Day $day2 -Students @($absName))
+                                & $check ($script:PBAbs.Chosen.Count -eq 1 -and @($script:PBAbs.ChosenList.ItemsSource).Count -eq 1) 'the student passed in starts in the box'
+                                & $check (@($script:PBAbs.StudentPool.ItemsSource).Count -eq @($Data.Students).Count - 1) 'the list leaves out the student in the box'
+                                & $check (-not $script:PBAbs.AddButton.IsEnabled) 'Add absence waits for the times'
+                                & $check (([datetime]$script:PBAbs.DayPicker.SelectedDate).ToString('yyyy-MM-dd') -eq $day2) 'the calendar starts on the day on screen'
+                                $script:PBAbs.FromBox.Text = '1700'
+                                $script:PBAbs.ToBox.Text = '0630 PM'
+                                & $check ($script:PBAbs.AddButton.IsEnabled -and [string]$script:PBAbs.PreviewText.Text -like '*1700-1830*') 'preview shows the absence (24-hour and 12-hour times read)'
+                                $script:PBAbs.ToBox.Text = '1600'
+                                & $check (-not $script:PBAbs.AddButton.IsEnabled) 'an end before the start is refused'
+                                $script:PBAbs.ToBox.Text = '6:30 pm'
+                                Invoke-PBAbsencePaste -Text "$absOther`r`nNobody, No"
+                                & $check ($script:PBAbs.Chosen.Count -eq 2 -and [string]$script:PBAbs.PasteText.Text -like '*Nobody, No*') 'pasted names go in the box and a name that is no one is listed'
+                                Remove-PBAbsenceStudent -Name $absOther
+                                & $check ($script:PBAbs.Chosen.Count -eq 1) 'x takes a student out of the box'
+                                $script:PBAbs.ReasonBox.Text = 'Dentist'
+                                Submit-PBAbsenceDialog
+                                $absAsk = $script:PBAbs.Result
+                                $script:PBAbs = $null
+                                & $check ($null -ne $absAsk -and (@($absAsk.Students) -join ',') -eq $absName -and $absAsk.From -eq '1700' -and $absAsk.Reason -eq 'Dentist') 'dialog returns what was asked'
+                                if ($null -ne $absAsk) {
+                                                $made = New-StudentAbsences -Students $absAsk.Students -Day $absAsk.Day -From $absAsk.From -To $absAsk.To -EndDay $absAsk.EndDay -Reason $absAsk.Reason
+                                                $absAdded = @(Add-StudentAbsences -Absences $made.Absences -Students @($script:PB.Data.Students))
+                                                Select-PBDay $day2
+                                                Update-PBAll
+                                                $puck = @($script:PB.C.StudentPool.ItemsSource | Where-Object { $_.Name -eq $absName })[0]
+                                                & $check ($absAdded.Count -eq 1 -and [string]$puck.BadgeText -like '*ABS 1700-1830*') 'the absence shows on the student''s puck'
+                                }
 
                                 $step = 'color key and export result windows'
                                 $key = New-PBColorKeyWindow

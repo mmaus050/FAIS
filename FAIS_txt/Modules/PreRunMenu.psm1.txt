@@ -1,11 +1,13 @@
 # PRERUNMENU.PSM1 DIRECTORY:
 #             The pop-ups that run before the puck board: log hooked (unsat) and
-#             incomplete events from the previous schedule
+#             incomplete events from the previous schedule, and change students' HOLD status
 # Initialize-FaisWinForms
 # Show-PreRunMenu
 # Show-EventSelectionMenu
+# Show-HoldStatusMenu
 # Process-HookedEvents
 # Process-IncompleteEvents
+# Update-StudentHoldStatus
 # Save-PreRunChanges
 # Invoke-PreRunMenu
 
@@ -26,13 +28,13 @@ function Initialize-FaisWinForms {
 # |  __/| | |  __/_____|  _ <| |_| | | | | | |  | |  __/ | | | |_| |
 # |_|   |_|  \___|     |_| \_\\__,_|_| |_| |_|  |_|\___|_| |_|\__,_|
 # ========================================================================================
-# Returns "Hook", "Incomplete", "Run" or "Exit"
+# Returns "Hook", "Incomplete", "Hold", "Run" or "Exit"
 function Show-PreRunMenu {
                 Initialize-FaisWinForms
 
                 $Form = New-Object System.Windows.Forms.Form
                 $Form.Text = "Pre-Run Operations Menu"
-                $Form.Size = New-Object System.Drawing.Size(400, 300)
+                $Form.Size = New-Object System.Drawing.Size(400, 350)
                 $Form.StartPosition = "CenterScreen"
                 $Form.Font = New-Object System.Drawing.Font("Segoe UI", 11)
 
@@ -56,9 +58,16 @@ function Show-PreRunMenu {
                 $btnIncomplete.Add_Click({ $Form.Tag = "Incomplete"; $Form.DialogResult = [System.Windows.Forms.DialogResult]::OK; $Form.Close() })
                 $Form.Controls.Add($btnIncomplete)
 
+                $btnHold = New-Object System.Windows.Forms.Button
+                $btnHold.Text = "Change Student HOLD status"
+                $btnHold.Location = New-Object System.Drawing.Point(20, 160)
+                $btnHold.Size = New-Object System.Drawing.Size(340, 40)
+                $btnHold.Add_Click({ $Form.Tag = "Hold"; $Form.DialogResult = [System.Windows.Forms.DialogResult]::OK; $Form.Close() })
+                $Form.Controls.Add($btnHold)
+
                 $btnRun = New-Object System.Windows.Forms.Button
                 $btnRun.Text = "Open Puck Board ->"
-                $btnRun.Location = New-Object System.Drawing.Point(20, 180)
+                $btnRun.Location = New-Object System.Drawing.Point(20, 230)
                 $btnRun.Size = New-Object System.Drawing.Size(340, 40)
                 $btnRun.BackColor = [System.Drawing.Color]::LightGreen
                 $btnRun.Add_Click({ $Form.Tag = "Run"; $Form.DialogResult = [System.Windows.Forms.DialogResult]::OK; $Form.Close() })
@@ -155,6 +164,72 @@ function Show-EventSelectionMenu {
                 $ExitBtn = New-Object System.Windows.Forms.Button
                 $ExitBtn.Location = New-Object System.Drawing.Point(610, 400)
                 $ExitBtn.Size = New-Object System.Drawing.Size(200, 40)
+                $ExitBtn.Text = "Cancel"
+                $ExitBtn.BackColor = [System.Drawing.Color]::LightGray
+                $ExitBtn.Add_Click({
+                                $Form.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+                                $Form.Close()
+                })
+                $Form.Controls.Add($ExitBtn)
+
+                $result = $Form.ShowDialog()
+                if ($result -eq [System.Windows.Forms.DialogResult]::OK) { return $Form.Tag }
+                return $null
+}
+
+
+# ========================================================================================
+# HOLD STATUS: every student with a check box, checked = on hold. Returns name -> $true/$false
+# for every student listed, or $null on cancel.
+# ========================================================================================
+function Show-HoldStatusMenu {
+                param ($Students)
+
+                Initialize-FaisWinForms
+
+                $Form = New-Object System.Windows.Forms.Form
+                $Form.Text = "Change Student HOLD status"
+                $Form.Size = New-Object System.Drawing.Size(450, 560)
+                $Form.StartPosition = "CenterScreen"
+                $Form.Font = New-Object System.Drawing.Font("Segoe UI", 11)
+
+                $HeaderLabel = New-Object System.Windows.Forms.Label
+                $HeaderLabel.Text = "Checked = on hold. Click a student to change it:"
+                $HeaderLabel.Location = New-Object System.Drawing.Point(20, 20)
+                $HeaderLabel.AutoSize = $true
+                $Form.Controls.Add($HeaderLabel)
+
+                $CheckedListBox = New-Object System.Windows.Forms.CheckedListBox
+                $CheckedListBox.Location = New-Object System.Drawing.Point(20, 60)
+                $CheckedListBox.Size = New-Object System.Drawing.Size(390, 380)
+                $CheckedListBox.CheckOnClick = $true
+                foreach ($Student in $Students) {
+                                $name = ([string]$Student.Name).Trim()
+                                if ($name -eq '') { continue }
+                                $index = $CheckedListBox.Items.Add($name)
+                                $CheckedListBox.SetItemChecked($index, (ConvertTo-FaisBool $Student.OnHold))
+                }
+                $Form.Controls.Add($CheckedListBox)
+
+                $SaveBtn = New-Object System.Windows.Forms.Button
+                $SaveBtn.Location = New-Object System.Drawing.Point(20, 460)
+                $SaveBtn.Size = New-Object System.Drawing.Size(180, 40)
+                $SaveBtn.Text = "Save HOLD Status"
+                $SaveBtn.BackColor = [System.Drawing.Color]::LightGreen
+                $SaveBtn.Add_Click({
+                                $holdByName = @{}
+                                for ($i = 0; $i -lt $CheckedListBox.Items.Count; $i++) {
+                                                $holdByName[[string]$CheckedListBox.Items[$i]] = $CheckedListBox.GetItemChecked($i)
+                                }
+                                $Form.Tag = $holdByName
+                                $Form.DialogResult = [System.Windows.Forms.DialogResult]::OK
+                                $Form.Close()
+                })
+                $Form.Controls.Add($SaveBtn)
+
+                $ExitBtn = New-Object System.Windows.Forms.Button
+                $ExitBtn.Location = New-Object System.Drawing.Point(230, 460)
+                $ExitBtn.Size = New-Object System.Drawing.Size(180, 40)
                 $ExitBtn.Text = "Cancel"
                 $ExitBtn.BackColor = [System.Drawing.Color]::LightGray
                 $ExitBtn.Add_Click({
@@ -267,6 +342,30 @@ function Process-IncompleteEvents {
                                 Add-SortieNote -Sortie $Sortie -Note 'Incomplete'
                 }
                 return $updatedStudents.ToArray()
+}
+
+
+# ========================================================================================
+# HOLD STATUS: sets OnHold on the students whose box changed. Returns those changes in the
+# Update-MasterDataStudents -FlagsByName shape (name -> @{ OnHold = $true/$false })
+# ========================================================================================
+function Update-StudentHoldStatus {
+                param (
+                                [Parameter(Mandatory)] [hashtable]$HoldByName,
+                                [Parameter(Mandatory)] $Students
+                )
+
+                $changes = @{}
+                foreach ($Student in $Students) {
+                                $name = ([string]$Student.Name).Trim()
+                                if ($name -eq '' -or -not $HoldByName.ContainsKey($name)) { continue }
+                                $hold = [bool]$HoldByName[$name]
+                                if ($hold -eq (ConvertTo-FaisBool $Student.OnHold)) { continue }
+                                $Student.OnHold = $hold
+                                $changes[$name] = @{ OnHold = $hold }
+                                Write-Host "$name is $(if ($hold) { 'now on hold' } else { 'off hold' })." -ForegroundColor Cyan
+                }
+                return $changes
 }
 
 
@@ -390,6 +489,28 @@ function Invoke-PreRunMenu {
                                                                                 if (-not $saved) { $text = "Incomplete events processed for this run only (the files could not be saved; Export will write them)." }
                                                                 }
                                                                 [void][System.Windows.Forms.MessageBox]::Show($text, "Incomplete Events",
+                                                                                [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+                                                }
+                                }
+                                elseif ($UserChoice -eq "Hold") {
+                                                $holdByName = Show-HoldStatusMenu -Students $Students
+                                                if ($null -ne $holdByName) {
+                                                                $changes = Update-StudentHoldStatus -HoldByName $holdByName -Students $Students
+                                                                $text = "No HOLD status changed."
+                                                                if ($changes.Count -gt 0) {
+                                                                                # OnHold = TRUE / FALSE in MasterData now
+                                                                                $saved = Save-PreRunChanges -MasterDataPath $MasterDataPath -OutputPath $OutputPath -FlagsByName $changes -LockedPrompt $LockedPrompt
+                                                                                if ($saved) {
+                                                                                                foreach ($s in $Students) {
+                                                                                                                if ($changes.ContainsKey(([string]$s.Name).Trim())) {
+                                                                                                                                $s | Add-Member -NotePropertyName 'OnHoldInMasterData' -NotePropertyValue (ConvertTo-FaisBool $s.OnHold) -Force
+                                                                                                                }
+                                                                                                }
+                                                                                }
+                                                                                $where = if ($saved) { 'and saved to MasterData' } else { 'for this run only (MasterData could not be saved; Export will write it)' }
+                                                                                $text = "HOLD status changed for $($changes.Count) student(s) $where."
+                                                                }
+                                                                [void][System.Windows.Forms.MessageBox]::Show($text, "HOLD Status",
                                                                                 [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
                                                 }
                                 }

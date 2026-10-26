@@ -265,3 +265,38 @@ Describe 'ExportResultDialog.xaml' {
                                 @($bytes | Where-Object { $_ -gt 127 }).Count | Should -Be 0
                 }
 }
+
+Describe 'AbsenceDialog.xaml' {
+                BeforeAll {
+                                $script:AbsText = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Modules/AbsenceDialog.xaml'))
+                                $script:BoardCode5 = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Modules/PuckBoard.psm1'))
+                }
+
+                It 'is well-formed XML with no code-behind hooks' {
+                                { [xml]$script:AbsText } | Should -Not -Throw
+                                $script:AbsText | Should -Not -Match 'x:Class='
+                                $script:AbsText | Should -Not -Match '\sClick='
+                }
+
+                It 'has every named element the board code looks up' {
+                                $names = @([regex]::Matches($script:AbsText, 'x:Name="([^"]+)"') | ForEach-Object { $_.Groups[1].Value })
+                                $listBlock = [regex]::Match($script:BoardCode5, "foreach \(\`$item in @\(([^)]*)\)\)").Groups[1].Value
+                                $wanted = @([regex]::Matches($listBlock, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value })
+                                $wanted.Count | Should -BeGreaterThan 10
+                                @($wanted | Where-Object { $names -notcontains $_ }) | Should -BeNullOrEmpty
+                }
+
+                It 'only binds to properties the view models provide, and uses only Tags the board code knows' {
+                                $bound = @([regex]::Matches($script:AbsText, '\{Binding (\w+)') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
+                                $provided = @([regex]::Matches($script:BoardCode5, '(?m)^\s+(\w+)\s+=\s') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
+                                @($bound | Where-Object { $provided -notcontains $_ }) | Should -BeNullOrEmpty
+                                $tags = @([regex]::Matches($script:AbsText, '\bTag="([^"{]+)"') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
+                                $tags.Count | Should -BeGreaterThan 3
+                                foreach ($t in $tags) { $script:BoardCode5 | Should -Match ([regex]::Escape("'$t'")) }
+                }
+
+                It 'is plain ASCII' {
+                                $bytes = [System.IO.File]::ReadAllBytes((Join-Path $script:Root 'Modules/AbsenceDialog.xaml'))
+                                @($bytes | Where-Object { $_ -gt 127 }).Count | Should -Be 0
+                }
+}
