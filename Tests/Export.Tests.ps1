@@ -39,8 +39,8 @@ BeforeAll {
 
     function New-Fill {
         param ([array]$Rows, [string[]]$Days)
-        $a = New-TestStudent -Name 'Adams, Al' -SimDebt 2.5
-        $b = New-TestStudent -Name 'Brown, Bea' -SimDebt 1
+        $a = New-TestStudent -Name 'Adams, Al' -SimDebt 2.5 -DiscontinuityScore 3
+        $b = New-TestStudent -Name 'Brown, Bea' -SimDebt 1 -DiscontinuityScore -1
         return [PSCustomObject]@{ Schedule = $Rows; Students = @($a, $b); Days = $Days }
     }
 
@@ -85,11 +85,13 @@ Describe 'Export-FaisOutput one day at a time' {
         } finally { Close-ExcelPackage $pkg -NoSave }
     }
 
-    It 'writes SimDebt into the column headed SimDebt' {
+    It 'writes SimDebt into the column headed SimDebt, and DiscontinuityScore into a column of its own (added when missing)' {
         $s = @(Import-Excel -Path $script:MD -WorksheetName 'Students')
         ($s | Where-Object { $_.SPName -eq 'Adams, Al' }).SimDebt | Should -Be 2.5
         ($s | Where-Object { $_.SPName -eq 'Brown, Bea' }).SimDebt | Should -Be 1
-        @($s[0].PSObject.Properties.Name) -join ',' | Should -BeExactly 'SPKey,SPName,SimDebt'
+        ($s | Where-Object { $_.SPName -eq 'Adams, Al' }).DiscontinuityScore | Should -Be 3
+        ($s | Where-Object { $_.SPName -eq 'Brown, Bea' }).DiscontinuityScore | Should -Be -1
+        @($s[0].PSObject.Properties.Name) -join ',' | Should -BeExactly 'SPKey,SPName,SimDebt,DiscontinuityScore'
     }
 
     It 'exporting the same day again replaces it (no duplicates)' {

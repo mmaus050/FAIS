@@ -298,18 +298,19 @@ function Process-HookedEvents {
 
 
 # ========================================================================================
-# INCOMPLETE: the event goes back to not-complete and only its sim debt is backed out
-# Returns the students that changed
+# INCOMPLETE: the event goes back to not-complete and only its sim debt and discontinuity
+# are backed out (-Instructors says who the non-counters are). Returns the students that changed
 # ========================================================================================
 function Process-IncompleteEvents {
                 param(
                                 [Parameter(Mandatory)] $SelectedItems,
                                 [Parameter(Mandatory)] $Students,
-                                $SoftWeights
+                                $SoftWeights,
+                                [array]$Instructors = @()
                 )
 
                 if ($null -eq $SoftWeights) {
-                                Write-Warning "SoftWeights was not provided. Incomplete events can be processed, but SimDebt will not change."
+                                Write-Warning "SoftWeights was not provided. Incomplete events can be processed, but SimDebt and DiscontinuityScore will not change."
                 }
 
                 $updatedStudents = New-Object System.Collections.Generic.List[object]
@@ -335,8 +336,8 @@ function Process-IncompleteEvents {
                                                 if ($null -eq $syllabusMission) {
                                                                 Write-Warning "Mission '$missionName' was not found in $studentName's syllabus. SimDebt was not changed."
                                                 }
-                                                elseif (Undo-StudentMission -Student $matchedStudent -Mission $syllabusMission -SoftWeights $SoftWeights) {
-                                                                Write-Host "$missionName is incomplete for $($matchedStudent.Name); SimDebt is now $($matchedStudent.SimDebt)." -ForegroundColor Cyan
+                                                elseif (Undo-StudentMission -Student $matchedStudent -Mission $syllabusMission -SoftWeights $SoftWeights -Instructors $Instructors) {
+                                                                Write-Host "$missionName is incomplete for $($matchedStudent.Name); SimDebt is now $($matchedStudent.SimDebt), DiscontinuityScore $($matchedStudent.DiscontinuityScore)." -ForegroundColor Cyan
                                                                 if (-not $updatedStudents.Contains($matchedStudent)) { $updatedStudents.Add($matchedStudent) }
                                                 }
                                                 else {
@@ -378,9 +379,9 @@ function Update-StudentHoldStatus {
 
 
 # ========================================================================================
-# Saves a pre-run change right away, both files or neither: SimDebt / unsat flags to
-# MasterData and, for incomplete events, those events' cells on the students' tabs in
-# OutputSchedule (so the two files agree even if the board is closed without exporting).
+# Saves a pre-run change right away, both files or neither: SimDebt / DiscontinuityScore /
+# unsat flags to MasterData and, for incomplete events, those events' cells on the students'
+# tabs in OutputSchedule (so the two files agree even if the board is closed without exporting).
 # A file open in Excel is saved and closed for the write, then opened again.
 # A change that can't be saved stays in memory and goes out with the Export.
 # Returns $true when saved.
@@ -390,6 +391,7 @@ function Save-PreRunChanges {
                                 [string]$MasterDataPath,
                                 [string]$OutputPath,
                                 [hashtable]$SimDebtByName = @{},
+                                [hashtable]$DiscontinuityByName = @{},
                                 [hashtable]$FlagsByName = @{},
                                 [array]$TabStudents = @(),
                                 [scriptblock]$LockedPrompt
@@ -413,7 +415,7 @@ function Save-PreRunChanges {
 
                                 try {
                                                 Invoke-WithFileBackup -Files $toSave -Action {
-                                                                Update-MasterDataStudents -MasterDataPath $MasterDataPath -SimDebtByName $SimDebtByName -FlagsByName $FlagsByName
+                                                                Update-MasterDataStudents -MasterDataPath $MasterDataPath -SimDebtByName $SimDebtByName -DiscontinuityByName $DiscontinuityByName -FlagsByName $FlagsByName
                                                                 if ($writeTabs) { Export-StudentSyllabusTabs -Students $TabStudents -FilePath $OutputPath }
                                                 }
                                                 return $true
@@ -442,7 +444,8 @@ function Invoke-PreRunMenu {
                                 [string]$MasterDataPath,
                                 [string]$OutputPath,
                                 [scriptblock]$LockedPrompt,
-                                [scriptblock]$AddAbsence
+                                [scriptblock]$AddAbsence,
+                                [array]$Instructors = @()
                 )
 
                 if ($null -eq $LockedPrompt) {
@@ -484,19 +487,24 @@ function Invoke-PreRunMenu {
                                 elseif ($UserChoice -eq "Incomplete") {
                                                 $SelectedItems = Show-EventSelectionMenu -Schedule $Schedule -Title "Select Incomplete Events"
                                                 if ($null -ne $SelectedItems) {
-                                                                $updatedStudents = @(Process-IncompleteEvents -SelectedItems $SelectedItems -Students $Students -SoftWeights $SoftWeights)
+                                                                $updatedStudents = @(Process-IncompleteEvents -SelectedItems $SelectedItems -Students $Students -SoftWeights $SoftWeights -Instructors $Instructors)
 
-                                                                # SimDebt and those events' tab cells, for the students changed by this selection
+                                                                # SimDebt, DiscontinuityScore and those events' tab cells, for the students changed by this selection
                                                                 $simDebtByName = @{}
+                                                                $discByName = @{}
                                                                 foreach ($student in $updatedStudents) {
                                                                                 if (-not [string]::IsNullOrWhiteSpace([string]$student.Name) -and $null -ne $student.SimDebt) {
                                                                                                 $simDebtByName[([string]$student.Name).Trim()] = [double]$student.SimDebt
                                                                                 }
+                                                                                $disc = Get-OptionalProperty $student 'DiscontinuityScore' $null
+                                                                                if (-not [string]::IsNullOrWhiteSpace([string]$student.Name) -and $null -ne $disc -and [string]$disc -ne '') {
+                                                                                                $discByName[([string]$student.Name).Trim()] = [double]$disc
+                                                                                }
                                                                 }
                                                                 $text = "No events changed (they were already incomplete). Check the console for details."
                                                                 if ($updatedStudents.Count -gt 0) {
-                                                                                $saved = Save-PreRunChanges -MasterDataPath $MasterDataPath -OutputPath $OutputPath -SimDebtByName $simDebtByName -TabStudents $updatedStudents -LockedPrompt $LockedPrompt
-                                                                                $text = "Incomplete events processed. SimDebt and the students' tabs are saved."
+                                                                                $saved = Save-PreRunChanges -MasterDataPath $MasterDataPath -OutputPath $OutputPath -SimDebtByName $simDebtByName -DiscontinuityByName $discByName -TabStudents $updatedStudents -LockedPrompt $LockedPrompt
+                                                                                $text = "Incomplete events processed. SimDebt, DiscontinuityScore and the students' tabs are saved."
                                                                                 if (-not $saved) { $text = "Incomplete events processed for this run only (the files could not be saved; Export will write them)." }
                                                                 }
                                                                 [void][System.Windows.Forms.MessageBox]::Show($text, "Incomplete Events",
