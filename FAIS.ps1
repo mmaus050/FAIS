@@ -3,7 +3,8 @@
 #
 # Run order:
 #   1. Open MasterData / OutputSchedule workbooks are saved in Excel so the latest edits are read
-#   2. Pre-run pop-ups: log hooked (unsat) / incomplete events from the last schedule (saved right away)
+#   2. Pre-run pop-ups: log hooked (unsat) / incomplete events from the last schedule, HOLD status,
+#      Add Student Absence (all saved right away)
 #   3. Puck board: lines come from MasterData's Schedule sheet, a tab for each day it has lines for
 #      (re-read whenever MasterData is saved), or are typed; hardcode IPs and students, see the + / - and rule flags.
 #      Add Student Absence blocks students off (saved to MasterData's StudentAbsences sheet right away)
@@ -141,7 +142,9 @@ Write-Host ("Loaded {0} students, {1} IPs, {2} formation callsigns from {3}." -f
 # Brings in the previous schedule (with the complex objects attached) so lines can be
 # marked hooked (unsat) or incomplete before anything is scheduled
 $PrevSchedule = @(DownloadPrevSchedule -Students $Students -Instructors $Instructors -excelOutputPath $excelOutputPath)
-if (-not (Invoke-PreRunMenu -Schedule $PrevSchedule -Students $Students -SoftWeights $SoftWeights -MasterDataPath $excelInputPath -OutputPath $excelOutputPath)) {
+# Add Student Absence (the same window as the board's button), on the board's first day
+$AddAbsence = { param($prompt) Invoke-FaisAddAbsence -Students $Students -MasterDataPath $excelInputPath -LockedPrompt $prompt }
+if (-not (Invoke-PreRunMenu -Schedule $PrevSchedule -Students $Students -SoftWeights $SoftWeights -MasterDataPath $excelInputPath -OutputPath $excelOutputPath -AddAbsence $AddAbsence)) {
     return
 }
 

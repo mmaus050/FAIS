@@ -14,8 +14,8 @@ Add `-Trace` to print every scheduling decision to the console. FAIS restarts it
 **You can leave Excel open.** If MasterData or OutputSchedule is open in Excel, FAIS saves it before reading it (so edits you have not saved yet are read too), and saves and closes it before writing it (so there is no "file is open" error), then opens it again afterwards. You only see a "file is open" box if Excel can't be reached, for example while a cell is still being edited.
 
 **What happens:**
-1. **Pre-run pop-ups.** Log any hooked (unsat) or incomplete events from the last schedule, and put students on or off hold with **Change Student HOLD status** (checked = on hold), then click **Open Puck Board**. These are saved right away (see *Data in and out*).
-2. **Puck board.** Each day on MasterData's **Schedule** sheet opens as its own tab with its lines (or you type them), and you hardcode whoever you want. **Add Student Absence** blocks a student off for a stretch of time. *(details below)*
+1. **Pre-run pop-ups.** Log any hooked (unsat) or incomplete events from the last schedule, put students on or off hold with **Change Student HOLD status** (checked = on hold), and block students off with **Add Student Absence**, then click **Open Puck Board**. These are saved right away (see *Data in and out*).
+2. **Puck board.** Each day on MasterData's **Schedule** sheet opens as its own tab with its lines (or you type them), and you hardcode whoever you want. **Add Student Absence** is on the board too. *(details below)*
 3. **Fill.** The scheduler fills every open line: formation wingmen, direct support, O&B return legs and For Sale lines included. **Fill <day>** fills just the day on screen; **Fill all N days** (shown when the board has more than one day) fills them all. You review the result on the board.
 4. **Export.** All or nothing: if any part fails, none of the files change. It writes the days you filled:
    - OutputSchedule: the **MasterSchedule** sheet (first tab). Only the filled days are replaced; other days already exported (today onward) are kept, so you can update **one day at a time**,
@@ -100,7 +100,7 @@ Both files are saved or neither. If they can't be saved (still open), the change
 
 ## Add Student Absence
 
-**Add Student Absence** (toolbar, or File > Add student absence...) blocks students off for a stretch of time: an appointment, leave, a duty. It does the same as typing a line on MasterData's **StudentAbsences** sheet, without opening Excel.
+**Add Student Absence** (on the Pre-Run menu, and on the puck board's toolbar and File menu) blocks students off for a stretch of time: an appointment, leave, a duty. It does the same as typing a line on MasterData's **StudentAbsences** sheet, without opening Excel.
 
 1. **Put the students in the box.** Any of these, as many students as you like:
    - drag a student from the list on the right into the box;
@@ -109,7 +109,7 @@ Both files are saved or neither. If they can't be saved (still open), the change
    - copy names (a column in Excel, a list in an email) and press **Ctrl+V**, or **Paste names**. One name per line or cell. Names are matched like *Update Syllabi* does (`Casey B. Quill` or `Quill, Casey [2d Lt]` is `Quill, Casey`); a name that is no one, or more than one student, is listed under the box.
 
    A student you were holding on the board starts in the box. Drag a student back to the list, or press their **x**, to take them out.
-2. **Pick the day** on the calendar. It starts on the day on screen.
+2. **Pick the day** on the calendar. It starts on the day on screen (from the Pre-Run menu: the board's first day).
 3. **Type the times** in **From** and **To**: 24-hour (`0730`, `1530`) or 12-hour with AM / PM (`0730 AM`, `0330 PM`; `330pm` and `3:30 p.m.` work too). **on** is the day it ends: the same day unless you change it, for an absence past midnight or over several days.
 4. A **Reason** is optional (it shows on the student's puck and in the rule flag).
 

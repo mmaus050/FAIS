@@ -100,6 +100,16 @@ Describe 'Source file <Name>' -ForEach $script:SourceFiles {
                                 @($bad) | Should -BeNullOrEmpty
                 }
 
+                It 'never indexes with a sum after a comma ($ws.Cells[1, $c + 1] is $ws.Cells[@(1, $c, 1)]: the comma binds first)' {
+                                $bad = $parsed.Ast.FindAll({
+                                                param($n)
+                                                $n -is [System.Management.Automation.Language.IndexExpressionAst] -and
+                                                $n.Index -is [System.Management.Automation.Language.BinaryExpressionAst] -and
+                                                $n.Index.Left -is [System.Management.Automation.Language.ArrayLiteralAst]
+                                }, $true)
+                                @($bad | ForEach-Object { "$($_.Extent.StartLineNumber): $($_.Extent.Text)" }) | Should -BeNullOrEmpty
+                }
+
                 It 'never wraps the board''s Lines list in @() (it is a generic List[object])' {
                                 $bad = foreach ($sub in $parsed.Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.ArrayExpressionAst] }, $true)) {
                                                 if ($sub.SubExpression.Statements.Count -eq 1 -and $sub.SubExpression.Statements[0].Extent.Text.Trim() -match '(?i)board\.(Lines|Undo)$') { "$($sub.Extent.StartLineNumber): $($sub.Extent.Text)" }

@@ -6,7 +6,8 @@ FAIS CATALOG - every source file in one text file
 #
 # Run order:
 #   1. Open MasterData / OutputSchedule workbooks are saved in Excel so the latest edits are read
-#   2. Pre-run pop-ups: log hooked (unsat) / incomplete events from the last schedule (saved right away)
+#   2. Pre-run pop-ups: log hooked (unsat) / incomplete events from the last schedule, HOLD status,
+#      Add Student Absence (all saved right away)
 #   3. Puck board: lines come from MasterData's Schedule sheet, a tab for each day it has lines for
 #      (re-read whenever MasterData is saved), or are typed; hardcode IPs and students, see the + / - and rule flags.
 #      Add Student Absence blocks students off (saved to MasterData's StudentAbsences sheet right away)
@@ -144,7 +145,9 @@ Write-Host ("Loaded {0} students, {1} IPs, {2} formation callsigns from {3}." -f
 # Brings in the previous schedule (with the complex objects attached) so lines can be
 # marked hooked (unsat) or incomplete before anything is scheduled
 $PrevSchedule = @(DownloadPrevSchedule -Students $Students -Instructors $Instructors -excelOutputPath $excelOutputPath)
-if (-not (Invoke-PreRunMenu -Schedule $PrevSchedule -Students $Students -SoftWeights $SoftWeights -MasterDataPath $excelInputPath -OutputPath $excelOutputPath)) {
+# Add Student Absence (the same window as the board's button), on the board's first day
+$AddAbsence = { param($prompt) Invoke-FaisAddAbsence -Students $Students -MasterDataPath $excelInputPath -LockedPrompt $prompt }
+if (-not (Invoke-PreRunMenu -Schedule $PrevSchedule -Students $Students -SoftWeights $SoftWeights -MasterDataPath $excelInputPath -OutputPath $excelOutputPath -AddAbsence $AddAbsence)) {
     return
 }
 
@@ -198,7 +201,7 @@ $LockedPrompt = {
 $UnsatChanges = Get-UnsatFlagUpdates -Students $FillResult.Students
 $PendingAbsences = @(Get-PendingStudentAbsences -Students $FillResult.Students)
 $ExportWarnings = @()
-$Exported = Export-FaisOutput -FillResult $FillResult -OutputPath $excelOutputPath -MasterDataPath $excelInputPath -AtisPath $atisOutputPath -Settings $OutputSettings -LockedPrompt $LockedPrompt -Days @($BoardResult.Days) -WarningVariable ExportWarnings
+$Exported = Export-FaisOutput -FillResult $FillResult -OutputPath $excelOutputPath -MasterDataPath $excelInputPath -AtisPath $atisOutputPath -Settings $OutputSettings -LockedPrompt $LockedPrompt -Days @($BoardResult.Days) -Instructors $Instructors -WarningVariable ExportWarnings
 $AtisWritten = if ($OutputSettings.WriteAtis) { $atisOutputPath } else { '' }
 $ExportSummary = Get-FaisExportSummary -Ok ([bool]$Exported) -FillResult $FillResult -Days @($BoardResult.Days) -OutputPath $excelOutputPath -MasterDataPath $excelInputPath `
     -AtisPath $AtisWritten -UnsatChanges $UnsatChanges -Absences $PendingAbsences -Warnings @($ExportWarnings | ForEach-Object { [string]$_.Message })
@@ -3954,6 +3957,7 @@ function Initialize-SortieRow {
 # Export-FormattedMasterSchedule / Apply-GroupBorders / Set-MasterScheduleFirst
 # Export-StudentSyllabusTabs / ConvertTo-SyllabusTabRow / Update-SyllabusTabCells / Format-TabEtd
 # Update-MasterDataStudents / Get-UnsatFlagUpdates
+# Update-StringTracker (MasterData's String Tracker sheet)
 # Add-MasterDataAbsences / Get-PendingStudentAbsences / Save-StudentAbsences (Add Student Absence)
 # Export-AtisWorkbook (ATIS.xlsx, one tab per day)
 # Export-DailyScheduleSheets (Teams) / Get-DaySheetName
@@ -4454,6 +4458,52 @@ function Get-UnsatFlagUpdates {
                 return $out
 }
 
+# MasterData's String Tracker sheet: one row per student with Get-StringCounts, in the
+# order of the Students list. The sheet is rewritten each time (made if it is missing).
+# Throws when MasterData can't be written.
+function Update-StringTracker {
+                param (
+                                [Parameter(Mandatory)] [string]$MasterDataPath,
+                                [array]$Students = @(),
+                                [array]$Instructors = @()
+                )
+
+                if (-not (Test-Path -LiteralPath $MasterDataPath)) { throw "MasterData.xlsx not found at: $MasterDataPath" }
+
+                $headings = @('StudentName', '5+ Strings', '4-Strings', '3-Strings', '2-Strings', '1-Strings', 'TotalUniqueCounters')
+                $package = $null
+                try {
+                                $package = Open-ExcelPackage -Path $MasterDataPath
+                                $ws = $package.Workbook.Worksheets['String Tracker']
+                                if ($null -eq $ws) { $ws = $package.Workbook.Worksheets.Add('String Tracker') }
+                                $oldLastRow = if ($null -ne $ws.Dimension) { $ws.Dimension.End.Row } else { 0 }
+
+                                for ($c = 0; $c -lt $headings.Count; $c++) { $ws.Cells[1, ($c + 1)].Value = $headings[$c] }
+                                $row = 2
+                                foreach ($s in @($Students)) {
+                                                if ($null -eq $s) { continue }
+                                                $name = ([string]$s.Name).Trim()
+                                                if ($name -eq '') { continue }
+                                                $counts = @(Get-StringCounts -Syllabus @($s.Syllabus) -Instructors $Instructors)
+                                                $ws.Cells[$row, 1].Value = $name
+                                                for ($c = 0; $c -lt $counts.Count; $c++) { $ws.Cells[$row, ($c + 2)].Value = [int]$counts[$c] }
+                                                $row++
+                                }
+                                # Rows left over from a longer student list
+                                for ($r = $row; $r -le $oldLastRow; $r++) {
+                                                for ($c = 1; $c -le $headings.Count; $c++) { $ws.Cells[$r, $c].Value = $null }
+                                }
+
+                                Close-ExcelPackage -ExcelPackage $package
+                                $package = $null
+                                Write-Host ("MasterData updated: String Tracker for {0} student(s)." -f ($row - 2)) -ForegroundColor Green
+                }
+                catch {
+                                if ($null -ne $package) { Close-ExcelPackage -ExcelPackage $package -NoSave }
+                                throw
+                }
+}
+
 
 # ==========================================
 # Adds a line to MasterData's StudentAbsences sheet for each absence ({Student; StartTime;
@@ -4802,7 +4852,7 @@ function Get-OutputSetting {
 }
 
 # Writes everything a run produces, or nothing: MasterSchedule, each student's syllabus
-# tab, SimDebt and the unsat flags that changed to MasterData, ATIS, then the optional Teams
+# tab, SimDebt, the unsat flags that changed and the String Tracker to MasterData, ATIS, then the optional Teams
 # copy. If any write fails, all of them are put back as they were.
 # Only the days that were filled (-Days; default: every day in the fill) are written:
 # MasterSchedule keeps the other days already exported (from today on, plus KeepPastDays),
@@ -4818,7 +4868,8 @@ function Export-FaisOutput {
                                 $Settings = @{},
                                 [scriptblock]$LockedPrompt,
                                 [string[]]$Days = @(),
-                                [datetime]$Today = (Get-Date)
+                                [datetime]$Today = (Get-Date),
+                                [array]$Instructors = @()
                 )
 
                 $allRows = @(ConvertTo-ExportRows -Schedule $FillResult.Schedule)
@@ -4872,6 +4923,7 @@ function Export-FaisOutput {
                                                                 Export-StudentSyllabusTabs -Students $FillResult.Students -FilePath $OutputPath
                                                                 Set-MasterScheduleFirst -FilePath $OutputPath
                                                                 Update-MasterDataStudents -MasterDataPath $MasterDataPath -SimDebtByName $debts -FlagsByName $flags
+                                                                Update-StringTracker -MasterDataPath $MasterDataPath -Students $FillResult.Students -Instructors $Instructors
                                                                 if ($absences.Count -gt 0) { Add-MasterDataAbsences -MasterDataPath $MasterDataPath -Absences $absences }
                                                                 if ($writeAtis) { Export-AtisWorkbook -ScheduleData $rows -FilePath $AtisPath }
                                                 }
@@ -5258,7 +5310,8 @@ function Open-FaisWorkbooks {
 ######## ./Modules/PreRunMenu.psm1.txt ########
 # PRERUNMENU.PSM1 DIRECTORY:
 #             The pop-ups that run before the puck board: log hooked (unsat) and
-#             incomplete events from the previous schedule, and change students' HOLD status
+#             incomplete events from the previous schedule, change students' HOLD status,
+#             and add a student absence (the window lives with the board: FAIS.ps1 passes it in)
 # Initialize-FaisWinForms
 # Show-PreRunMenu
 # Show-EventSelectionMenu
@@ -5286,13 +5339,13 @@ function Initialize-FaisWinForms {
 # |  __/| | |  __/_____|  _ <| |_| | | | | | |  | |  __/ | | | |_| |
 # |_|   |_|  \___|     |_| \_\\__,_|_| |_| |_|  |_|\___|_| |_|\__,_|
 # ========================================================================================
-# Returns "Hook", "Incomplete", "Hold", "Run" or "Exit"
+# Returns "Hook", "Incomplete", "Hold", "Absence", "Run" or "Exit"
 function Show-PreRunMenu {
                 Initialize-FaisWinForms
 
                 $Form = New-Object System.Windows.Forms.Form
                 $Form.Text = "Pre-Run Operations Menu"
-                $Form.Size = New-Object System.Drawing.Size(400, 350)
+                $Form.Size = New-Object System.Drawing.Size(400, 400)
                 $Form.StartPosition = "CenterScreen"
                 $Form.Font = New-Object System.Drawing.Font("Segoe UI", 11)
 
@@ -5323,9 +5376,16 @@ function Show-PreRunMenu {
                 $btnHold.Add_Click({ $Form.Tag = "Hold"; $Form.DialogResult = [System.Windows.Forms.DialogResult]::OK; $Form.Close() })
                 $Form.Controls.Add($btnHold)
 
+                $btnAbsence = New-Object System.Windows.Forms.Button
+                $btnAbsence.Text = "Add Student Absence"
+                $btnAbsence.Location = New-Object System.Drawing.Point(20, 210)
+                $btnAbsence.Size = New-Object System.Drawing.Size(340, 40)
+                $btnAbsence.Add_Click({ $Form.Tag = "Absence"; $Form.DialogResult = [System.Windows.Forms.DialogResult]::OK; $Form.Close() })
+                $Form.Controls.Add($btnAbsence)
+
                 $btnRun = New-Object System.Windows.Forms.Button
                 $btnRun.Text = "Open Puck Board ->"
-                $btnRun.Location = New-Object System.Drawing.Point(20, 230)
+                $btnRun.Location = New-Object System.Drawing.Point(20, 280)
                 $btnRun.Size = New-Object System.Drawing.Size(340, 40)
                 $btnRun.BackColor = [System.Drawing.Color]::LightGreen
                 $btnRun.Add_Click({ $Form.Tag = "Run"; $Form.DialogResult = [System.Windows.Forms.DialogResult]::OK; $Form.Close() })
@@ -5681,6 +5741,8 @@ function Save-PreRunChanges {
 
 # ========================================================================================
 # The pre-run loop. Returns $true to continue to the puck board, $false to stop.
+# -AddAbsence: shows the Add Student Absence window (gets the locked-file prompt) and returns
+# what happened ('' when cancelled)
 # ========================================================================================
 function Invoke-PreRunMenu {
                 param (
@@ -5689,7 +5751,8 @@ function Invoke-PreRunMenu {
                                 $SoftWeights,
                                 [string]$MasterDataPath,
                                 [string]$OutputPath,
-                                [scriptblock]$LockedPrompt
+                                [scriptblock]$LockedPrompt,
+                                [scriptblock]$AddAbsence
                 )
 
                 if ($null -eq $LockedPrompt) {
@@ -5769,6 +5832,20 @@ function Invoke-PreRunMenu {
                                                                                 $text = "HOLD status changed for $($changes.Count) student(s) $where."
                                                                 }
                                                                 [void][System.Windows.Forms.MessageBox]::Show($text, "HOLD Status",
+                                                                                [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+                                                }
+                                }
+                                elseif ($UserChoice -eq "Absence") {
+                                                $text = 'Add Student Absence is on the puck board: open it and use the button there.'
+                                                if ($null -ne $AddAbsence) {
+                                                                try { $text = [string](& $AddAbsence $LockedPrompt) }
+                                                                catch {
+                                                                                $text = "The Add Student Absence window could not open: $($_.Exception.Message). It is also on the puck board."
+                                                                                Write-Host $text -ForegroundColor Yellow
+                                                                }
+                                                }
+                                                if ($text) {
+                                                                [void][System.Windows.Forms.MessageBox]::Show($text, "Add Student Absence",
                                                                                 [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
                                                 }
                                 }
@@ -8830,8 +8907,7 @@ function Add-PBStudentAbsences {
                 finally { Hide-BusyOverlay }
 
                 $names = @($added | ForEach-Object { [string]$_.Student })
-                $text = "$(Format-PBNameList $names) blocked off $(Format-AbsenceTime $added[0])"
-                if ($added[0].Reason) { $text += " ($($added[0].Reason))" }
+                $text = Format-PBAbsenceAdded $added
                 $clashes = @(Get-PBAbsenceClashes -Names $names)
                 if ($clashes.Count -gt 0) { $text += ". Already hardcoded inside it (flagged red): $($clashes -join ', ')" }
                 if ($saved.Saved) {
@@ -8843,6 +8919,39 @@ function Add-PBStudentAbsences {
                                 Set-PBStatus $text 'Warn'
                 }
                 return $added
+}
+
+# Add Student Absence from the pre-run menu, before the board opens: the same window (on the
+# board's first day), the absences go on the students (so the board opens with them) and are
+# saved to MasterData's StudentAbsences sheet right away, else Export writes them.
+# Returns what happened, for a message box ('' when the window was cancelled).
+function Invoke-FaisAddAbsence {
+                param (
+                                [array]$Students = @(),
+                                [string]$MasterDataPath,
+                                [string]$Day = (Get-NextFlyingDay).ToString('yyyy-MM-dd'),
+                                [scriptblock]$LockedPrompt
+                )
+
+                Initialize-PuckBoardAssemblies
+                $request = Show-PBAbsenceDialog -Day $Day -Roster $Students
+                if ($null -eq $request) { return '' }
+                $made = New-StudentAbsences -Students @($request.Students) -Day $request.Day -From $request.From -To $request.To -EndDay $request.EndDay -Reason $request.Reason
+                if (@($made.Errors).Count -gt 0) { return (@($made.Errors) -join ' ') }
+                $added = @(Add-StudentAbsences -Absences $made.Absences -Students $Students)
+                if ($added.Count -eq 0) { return "$(Format-PBNameList @($made.Absences | ForEach-Object { $_.Student })) already blocked off $(Format-AbsenceTime $made.Absences[0]) - nothing was added." }
+                $saved = Save-StudentAbsences -MasterDataPath $MasterDataPath -Students $Students -LockedPrompt $LockedPrompt
+                if ($saved.Saved) { return "$(Format-PBAbsenceAdded $added). Saved to MasterData's StudentAbsences sheet." }
+                return "$(Format-PBAbsenceAdded $added) for this run only: MasterData could not be saved ($($saved.Message)). Export writes it with the schedule."
+}
+
+# 'Adams, Al and Brown, Bea blocked off Tue 20 Oct 0900-1130 (Dentist)'
+function Format-PBAbsenceAdded {
+                param ([array]$Added)
+
+                $text = "$(Format-PBNameList @($Added | ForEach-Object { [string]$_.Student })) blocked off $(Format-AbsenceTime $Added[0])"
+                if ($Added[0].Reason) { $text += " ($($Added[0].Reason))" }
+                return $text
 }
 
 # The hardcoded lines (any day) of these students that an absence now covers: 'Tue 0730 Adams, Al'
@@ -8868,12 +8977,13 @@ function Format-PBNameList {
                 return "$($n.Count) students ($($n -join '; '))"
 }
 
-# The Add student absence window. -Students start in the box. Returns
-# @{ Students; Day; From; To; EndDay; Reason } or $null when cancelled.
+# The Add student absence window. -Students start in the box; -Roster is every student (the
+# board's when not given). Returns @{ Students; Day; From; To; EndDay; Reason } or $null
+# when cancelled.
 function Show-PBAbsenceDialog {
-                param ([string]$Day, [string[]]$Students = @())
+                param ([string]$Day, [string[]]$Students = @(), [array]$Roster)
 
-                $win = Initialize-PBAbsenceDialog -Day $Day -Students $Students
+                $win = Initialize-PBAbsenceDialog -Day $Day -Students $Students -Roster $Roster
                 try { [void]$win.ShowDialog() } catch { Write-PBLog "Add student absence dialog: $($_.Exception.Message)" }
                 $result = $script:PBAbs.Result
                 $script:PBAbs = $null
@@ -8882,12 +8992,13 @@ function Show-PBAbsenceDialog {
 
 # Builds the Add student absence window without showing it
 function Initialize-PBAbsenceDialog {
-                param ([string]$Day, [string[]]$Students = @())
+                param ([string]$Day, [string[]]$Students = @(), [array]$Roster)
 
                 [xml]$xaml = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'AbsenceDialog.xaml') -Raw -Encoding UTF8
                 $win = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
+                if ($null -eq $Roster) { $Roster = @($script:PB.Data.Students) }
                 $abs = @{ Window = $win; Result = $null; Chosen = (New-Object System.Collections.Generic.List[string]); Held = ''; Press = $null; Drag = $null; PendingDrop = $null; LastDay = $null
-                                Actions = (New-Object System.Collections.Generic.List[object]) }
+                                Actions = (New-Object System.Collections.Generic.List[object]); Students = @($Roster | Where-Object { $null -ne $_ }) }
                 foreach ($item in @('SearchBox', 'StudentPool', 'DropBox', 'DropHint', 'ChosenList', 'PasteButton', 'ClearButton', 'HoldText', 'PasteText',
                                 'DayPicker', 'FromBox', 'ToBox', 'EndDayPicker', 'ReasonBox', 'PreviewText', 'AddButton', 'CancelButton')) {
                                 $c = $win.FindName($item)
@@ -8896,6 +9007,7 @@ function Initialize-PBAbsenceDialog {
                 }
                 $script:PBAbs = $abs
                 try { if ($script:PB.Window.IsVisible) { $win.Owner = $script:PB.Window } } catch { }
+                if ($null -eq $win.Owner) { $win.WindowStartupLocation = [System.Windows.WindowStartupLocation]::CenterScreen }
 
                 foreach ($name in $Students) { Add-PBAbsenceStudent -Name $name -NoRefresh }
                 $date = ConvertTo-PBDayDate $Day
@@ -8948,7 +9060,7 @@ function Update-PBAbsencePool {
                 $filter = ([string]$abs.SearchBox.Text).Trim()
                 $picked = $abs.DayPicker.SelectedDate
                 $day = if ($null -ne $picked) { ([datetime]$picked).ToString('yyyy-MM-dd') } else { '' }
-                $vms = foreach ($s in @($script:PB.Data.Students | Sort-Object -Property Name)) {
+                $vms = foreach ($s in @($abs.Students | Sort-Object -Property Name)) {
                                 $name = ([string]$s.Name).Trim()
                                 if ($name -eq '' -or $abs.Chosen.Contains($name)) { continue }
                                 if ($filter -and $name -notlike "*$filter*") { continue }
@@ -9008,7 +9120,7 @@ function Update-PBAbsencePreview {
                 $text = "$(Format-PBNameList $ask.Students): away $(Format-AbsenceTime $first)"
                 if ($first.Reason) { $text += " ($($first.Reason))" }
                 $text += ". A line for each goes on MasterData's StudentAbsences sheet."
-                $have = @(foreach ($s in @($script:PB.Data.Students)) {
+                $have = @(foreach ($s in @($abs.Students)) {
                                 if ($ask.Students -notcontains ([string]$s.Name).Trim()) { continue }
                                 if (@($s.Absences | Where-Object { $null -ne $_ -and $_.StartTime -eq $first.StartTime -and $_.EndTime -eq $first.EndTime }).Count -gt 0) { ([string]$s.Name).Trim() }
                 })
@@ -9032,7 +9144,7 @@ function Add-PBAbsenceStudent {
                 param ([string]$Name, [switch]$NoRefresh)
 
                 $abs = $script:PBAbs
-                $student = @($script:PB.Data.Students | Where-Object { ([string]$_.Name).Trim() -ieq ([string]$Name).Trim() })[0]
+                $student = @($abs.Students | Where-Object { ([string]$_.Name).Trim() -ieq ([string]$Name).Trim() })[0]
                 if ($null -eq $student) { return }
                 $n = ([string]$student.Name).Trim()
                 if (-not $abs.Chosen.Contains($n)) { $abs.Chosen.Add($n) }
@@ -9075,7 +9187,7 @@ function Invoke-PBAbsencePaste {
                                 $abs.PasteText.Text = 'Nothing to paste: copy the names first (one per line or cell, from Excel, an email or a list).'
                                 return
                 }
-                $found = Resolve-PastedStudents -Text $Text -Students @($script:PB.Data.Students)
+                $found = Resolve-PastedStudents -Text $Text -Students @($abs.Students)
                 foreach ($s in @($found.Students)) { Add-PBAbsenceStudent -Name ([string]$s.Name) -NoRefresh }
                 $unknown = @($found.Unknown)
                 $abs.PasteText.Text = if ($unknown.Count -eq 0) { '' } else {
@@ -10732,7 +10844,7 @@ function Test-PuckBoardWindow {
                     <Rectangle Width="1" Height="20" Fill="#94A3B8" Margin="8,0"/>
                     <Button x:Name="UpdateSyllabiButton" Content="Update Syllabi" Style="{StaticResource BarButton}"
                             ToolTip="Pick the day's flying schedule or the Big Board: FAIS works out which it is and marks each student's events complete or not complete from it. You see what will change before anything is saved."/>
-                    <Button x:Name="AddAbsenceButton" Content="Add Student Absence" Style="{StaticResource BarButton}"
+                    <Button x:Name="AddAbsenceButton" Content="Add Student Absence" Style="{StaticResource BarButton}" FontWeight="SemiBold"
                             ToolTip="Block students off for a stretch of time (an appointment, leave...): drag or paste them in, pick the day and type the times. It goes on MasterData's StudentAbsences sheet, and the board and the scheduler keep them off every line inside it."/>
                     <Rectangle Width="1" Height="20" Fill="#94A3B8" Margin="8,0"/>
                     <DatePicker x:Name="AddDayPicker" Width="125" VerticalAlignment="Center"/>
@@ -12469,6 +12581,7 @@ function Trace-SchedulingDecision {
 # Get-UnsatSimKind / Get-LastSimType / Clear-CleanedUnsat / Restore-PlannedUnsat
 # Add-StudentReservation / Remove-StudentReservation / Get-ReservedMissionNames
 # Get-StudentTimeline
+# Measure-String / Get-StringLength / Get-StringLengths / Get-StringCounts (String Tracker)
 
 
 # =================================================================================
@@ -12984,6 +13097,119 @@ function Get-StudentTimeline {
                 }
 
                 return @($items | Sort-Object -Property Start)
+}
+
+
+# =================================================================================
+#  STRINGS AND COUNTERS (String Tracker)
+#    - Each category (FT, FF, AA) is its own sequence, in mission order: FT5001, FT5002, ...
+#      even when rides from another category were flown in between
+#    - Non-counters are skipped, any number in a row, unless they flew the student two
+#      rides in a row (strictly back to back): then they are a counter for that student
+#    - One different counter between two of an IP's rides does not break that IP's string;
+#      two different counters in a row end it
+#    - Sims, solos and check rides (IsCheck) are left out entirely
+# =================================================================================
+
+# Walks back one ride at a time; each step is a recursive call.
+# $History is newest first: $History[0] is IP1 (current ride), $History[1] is IP2, ...
+# $SkippedOne is True once a different counter has been passed over since IP1's last ride.
+function Measure-String {
+                param ([string[]]$History, [string[]]$NonCounters, [int]$n, [bool]$SkippedOne)
+
+                $ip = $History[$n]  # $null once we run out of rides, which answers False to everything
+
+                # IP1 = IPn?  True: one more ride in the string, and the skip resets
+                if ($ip -eq $History[0]) { return 1 + (Measure-String $History $NonCounters ($n + 1) $false) }
+
+                # Is IPn a non-counter?  True: skip it
+                if ($ip -in $NonCounters) { return Measure-String $History $NonCounters ($n + 1) $SkippedOne }
+
+                # First different counter: look past it
+                if ($null -ne $ip -and -not $SkippedOne) { return Measure-String $History $NonCounters ($n + 1) $true }
+
+                # Second different counter in a row, or no more rides: the string ends
+                return 0
+}
+
+# Length of the last ride's string. $Sorties is IP names oldest to newest: A,A,B,A,A,A -> 5
+function Get-StringLength {
+                param ([string[]]$Sorties, [string[]]$NonCounters = @())
+
+                if ($Sorties.Count -eq 0) { return 0 }
+                $History = $Sorties[($Sorties.Count - 1)..0]
+                if ($History[0] -in $NonCounters) { return 0 }  # a non-counter's ride is not part of a string
+                return 1 + (Measure-String $History $NonCounters 1 $false)
+}
+
+# Length of every string in one category's rides (IP names in mission order). A,A,B,A,A,A -> 5, 1
+function Get-StringLengths {
+                param ([string[]]$Sorties, [string[]]$NonCounters = @())
+
+                # String length at each ride, counted back from that ride
+                $Length = @(for ($i = 0; $i -lt $Sorties.Count; $i++) { Get-StringLength $Sorties[0..$i] $NonCounters })
+
+                # A string is finished at a ride when that IP's next ride starts over at 1, or the IP never flies the category again
+                for ($i = 0; $i -lt $Sorties.Count; $i++) {
+                                if ($Length[$i] -eq 0) { continue }  # non-counter
+                                $next = $null
+                                for ($j = $i + 1; $j -lt $Sorties.Count; $j++) {
+                                                if ($Sorties[$j] -eq $Sorties[$i]) { $next = $j; break }
+                                }
+                                if ($null -eq $next -or $Length[$next] -eq 1) { $Length[$i] }
+                }
+}
+
+# A student's strings and counters from their syllabus and the Instructors list.
+# Returns @(5-strings, 4-strings, 3-strings, 2-strings, 1-strings, counters). Strings longer than 5 count as 5-strings.
+# Counters are the unique IPs who are not non-counters.
+function Get-StringCounts {
+                param ([array]$Syllabus, [array]$Instructors = @())
+
+                # Completed rides with an IP in the cockpit, by category (FT5001 -> FT, 5001) and in mission order inside each
+                $Flights = @(
+                                $Syllabus | Where-Object {
+                                                (Test-MissionComplete $_) -and
+                                                -not (ConvertTo-FaisBool $_.IsCheck) -and
+                                                [string]$_.Type -notlike '*Solo*' -and
+                                                (Get-MissionKind -Mission $_ -InstructorName (Get-NameText $_.Instructor)) -eq 'Flight' -and
+                                                -not [string]::IsNullOrWhiteSpace((Get-NameText $_.Instructor))
+                                } | ForEach-Object {
+                                                $null = ([string]$_.Mission).Trim() -match '^(\D*)(\d*)'
+                                                [PSCustomObject]@{
+                                                                Category = $Matches[1].ToUpper()
+                                                                Number   = if ($Matches[2] -ne '') { [double]$Matches[2] } else { [double]::MaxValue }
+                                                                ID       = Get-SyllabusSortKey $_
+                                                                IP       = Get-BaseName (Get-NameText $_.Instructor)
+                                                }
+                                } | Sort-Object Category, Number, ID
+                )
+
+                # IPs who flew the student two rides in a row in a category (strictly back to back, not zippered)
+                $BackToBack = @(
+                                for ($i = 1; $i -lt $Flights.Count; $i++) {
+                                                if ($Flights[$i].Category -eq $Flights[$i - 1].Category -and $Flights[$i].IP -eq $Flights[$i - 1].IP) { $Flights[$i].IP }
+                                }
+                )
+
+                # Non-counters from the Instructors sheet (a blank IsCounter counts as a counter), except back-to-back ones
+                $NonCounters = @(
+                                $Instructors | Where-Object { -not (ConvertTo-FaisBool $_.IsCounter -Default $true) } |
+                                                ForEach-Object { Get-BaseName (Get-NameText $_.Name) } |
+                                                Where-Object { $_ -notin $BackToBack }
+                )
+
+                # Strings, counted inside each category
+                $Strings = @{ 5 = 0; 4 = 0; 3 = 0; 2 = 0; 1 = 0 }
+                foreach ($Group in ($Flights | Group-Object Category)) {
+                                foreach ($Len in (Get-StringLengths ([string[]]@($Group.Group | ForEach-Object { $_.IP })) $NonCounters)) {
+                                                $Strings[[Math]::Min($Len, 5)]++
+                                }
+                }
+
+                $Counters = @($Flights | ForEach-Object { $_.IP } | Where-Object { $_ -notin $NonCounters } | Sort-Object -Unique).Count
+
+                return @($Strings[5], $Strings[4], $Strings[3], $Strings[2], $Strings[1], $Counters)
 }
 
 ######## ./Modules/SyllabusImport.psm1.txt ########
@@ -21617,13 +21843,14 @@ Add `-Trace` to print every scheduling decision to the console. FAIS restarts it
 **You can leave Excel open.** If MasterData or OutputSchedule is open in Excel, FAIS saves it before reading it (so edits you have not saved yet are read too), and saves and closes it before writing it (so there is no "file is open" error), then opens it again afterwards. You only see a "file is open" box if Excel can't be reached, for example while a cell is still being edited.
 
 **What happens:**
-1. **Pre-run pop-ups.** Log any hooked (unsat) or incomplete events from the last schedule, and put students on or off hold with **Change Student HOLD status** (checked = on hold), then click **Open Puck Board**. These are saved right away (see *Data in and out*).
-2. **Puck board.** Each day on MasterData's **Schedule** sheet opens as its own tab with its lines (or you type them), and you hardcode whoever you want. **Add Student Absence** blocks a student off for a stretch of time. *(details below)*
+1. **Pre-run pop-ups.** Log any hooked (unsat) or incomplete events from the last schedule, put students on or off hold with **Change Student HOLD status** (checked = on hold), and block students off with **Add Student Absence**, then click **Open Puck Board**. These are saved right away (see *Data in and out*).
+2. **Puck board.** Each day on MasterData's **Schedule** sheet opens as its own tab with its lines (or you type them), and you hardcode whoever you want. **Add Student Absence** is on the board too. *(details below)*
 3. **Fill.** The scheduler fills every open line: formation wingmen, direct support, O&B return legs and For Sale lines included. **Fill <day>** fills just the day on screen; **Fill all N days** (shown when the board has more than one day) fills them all. You review the result on the board.
 4. **Export.** All or nothing: if any part fails, none of the files change. It writes the days you filled:
    - OutputSchedule: the **MasterSchedule** sheet (first tab). Only the filled days are replaced; other days already exported (today onward) are kept, so you can update **one day at a time**,
    - OutputSchedule: **each student's syllabus tab** (tomorrow's run starts from it),
-   - MasterData: **SimDebt**, and **UnsatSim / UnsatFlight** reset to FALSE for students whose schedule cleans up the unsat.
+   - MasterData: **SimDebt**, and **UnsatSim / UnsatFlight** reset to FALSE for students whose schedule cleans up the unsat,
+   - MasterData: the **String Tracker** sheet, one row per student: 5+, 4, 3, 2 and 1-strings and unique counters, counted from each student's syllabus (the exported rides included). Each category (FT, FF, AA) is counted in mission order; sims, solos and check rides are left out; a non-counter counts only for a student they flew two rides in a row.
 
    It also writes **ATIS.xlsx**: one tab per day (named like `Wednesday. October 21, 2026`). Each tab lists that day's flights in ETD order, then a thick border, then that day's sims (OFT / IFT) in ETD order, in the same columns as MasterSchedule. Each export rebuilds the tabs for the days it covers and keeps every other day's tab, so ATIS builds up a day-by-day history. The file opens on the first day you just exported. Set `WriteAtis = $false` in `$OutputSettings` to turn it off.
 
@@ -21642,7 +21869,7 @@ Closing the board without exporting writes nothing (only the pre-run pop-ups hav
 | Puck board and fill | MasterData's Schedule sheet again whenever MasterData is saved; **Load a day...** reads it (or the last exported MasterSchedule) fresh | Nothing (the board's own autosave in `Boards\` aside) |
 | **Update Syllabi** | The training file you pick (flying schedule or Big Board) | OutputSchedule: the changed events' cells on the students' tabs (a student with no tab gets one). MasterData: SimDebt |
 | **Add Student Absence** | | MasterData: a line on StudentAbsences for each student (Student, StartTime, EndTime, Reason, IsActive = TRUE) |
-| **Export** | | OutputSchedule: MasterSchedule (the filled days), student tabs. MasterData: SimDebt, unsat resets, and any absence **Add Student Absence** could not save. ATIS: the exported days' tabs |
+| **Export** | | OutputSchedule: MasterSchedule (the filled days), student tabs. MasterData: SimDebt, unsat resets, String Tracker, and any absence **Add Student Absence** could not save. ATIS: the exported days' tabs |
 
 - **MasterSchedule is the only sheet of OutputSchedule that is rewritten**, and only the filled days in it change (ATIS rebuilds the tabs of the days it exports). A student's tab is updated in place: only the Instructor, ETD and IsComplete cells of events that changed are written, so your own columns, notes and formatting stay. A student with no tab gets a new one.
 - **MasterData Students sheet:** students are matched by the column headed SPName and SimDebt goes to the column headed SimDebt (columns B and P when those headings are missing). UnsatSim and UnsatFlight are written to the columns with those headings.
@@ -21702,7 +21929,7 @@ Both files are saved or neither. If they can't be saved (still open), the change
 
 ## Add Student Absence
 
-**Add Student Absence** (toolbar, or File > Add student absence...) blocks students off for a stretch of time: an appointment, leave, a duty. It does the same as typing a line on MasterData's **StudentAbsences** sheet, without opening Excel.
+**Add Student Absence** (on the Pre-Run menu, and on the puck board's toolbar and File menu) blocks students off for a stretch of time: an appointment, leave, a duty. It does the same as typing a line on MasterData's **StudentAbsences** sheet, without opening Excel.
 
 1. **Put the students in the box.** Any of these, as many students as you like:
    - drag a student from the list on the right into the box;
@@ -21711,7 +21938,7 @@ Both files are saved or neither. If they can't be saved (still open), the change
    - copy names (a column in Excel, a list in an email) and press **Ctrl+V**, or **Paste names**. One name per line or cell. Names are matched like *Update Syllabi* does (`Casey B. Quill` or `Quill, Casey [2d Lt]` is `Quill, Casey`); a name that is no one, or more than one student, is listed under the box.
 
    A student you were holding on the board starts in the box. Drag a student back to the list, or press their **x**, to take them out.
-2. **Pick the day** on the calendar. It starts on the day on screen.
+2. **Pick the day** on the calendar. It starts on the day on screen (from the Pre-Run menu: the board's first day).
 3. **Type the times** in **From** and **To**: 24-hour (`0730`, `1530`) or 12-hour with AM / PM (`0730 AM`, `0330 PM`; `330pm` and `3:30 p.m.` work too). **on** is the day it ends: the same day unless you change it, for an absence past midnight or over several days.
 4. A **Reason** is optional (it shows on the student's puck and in the rule flag).
 
@@ -25641,6 +25868,55 @@ Describe 'Get-UnsatFlagUpdates' {
                 }
 }
 
+Describe 'Get-StringCounts' {
+                BeforeAll {
+                                # One completed ride per letter, in mission order per category (FT5001, FT5002, ...),
+                                # with ETDs running backwards so only mission order can give the right answer
+                                function New-TStringSyllabus {
+                                                param ([hashtable]$Rides, [array]$Extra = @())
+                                                $id = 0
+                                                $etd = [datetime]'2026-06-01'
+                                                $rows = @(foreach ($cat in $Rides.Keys) {
+                                                                $num = 5000
+                                                                foreach ($ip in $Rides[$cat].ToCharArray()) {
+                                                                                $id++; $num++; $etd = $etd.AddDays(-1)
+                                                                                [PSCustomObject]@{ SyllabusID = $id; Mission = "$cat$num"; Instructor = "IP $ip [Capt]"; ETD = $etd.ToString('yyyy-MM-dd HH:mm:ss'); Type = 'Single'; IsCheck = $false; IsComplete = $true }
+                                                                }
+                                                })
+                                                return @($rows + $Extra)
+                                }
+                                function New-TStringIPs {
+                                                param ([string]$NonCounters = '')
+                                                foreach ($c in 'ABCDS'.ToCharArray()) { [PSCustomObject]@{ Name = "IP $c [Capt]"; IsCounter = -not $NonCounters.Contains([string]$c) } }
+                                }
+                }
+
+                It 'returns 5+, 4, 3, 2, 1-strings and counters (<Case>)' -ForEach @(
+                                @{ Case = 'AABABB'; Rides = @{ FT = 'AABABB' }; NC = ''; Expected = @(0, 0, 2, 0, 0, 2) }
+                                @{ Case = 'ABABAB'; Rides = @{ FT = 'ABABAB' }; NC = ''; Expected = @(0, 0, 2, 0, 0, 2) }
+                                @{ Case = 'AABAAA'; Rides = @{ FT = 'AABAAA' }; NC = ''; Expected = @(1, 0, 0, 0, 1, 2) }
+                                @{ Case = 'AAABCA, single non-counters'; Rides = @{ FT = 'AAABCA' }; NC = 'BC'; Expected = @(0, 1, 0, 0, 0, 1) }
+                                @{ Case = 'AAAAAAA counts as a 5-string'; Rides = @{ FT = 'AAAAAAA' }; NC = ''; Expected = @(1, 0, 0, 0, 0, 1) }
+                                @{ Case = 'ASSA, non-counter back to back'; Rides = @{ FT = 'ASSA' }; NC = 'S'; Expected = @(0, 0, 0, 1, 2, 2) }
+                                @{ Case = 'ASAS, non-counter zippered'; Rides = @{ FT = 'ASAS' }; NC = 'S'; Expected = @(0, 0, 0, 1, 0, 1) }
+                                @{ Case = 'categories counted apart'; Rides = @{ FT = 'AAA'; AA = 'AAA' }; NC = ''; Expected = @(0, 0, 2, 0, 0, 1) }
+                                @{ Case = 'nothing flown'; Rides = @{}; NC = ''; Expected = @(0, 0, 0, 0, 0, 0) }
+                ) {
+                                $counts = @(Get-StringCounts -Syllabus (New-TStringSyllabus -Rides $Rides) -Instructors @(New-TStringIPs -NonCounters $NC))
+                                $counts | Should -Be $Expected
+                }
+
+                It 'leaves out sims, solos, check rides and rides not flown' {
+                                $extra = @(
+                                                [PSCustomObject]@{ SyllabusID = 90; Mission = 'FE4001'; Instructor = 'IP B'; ETD = '2026-05-30 08:00:00'; Type = 'OFT'; IsCheck = $false; IsComplete = $true }
+                                                [PSCustomObject]@{ SyllabusID = 91; Mission = 'FT5003'; Instructor = 'IP B'; ETD = '2026-05-30 09:00:00'; Type = 'SingleSolo'; IsCheck = $false; IsComplete = $true }
+                                                [PSCustomObject]@{ SyllabusID = 92; Mission = 'FT5390'; Instructor = 'IP C'; ETD = '2026-05-30 10:00:00'; Type = 'Single'; IsCheck = $true; IsComplete = $true }
+                                                [PSCustomObject]@{ SyllabusID = 93; Mission = 'FT5004'; Instructor = 'IP D'; ETD = ''; Type = 'Single'; IsCheck = $false; IsComplete = $false }
+                                )
+                                @(Get-StringCounts -Syllabus (New-TStringSyllabus -Rides @{ FT = 'AA' } -Extra $extra) -Instructors @(New-TStringIPs)) | Should -Be @(0, 0, 0, 1, 0, 1)
+                }
+}
+
 Describe 'Update-StudentHoldStatus' {
                 It 'changes only the students whose box changed and returns them for MasterData' {
                                 $a = New-TestStudent -Name 'Adams, Al'
@@ -25818,6 +26094,33 @@ Describe 'Update-MasterDataStudents' -Skip:(-not $script:HasExcel) {
                                 $path = Join-Path $TestDrive 'NoStudents.xlsx'
                                 New-TMasterData -Path $path -Students @(New-TStudentRow -Name 'Adams, Al') -NoStudentsSheet
                                 { Update-MasterDataStudents -MasterDataPath $path -SimDebtByName @{ 'Adams, Al' = 1 } } | Should -Throw "*'Students' not found*"
+                }
+}
+
+Describe 'Update-StringTracker' -Skip:(-not $script:HasExcel) {
+                It 'rewrites the sheet: headings, one row per student, old rows cleared' {
+                                $path = Join-Path $TestDrive 'Strings.xlsx'
+                                New-TMasterData -Path $path -Students @(New-TStudentRow -Name 'Adams, Al')
+                                @('Old1', 'Old2', 'Old3') | ForEach-Object { [PSCustomObject][ordered]@{ StudentName = $_; TotalUniqueCounters = 9; '1-Strings' = 9 } } | Export-Excel -Path $path -WorksheetName 'String Tracker' 3>$null
+                                $a = New-TestStudent -Name 'Adams, Al' -Done 'FI3101|2026-02-20 08:00', 'FT5001|2026-02-21 08:00|Jones, Bob', 'FT5102|2026-02-22 08:00|Jones, Bob'
+                                $b = New-TestStudent -Name 'Brown, Bea'
+                                Update-StringTracker -MasterDataPath $path -Students @($a, $b) -Instructors @() 6>$null
+                                $rows = @(Import-Excel -Path $path -WorksheetName 'String Tracker')
+                                @($rows[0].PSObject.Properties.Name) | Should -Be @('StudentName', '5+ Strings', '4-Strings', '3-Strings', '2-Strings', '1-Strings', 'TotalUniqueCounters')
+                                $rows.Count | Should -Be 2
+                                $rows[0].StudentName | Should -Be 'Adams, Al'
+                                @($rows[0].'5+ Strings', $rows[0].'4-Strings', $rows[0].'3-Strings', $rows[0].'2-Strings', $rows[0].'1-Strings', $rows[0].TotalUniqueCounters) | Should -Be @(0, 0, 0, 1, 0, 1)
+                                $rows[1].StudentName | Should -Be 'Brown, Bea'
+                                $rows[1].TotalUniqueCounters | Should -Be 0
+                                # The other sheets are untouched
+                                @(Import-Excel -Path $path -WorksheetName 'Students')[0].SPName | Should -Be 'Adams, Al'
+                }
+
+                It 'makes the sheet when MasterData has none' {
+                                $path = Join-Path $TestDrive 'NoStrings.xlsx'
+                                New-TMasterData -Path $path -Students @(New-TStudentRow -Name 'Adams, Al')
+                                Update-StringTracker -MasterDataPath $path -Students @(New-TestStudent -Name 'Adams, Al') 6>$null
+                                @(Import-Excel -Path $path -WorksheetName 'String Tracker')[0].StudentName | Should -Be 'Adams, Al'
                 }
 }
 
@@ -31954,6 +32257,25 @@ Describe 'Puck board: Add Student Absence (no window)' {
         @((Get-FaisExportSummary -Ok $true -FillResult $fill -Days @($script:D1)).Lines | Where-Object { $_.Text -like '*absence*' }).Count | Should -Be 0
     }
 
+    It 'from the pre-run menu: the same window over every student, the absence goes on them and is saved' {
+        Mock -ModuleName PuckBoard Initialize-PuckBoardAssemblies { }
+        Mock -ModuleName PuckBoard Show-PBAbsenceDialog { New-AbsAsk -Students @('Brown, Bea') -From '1300' -To '0200 PM' -Reason 'Dentist' }
+        $stu = @((New-TestStudent -Name 'Adams, Al'), (New-TestStudent -Name 'Brown, Bea'))
+        $text = Invoke-FaisAddAbsence -Students $stu -MasterDataPath 'C:\m.xlsx' -Day '2026-10-20' -LockedPrompt { $true }
+        $text | Should -BeExactly "Brown, Bea blocked off Tue 20 Oct 1300-1400 (Dentist). Saved to MasterData's StudentAbsences sheet."
+        Should -Invoke -ModuleName PuckBoard Show-PBAbsenceDialog -Times 1 -Exactly -ParameterFilter { $Day -eq '2026-10-20' -and @($Roster).Count -eq 2 }
+        Should -Invoke -ModuleName PuckBoard Save-StudentAbsences -Times 1 -Exactly -ParameterFilter { $MasterDataPath -eq 'C:\m.xlsx' -and @($Students).Count -eq 2 }
+        @($stu[1].Absences).Count | Should -Be 1
+        @($stu[0].Absences).Count | Should -Be 0
+
+        Invoke-FaisAddAbsence -Students $stu -MasterDataPath 'C:\m.xlsx' -Day '2026-10-20' | Should -BeExactly 'Brown, Bea already blocked off Tue 20 Oct 1300-1400 - nothing was added.'
+        Mock -ModuleName PuckBoard Show-PBAbsenceDialog { New-AbsAsk -Students @('Adams, Al') -From '1300' -To '1400' }
+        Mock -ModuleName PuckBoard Save-StudentAbsences { [PSCustomObject]@{ Saved = $false; Count = 0; Message = 'MasterData.xlsx is still open' } }
+        Invoke-FaisAddAbsence -Students $stu -MasterDataPath 'C:\m.xlsx' -Day '2026-10-20' | Should -BeExactly 'Adams, Al blocked off Tue 20 Oct 1300-1400 for this run only: MasterData could not be saved (MasterData.xlsx is still open). Export writes it with the schedule.'
+        Mock -ModuleName PuckBoard Show-PBAbsenceDialog { $null }
+        Invoke-FaisAddAbsence -Students $stu -MasterDataPath 'C:\m.xlsx' -Day '2026-10-20' | Should -BeExactly ''
+    }
+
     Context 'the window (plain objects stand in for its boxes)' {
         BeforeEach {
             Mock -ModuleName PuckBoard Get-PBBrush { $Color }
@@ -31961,7 +32283,7 @@ Describe 'Puck board: Add Student Absence (no window)' {
             & (Get-Module PuckBoard) {
                 $o = { param($h) [PSCustomObject]$h }
                 $script:PBAbs = @{ Window = (& $o @{ DialogResult = $null }); Result = $null; Chosen = (New-Object System.Collections.Generic.List[string])
-                    Held = ''; Press = $null; Drag = $null; PendingDrop = $null; LastDay = [datetime]'2026-10-20' }
+                    Held = ''; Press = $null; Drag = $null; PendingDrop = $null; LastDay = [datetime]'2026-10-20'; Students = @($script:PB.Data.Students) }
                 foreach ($box in @('SearchBox', 'FromBox', 'ToBox', 'ReasonBox', 'HoldText', 'PasteText', 'PreviewText')) { $script:PBAbs[$box] = & $o @{ Text = ''; Foreground = '' } }
                 $script:PBAbs.StudentPool = & $o @{ ItemsSource = $null }
                 $script:PBAbs.ChosenList = & $o @{ ItemsSource = $null }
@@ -32564,6 +32886,16 @@ Describe 'Source file <Name>' -ForEach $script:SourceFiles {
                                                 if ($text -match '^\$(\w+)$' -and $listVars.Contains($Matches[1].ToLowerInvariant())) { "$($sub.Extent.StartLineNumber): $($sub.Extent.Text)" }
                                 }
                                 @($bad) | Should -BeNullOrEmpty
+                }
+
+                It 'never indexes with a sum after a comma ($ws.Cells[1, $c + 1] is $ws.Cells[@(1, $c, 1)]: the comma binds first)' {
+                                $bad = $parsed.Ast.FindAll({
+                                                param($n)
+                                                $n -is [System.Management.Automation.Language.IndexExpressionAst] -and
+                                                $n.Index -is [System.Management.Automation.Language.BinaryExpressionAst] -and
+                                                $n.Index.Left -is [System.Management.Automation.Language.ArrayLiteralAst]
+                                }, $true)
+                                @($bad | ForEach-Object { "$($_.Extent.StartLineNumber): $($_.Extent.Text)" }) | Should -BeNullOrEmpty
                 }
 
                 It 'never wraps the board''s Lines list in @() (it is a generic List[object])' {

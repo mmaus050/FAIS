@@ -1,6 +1,7 @@
 # PRERUNMENU.PSM1 DIRECTORY:
 #             The pop-ups that run before the puck board: log hooked (unsat) and
-#             incomplete events from the previous schedule, and change students' HOLD status
+#             incomplete events from the previous schedule, change students' HOLD status,
+#             and add a student absence (the window lives with the board: FAIS.ps1 passes it in)
 # Initialize-FaisWinForms
 # Show-PreRunMenu
 # Show-EventSelectionMenu
@@ -28,13 +29,13 @@ function Initialize-FaisWinForms {
 # |  __/| | |  __/_____|  _ <| |_| | | | | | |  | |  __/ | | | |_| |
 # |_|   |_|  \___|     |_| \_\\__,_|_| |_| |_|  |_|\___|_| |_|\__,_|
 # ========================================================================================
-# Returns "Hook", "Incomplete", "Hold", "Run" or "Exit"
+# Returns "Hook", "Incomplete", "Hold", "Absence", "Run" or "Exit"
 function Show-PreRunMenu {
                 Initialize-FaisWinForms
 
                 $Form = New-Object System.Windows.Forms.Form
                 $Form.Text = "Pre-Run Operations Menu"
-                $Form.Size = New-Object System.Drawing.Size(400, 350)
+                $Form.Size = New-Object System.Drawing.Size(400, 400)
                 $Form.StartPosition = "CenterScreen"
                 $Form.Font = New-Object System.Drawing.Font("Segoe UI", 11)
 
@@ -65,9 +66,16 @@ function Show-PreRunMenu {
                 $btnHold.Add_Click({ $Form.Tag = "Hold"; $Form.DialogResult = [System.Windows.Forms.DialogResult]::OK; $Form.Close() })
                 $Form.Controls.Add($btnHold)
 
+                $btnAbsence = New-Object System.Windows.Forms.Button
+                $btnAbsence.Text = "Add Student Absence"
+                $btnAbsence.Location = New-Object System.Drawing.Point(20, 210)
+                $btnAbsence.Size = New-Object System.Drawing.Size(340, 40)
+                $btnAbsence.Add_Click({ $Form.Tag = "Absence"; $Form.DialogResult = [System.Windows.Forms.DialogResult]::OK; $Form.Close() })
+                $Form.Controls.Add($btnAbsence)
+
                 $btnRun = New-Object System.Windows.Forms.Button
                 $btnRun.Text = "Open Puck Board ->"
-                $btnRun.Location = New-Object System.Drawing.Point(20, 230)
+                $btnRun.Location = New-Object System.Drawing.Point(20, 280)
                 $btnRun.Size = New-Object System.Drawing.Size(340, 40)
                 $btnRun.BackColor = [System.Drawing.Color]::LightGreen
                 $btnRun.Add_Click({ $Form.Tag = "Run"; $Form.DialogResult = [System.Windows.Forms.DialogResult]::OK; $Form.Close() })
@@ -423,6 +431,8 @@ function Save-PreRunChanges {
 
 # ========================================================================================
 # The pre-run loop. Returns $true to continue to the puck board, $false to stop.
+# -AddAbsence: shows the Add Student Absence window (gets the locked-file prompt) and returns
+# what happened ('' when cancelled)
 # ========================================================================================
 function Invoke-PreRunMenu {
                 param (
@@ -431,7 +441,8 @@ function Invoke-PreRunMenu {
                                 $SoftWeights,
                                 [string]$MasterDataPath,
                                 [string]$OutputPath,
-                                [scriptblock]$LockedPrompt
+                                [scriptblock]$LockedPrompt,
+                                [scriptblock]$AddAbsence
                 )
 
                 if ($null -eq $LockedPrompt) {
@@ -511,6 +522,20 @@ function Invoke-PreRunMenu {
                                                                                 $text = "HOLD status changed for $($changes.Count) student(s) $where."
                                                                 }
                                                                 [void][System.Windows.Forms.MessageBox]::Show($text, "HOLD Status",
+                                                                                [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+                                                }
+                                }
+                                elseif ($UserChoice -eq "Absence") {
+                                                $text = 'Add Student Absence is on the puck board: open it and use the button there.'
+                                                if ($null -ne $AddAbsence) {
+                                                                try { $text = [string](& $AddAbsence $LockedPrompt) }
+                                                                catch {
+                                                                                $text = "The Add Student Absence window could not open: $($_.Exception.Message). It is also on the puck board."
+                                                                                Write-Host $text -ForegroundColor Yellow
+                                                                }
+                                                }
+                                                if ($text) {
+                                                                [void][System.Windows.Forms.MessageBox]::Show($text, "Add Student Absence",
                                                                                 [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
                                                 }
                                 }

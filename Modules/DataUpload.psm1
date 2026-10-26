@@ -526,7 +526,7 @@ function Update-StringTracker {
                                 if ($null -eq $ws) { $ws = $package.Workbook.Worksheets.Add('String Tracker') }
                                 $oldLastRow = if ($null -ne $ws.Dimension) { $ws.Dimension.End.Row } else { 0 }
 
-                                for ($c = 0; $c -lt $headings.Count; $c++) { $ws.Cells[1, $c + 1].Value = $headings[$c] }
+                                for ($c = 0; $c -lt $headings.Count; $c++) { $ws.Cells[1, ($c + 1)].Value = $headings[$c] }
                                 $row = 2
                                 foreach ($s in @($Students)) {
                                                 if ($null -eq $s) { continue }
@@ -534,7 +534,7 @@ function Update-StringTracker {
                                                 if ($name -eq '') { continue }
                                                 $counts = @(Get-StringCounts -Syllabus @($s.Syllabus) -Instructors $Instructors)
                                                 $ws.Cells[$row, 1].Value = $name
-                                                for ($c = 0; $c -lt $counts.Count; $c++) { $ws.Cells[$row, $c + 2].Value = [int]$counts[$c] }
+                                                for ($c = 0; $c -lt $counts.Count; $c++) { $ws.Cells[$row, ($c + 2)].Value = [int]$counts[$c] }
                                                 $row++
                                 }
                                 # Rows left over from a longer student list
