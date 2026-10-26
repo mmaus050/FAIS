@@ -5,6 +5,7 @@
 # Export-FormattedMasterSchedule / Apply-GroupBorders / Set-MasterScheduleFirst
 # Export-StudentSyllabusTabs / ConvertTo-SyllabusTabRow / Update-SyllabusTabCells / Format-TabEtd
 # Update-MasterDataStudents / Get-UnsatFlagUpdates
+# Update-StringTracker (MasterData's String Tracker sheet)
 # Export-AtisWorkbook (ATIS.xlsx, one tab per day)
 # Export-DailyScheduleSheets (Teams) / Get-DaySheetName
 # Invoke-WithFileBackup / Export-FaisOutput
@@ -504,6 +505,52 @@ function Get-UnsatFlagUpdates {
                 return $out
 }
 
+# MasterData's String Tracker sheet: one row per student with Get-StringCounts, in the
+# order of the Students list. The sheet is rewritten each time (made if it is missing).
+# Throws when MasterData can't be written.
+function Update-StringTracker {
+                param (
+                                [Parameter(Mandatory)] [string]$MasterDataPath,
+                                [array]$Students = @(),
+                                [array]$Instructors = @()
+                )
+
+                if (-not (Test-Path -LiteralPath $MasterDataPath)) { throw "MasterData.xlsx not found at: $MasterDataPath" }
+
+                $headings = @('StudentName', '5+ Strings', '4-Strings', '3-Strings', '2-Strings', '1-Strings', 'TotalUniqueCounters')
+                $package = $null
+                try {
+                                $package = Open-ExcelPackage -Path $MasterDataPath
+                                $ws = $package.Workbook.Worksheets['String Tracker']
+                                if ($null -eq $ws) { $ws = $package.Workbook.Worksheets.Add('String Tracker') }
+                                $oldLastRow = if ($null -ne $ws.Dimension) { $ws.Dimension.End.Row } else { 0 }
+
+                                for ($c = 0; $c -lt $headings.Count; $c++) { $ws.Cells[1, $c + 1].Value = $headings[$c] }
+                                $row = 2
+                                foreach ($s in @($Students)) {
+                                                if ($null -eq $s) { continue }
+                                                $name = ([string]$s.Name).Trim()
+                                                if ($name -eq '') { continue }
+                                                $counts = @(Get-StringCounts -Syllabus @($s.Syllabus) -Instructors $Instructors)
+                                                $ws.Cells[$row, 1].Value = $name
+                                                for ($c = 0; $c -lt $counts.Count; $c++) { $ws.Cells[$row, $c + 2].Value = [int]$counts[$c] }
+                                                $row++
+                                }
+                                # Rows left over from a longer student list
+                                for ($r = $row; $r -le $oldLastRow; $r++) {
+                                                for ($c = 1; $c -le $headings.Count; $c++) { $ws.Cells[$r, $c].Value = $null }
+                                }
+
+                                Close-ExcelPackage -ExcelPackage $package
+                                $package = $null
+                                Write-Host ("MasterData updated: String Tracker for {0} student(s)." -f ($row - 2)) -ForegroundColor Green
+                }
+                catch {
+                                if ($null -ne $package) { Close-ExcelPackage -ExcelPackage $package -NoSave }
+                                throw
+                }
+}
+
 
 # ==========================================
 # ATIS.xlsx: one tab per day, flights in time order, then sims in time order below a
@@ -723,7 +770,7 @@ function Get-OutputSetting {
 }
 
 # Writes everything a run produces, or nothing: MasterSchedule, each student's syllabus
-# tab, SimDebt and the unsat flags that changed to MasterData, ATIS, then the optional Teams
+# tab, SimDebt, the unsat flags that changed and the String Tracker to MasterData, ATIS, then the optional Teams
 # copy. If any write fails, all of them are put back as they were.
 # Only the days that were filled (-Days; default: every day in the fill) are written:
 # MasterSchedule keeps the other days already exported (from today on, plus KeepPastDays),
@@ -739,7 +786,8 @@ function Export-FaisOutput {
                                 $Settings = @{},
                                 [scriptblock]$LockedPrompt,
                                 [string[]]$Days = @(),
-                                [datetime]$Today = (Get-Date)
+                                [datetime]$Today = (Get-Date),
+                                [array]$Instructors = @()
                 )
 
                 $allRows = @(ConvertTo-ExportRows -Schedule $FillResult.Schedule)
@@ -792,6 +840,7 @@ function Export-FaisOutput {
                                                                 Export-StudentSyllabusTabs -Students $FillResult.Students -FilePath $OutputPath
                                                                 Set-MasterScheduleFirst -FilePath $OutputPath
                                                                 Update-MasterDataStudents -MasterDataPath $MasterDataPath -SimDebtByName $debts -FlagsByName $flags
+                                                                Update-StringTracker -MasterDataPath $MasterDataPath -Students $FillResult.Students -Instructors $Instructors
                                                                 if ($writeAtis) { Export-AtisWorkbook -ScheduleData $rows -FilePath $AtisPath }
                                                 }
                                 }

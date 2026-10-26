@@ -193,7 +193,7 @@ $LockedPrompt = {
 # failed, or names MasterData did not have) for the result window
 $UnsatChanges = Get-UnsatFlagUpdates -Students $FillResult.Students
 $ExportWarnings = @()
-$Exported = Export-FaisOutput -FillResult $FillResult -OutputPath $excelOutputPath -MasterDataPath $excelInputPath -AtisPath $atisOutputPath -Settings $OutputSettings -LockedPrompt $LockedPrompt -Days @($BoardResult.Days) -WarningVariable ExportWarnings
+$Exported = Export-FaisOutput -FillResult $FillResult -OutputPath $excelOutputPath -MasterDataPath $excelInputPath -AtisPath $atisOutputPath -Settings $OutputSettings -LockedPrompt $LockedPrompt -Days @($BoardResult.Days) -Instructors $Instructors -WarningVariable ExportWarnings
 $AtisWritten = if ($OutputSettings.WriteAtis) { $atisOutputPath } else { '' }
 $ExportSummary = Get-FaisExportSummary -Ok ([bool]$Exported) -FillResult $FillResult -Days @($BoardResult.Days) -OutputPath $excelOutputPath -MasterDataPath $excelInputPath `
     -AtisPath $AtisWritten -UnsatChanges $UnsatChanges -Warnings @($ExportWarnings | ForEach-Object { [string]$_.Message })
