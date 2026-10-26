@@ -5,7 +5,8 @@
 #   1. Open MasterData / OutputSchedule workbooks are saved in Excel so the latest edits are read
 #   2. Pre-run pop-ups: log hooked (unsat) / incomplete events from the last schedule (saved right away)
 #   3. Puck board: lines come from MasterData's Schedule sheet, a tab for each day it has lines for
-#      (re-read whenever MasterData is saved), or are typed; hardcode IPs and students, see the + / - and rule flags
+#      (re-read whenever MasterData is saved), or are typed; hardcode IPs and students, see the + / - and rule flags.
+#      Add Student Absence blocks students off (saved to MasterData's StudentAbsences sheet right away)
 #   4. "Fill this day" or "Fill all days": the scheduler fills the open lines, you review it
 #   5. Export, all or nothing, for the filled days: OutputSchedule.xlsx (MasterSchedule, other exported
 #      days kept, + each student's syllabus tab), SimDebt + cleaned-up unsats to MasterData, and
@@ -189,14 +190,15 @@ $LockedPrompt = {
     return ($answer -eq [System.Windows.MessageBoxResult]::OK)
 }
 
-# Unsat flags the export will change (read before it writes them), and its warnings (why it
-# failed, or names MasterData did not have) for the result window
+# Unsat flags the export will change and absences it adds (read before it writes them), and its
+# warnings (why it failed, or names MasterData did not have) for the result window
 $UnsatChanges = Get-UnsatFlagUpdates -Students $FillResult.Students
+$PendingAbsences = @(Get-PendingStudentAbsences -Students $FillResult.Students)
 $ExportWarnings = @()
 $Exported = Export-FaisOutput -FillResult $FillResult -OutputPath $excelOutputPath -MasterDataPath $excelInputPath -AtisPath $atisOutputPath -Settings $OutputSettings -LockedPrompt $LockedPrompt -Days @($BoardResult.Days) -Instructors $Instructors -WarningVariable ExportWarnings
 $AtisWritten = if ($OutputSettings.WriteAtis) { $atisOutputPath } else { '' }
 $ExportSummary = Get-FaisExportSummary -Ok ([bool]$Exported) -FillResult $FillResult -Days @($BoardResult.Days) -OutputPath $excelOutputPath -MasterDataPath $excelInputPath `
-    -AtisPath $AtisWritten -UnsatChanges $UnsatChanges -Warnings @($ExportWarnings | ForEach-Object { [string]$_.Message })
+    -AtisPath $AtisWritten -UnsatChanges $UnsatChanges -Absences $PendingAbsences -Warnings @($ExportWarnings | ForEach-Object { [string]$_.Message })
 if (-not $Exported) {
     Write-Host "Nothing was written (OutputSchedule, MasterData and ATIS are as they were). Your board is saved; run FAIS again and Export once the files are closed." -ForegroundColor Red
     try { Show-FaisExportResult -Summary $ExportSummary } catch { Write-Host "Could not show the export result window: $($_.Exception.Message)" -ForegroundColor Yellow }

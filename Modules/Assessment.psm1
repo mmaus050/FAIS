@@ -6,7 +6,7 @@
 # Get-PlacementAssessment
 # Get-AssessmentLines (text for tooltips / popups)
 # Get-MissionChoiceTexts / ConvertFrom-MissionChoiceText / Get-MissionAdvice (the mission dropdown)
-# Get-StudentPuckInfo / Get-InstructorPuckInfo
+# Get-StudentPuckInfo / Get-StudentDayAbsences / Get-InstructorPuckInfo
 
 
 $script:AssessCache = @{
@@ -445,16 +445,9 @@ function Get-StudentPuckInfo {
                 if (ConvertTo-FaisBool $Student.UnsatFlight) { $badges.Add('U-FLT') }
 
                 $absText = New-Object System.Collections.Generic.List[string]
-                $dayDate = $null
-                if ($Day) { $dayDate = [datetime]::ParseExact($Day, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture) }
-                foreach ($a in @($Student.Absences)) {
-                                if ($null -eq $a -or $null -eq $dayDate) { continue }
-                                if ($a.StartTime.Date -le $dayDate -and $a.EndTime.Date -ge $dayDate) {
-                                                $s = if ($a.StartTime.Date -lt $dayDate) { '0000' } else { $a.StartTime.ToString('HHmm') }
-                                                $e = if ($a.EndTime.Date -gt $dayDate) { '2359' } else { $a.EndTime.ToString('HHmm') }
-                                                $badges.Add("ABS $s-$e")
-                                                $absText.Add("$s-$e $($a.Reason)".Trim())
-                                }
+                foreach ($a in @(Get-StudentDayAbsences -Student $Student -Day $Day)) {
+                                $badges.Add("ABS $($a.Times)")
+                                $absText.Add("$($a.Times) $($a.Reason)".Trim())
                 }
 
                 $turns = 0
@@ -480,6 +473,21 @@ function Get-StudentPuckInfo {
                                 SimDebt  = $debt
                                 Blocked  = ((ConvertTo-FaisBool $Student.OnHold))
                 }
+}
+
+# A student's absences on one day ('yyyy-MM-dd'), cut to that day: {Times ('0900-1100', with
+# 0000 / 2359 where it starts the day before or ends the day after); Reason}
+function Get-StudentDayAbsences {
+                param ($Student, [string]$Day)
+
+                if (-not $Day) { return @() }
+                $dayDate = [datetime]::ParseExact($Day, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
+                return @(foreach ($a in @($Student.Absences)) {
+                                if ($null -eq $a -or $a.StartTime.Date -gt $dayDate -or $a.EndTime.Date -lt $dayDate) { continue }
+                                $s = if ($a.StartTime.Date -lt $dayDate) { '0000' } else { $a.StartTime.ToString('HHmm') }
+                                $e = if ($a.EndTime.Date -gt $dayDate) { '2359' } else { $a.EndTime.ToString('HHmm') }
+                                [PSCustomObject]@{ Times = "$s-$e"; Reason = [string]$a.Reason }
+                })
 }
 
 # Badges and line count for an IP puck on one day
