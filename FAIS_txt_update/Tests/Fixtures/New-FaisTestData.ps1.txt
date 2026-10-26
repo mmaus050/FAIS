@@ -123,7 +123,6 @@ function New-TestSoftWeights {
                                 LevelDifference   = 2
                                 CounterContinuity = 5
                                 Alternating       = -10
-                                OpeningString     = 5
                                 NewCounter        = 0
                                 OFTIFTPen         = -7
                                 DollarRideBonus   = 20

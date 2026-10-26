@@ -757,8 +757,9 @@ function SoftRules {
                 # one different counter in between does not break a string (A,A,B,A is a 3-string with A).
                 #   - The zipper ride (B) only costs the Zipper weight, and only while a 2-string waits on it
                 #   - The ride back to the string (A) scores like any other ride in the string
-                #   - Break String only when a string really ends short (two different counters in a row)
-                #   - Non-counters break no strings unless they fly two in a row (then they count)
+                #   - Break String only when a 2-string really ends (two different counters in a row)
+                #   - Ending a 2-string to make a new 2-string (A,A,B + B) is even: 0
+                #   - Non-counters score 0 and break no strings, unless they fly two in a row (then they count)
                 #   - Alternating counters (A,B,A,B) are not a string
                 # Flights only: a sim line, solo or check ride never scores here, and past sims never count
                 #####################################
@@ -784,14 +785,15 @@ function SoftRules {
                 }
 
                 if ($null -ne $Placement -and -not $Placement.IsCounter) {
-                                $pts = Get-Weight $Config 'NonCounter'
-                                $Score += $pts
-                                $Breakdown['Non-Counter'] = $pts
+                                $Breakdown['Non-Counter'] = 0
                                 $Reasons['Non-Counter'] = "$CurrentIP_Short is a non-counter (breaks no strings)"
                 }
                 elseif ($null -ne $Placement) {
                                 $o = $Placement.Outlook
                                 $arrow = " $([char]0x2192) "
+                                # 2-strings this ride ends (a 1-ride IP or a finished 3+ string has nothing to lose)
+                                $ended = @($o.Broken | Where-Object { $_.Length -eq 2 })
+                                $endedText = (@($ended | ForEach-Object { "$($_.Length) String w/ $(Get-ShortIPName $_.IP)" }) -join ', ')
 
                                 if ($o.Alternating) {
                                                 $pts = Get-Weight $Config 'Alternating' -10
@@ -799,6 +801,11 @@ function SoftRules {
                                                 $Breakdown['Alternating'] = $pts
                                                 $last = Get-ShortIPName $o.LastIP
                                                 $Reasons['Alternating'] = "Alternating counters: $CurrentIP_Short$arrow$last$arrow$CurrentIP_Short$arrow$last"
+                                }
+                                elseif ($o.Length -eq 2 -and $ended.Count -gt 0) {
+                                                # A 2-string for a 2-string: even
+                                                $Breakdown['String Swap'] = 0
+                                                $Reasons['String Swap'] = "2 String$(if ($Placement.TwoInRow) { ' (non-counter, 2 in a row)' }), ends $endedText"
                                 }
                                 elseif ($o.Length -ge 2) {
                                                 $tags = @(
@@ -829,19 +836,10 @@ function SoftRules {
                                                                                 $Breakdown['CAP Bonus (string)'] = $pts2
                                                                                 $Reasons['CAP Bonus (string)'] = "CAP student, $StringText"
                                                                 }
-                                                                # A 3-sortie string should normally begin each category
-                                                                if ($o.Opening) {
-                                                                                $pts3 = Get-Weight $Config 'OpeningString' 5
-                                                                                $Score += $pts3
-                                                                                $Breakdown['Opening String'] = $pts3
-                                                                                $Reasons['Opening String'] = "Opening $($Placement.Category) string, ride $($o.Length) of 3"
-                                                                }
                                                 }
                                 }
 
-                                # Strings this ride ends before they reach 3 (a 1-ride IP has no string to protect)
-                                $ended = @($o.Broken | Where-Object { $_.Length -eq 2 })
-                                if ($ended.Count -gt 0) {
+                                if ($ended.Count -gt 0 -and -not $Breakdown.Contains('String Swap')) {
                                                 $pts = (Get-Weight $Config 'BreakString') * $ended.Count
                                                 $Score += $pts
                                                 $Breakdown['Break String'] = $pts

@@ -1550,15 +1550,13 @@ Describe 'SoftRules -Detailed' {
                                                                 return (Get-Soft -Student $Student -Instructor $Instructor -Mission $next.Mission)
                                                 }
 
-                                                $script:StringKeys = @('Non-Counter', 'Continue String', 'String 4', 'String 5', 'Opening String', 'Zipper', 'Alternating', 'Break String', 'Counter Continuity', 'New Counter', 'CAP Bonus (string)')
+                                                $script:StringKeys = @('Non-Counter', 'Continue String', 'String 4', 'String 5', 'String Swap', 'Zipper', 'Alternating', 'Break String', 'Counter Continuity', 'New Counter', 'CAP Bonus (string)')
                                 }
 
-                                It 'Continue String, Opening String and Counter Continuity when the last IP flies again' {
+                                It 'Continue String and Counter Continuity when the last IP flies again' {
                                                 $r = Get-NextSoft (New-StringStudent 'J') 'Jones, Bob'
                                                 $r.Breakdown['Continue String'] | Should -Be 10
                                                 $r.Reasons['Continue String'] | Should -Be '2 String'
-                                                $r.Breakdown['Opening String'] | Should -Be 5
-                                                $r.Reasons['Opening String'] | Should -Be 'Opening FT string, ride 2 of 3'
                                                 $r.Breakdown['Counter Continuity'] | Should -Be 5
                                                 $r.Reasons['Counter Continuity'] | Should -Be 'Jones already counts (1 of 6 Fundamental counters)'
                                                 foreach ($k in 'String 4', 'String 5', 'Zipper', 'Alternating', 'Break String', 'Non-Counter', 'New Counter', 'CAP Bonus (string)') { $r.Breakdown.Contains($k) | Should -BeFalse }
@@ -1568,7 +1566,6 @@ Describe 'SoftRules -Detailed' {
                                                 $r = Get-NextSoft (New-StringStudent 'JJ') 'Jones, Bob'
                                                 $r.Breakdown['Continue String'] | Should -Be 10
                                                 $r.Reasons['Continue String'] | Should -Be '3 String'
-                                                $r.Reasons['Opening String'] | Should -Be 'Opening FT string, ride 3 of 3'
                                 }
 
                                 It 'CAP Bonus (string) reads the student''s IsCap' {
@@ -1588,7 +1585,7 @@ Describe 'SoftRules -Detailed' {
                                                 $r = Get-NextSoft (New-StringStudent $Rides) 'Jones, Bob'
                                                 $r.Breakdown[$Label] | Should -Be $Points
                                                 $r.Reasons[$Label] | Should -Be $Want
-                                                foreach ($k in 'Continue String', 'Opening String', 'Break String') { $r.Breakdown.Contains($k) | Should -BeFalse }
+                                                foreach ($k in 'Continue String', 'String Swap', 'Break String') { $r.Breakdown.Contains($k) | Should -BeFalse }
                                 }
 
                                 It 'the zipper ride (J,J + L) only costs the Zipper weight: Jones'' string is not broken' {
@@ -1602,20 +1599,23 @@ Describe 'SoftRules -Detailed' {
                                                 $r = Get-NextSoft (New-StringStudent 'JJL') 'Jones, Bob'
                                                 $r.Breakdown['Continue String'] | Should -Be 10
                                                 $r.Reasons['Continue String'] | Should -Be '3 String (zipper over Lee)'
-                                                $r.Reasons['Opening String'] | Should -Be 'Opening FT string, ride 3 of 3'
                                                 $r.Reasons['Counter Continuity'] | Should -Be 'Jones already counts (2 of 6 Fundamental counters)'
                                                 foreach ($k in 'Zipper', 'Break String', 'Alternating') { $r.Breakdown.Contains($k) | Should -BeFalse }
                                 }
 
-                                It 'Break String once a 2-string really ends: two different counters in a row (J,J,L + <Name>)' -TestCases @(
-                                                @{ Name = 'Ortiz, Sam'; Continues = $false }
-                                                @{ Name = 'Lee, Ann'; Continues = $true }
-                                ) {
-                                                $r = Get-NextSoft (New-StringStudent 'JJL') $Name
+                                It 'Break String once a 2-string really ends: two different counters in a row (J,J,L + Ortiz)' {
+                                                $r = Get-NextSoft (New-StringStudent 'JJL') 'Ortiz, Sam'
                                                 $r.Breakdown['Break String'] | Should -Be -5
                                                 $r.Reasons['Break String'] | Should -Be 'Breaks 2 String w/ Jones'
-                                                $r.Breakdown.Contains('Continue String') | Should -Be $Continues
-                                                $r.Breakdown.Contains('Zipper') | Should -BeFalse
+                                                foreach ($k in 'Continue String', 'String Swap', 'Zipper') { $r.Breakdown.Contains($k) | Should -BeFalse }
+                                }
+
+                                It 'ending a 2-string to make a new 2-string (J,J,L + L) is even' {
+                                                $r = Get-NextSoft (New-StringStudent 'JJL') 'Lee, Ann'
+                                                $r.Breakdown['String Swap'] | Should -Be 0
+                                                $r.Reasons['String Swap'] | Should -Be '2 String, ends 2 String w/ Jones'
+                                                foreach ($k in 'Continue String', 'Break String', 'Zipper', 'CAP Bonus (string)') { $r.Breakdown.Contains($k) | Should -BeFalse }
+                                                $r.Breakdown['Counter Continuity'] | Should -Be 5
                                 }
 
                                 It 'one ride with an IP is no string to break or wait on (<Rides> + <Name>)' -TestCases @(
@@ -1640,9 +1640,9 @@ Describe 'SoftRules -Detailed' {
                                                 Get-ShortIPName 'Lee, Ann' | Should -Be 'Lee'
                                 }
 
-                                It 'a non-counter breaks no strings (J,J + Leech)' {
+                                It 'a non-counter scores 0 and breaks no strings (J,J + Leech)' {
                                                 $r = Get-NextSoft (New-StringStudent 'JJ') 'Leech, Tom'
-                                                $r.Breakdown['Non-Counter'] | Should -Be -15
+                                                $r.Breakdown['Non-Counter'] | Should -Be 0
                                                 $r.Reasons['Non-Counter'] | Should -Be 'Leech is a non-counter (breaks no strings)'
                                                 foreach ($k in 'Continue String', 'Zipper', 'Break String', 'Counter Continuity', 'New Counter') { $r.Breakdown.Contains($k) | Should -BeFalse }
                                 }
@@ -1653,16 +1653,25 @@ Describe 'SoftRules -Detailed' {
                                                 $r.Breakdown.Contains('Break String') | Should -BeFalse
                                 }
 
-                                It 'a non-counter who flies two in a row counts, and then breaks strings like any counter' {
+                                It 'a non-counter who flies two in a row counts: a 2-string for Jones'' 2-string is even' {
                                                 $r = Get-NextSoft (New-StringStudent 'JJN') 'Leech, Tom'
                                                 $r.Breakdown.Contains('Non-Counter') | Should -BeFalse
-                                                $r.Reasons['Continue String'] | Should -Be '2 String (non-counter, 2 in a row)'
-                                                $r.Reasons['Break String'] | Should -Be 'Breaks 2 String w/ Jones'
+                                                $r.Breakdown['String Swap'] | Should -Be 0
+                                                $r.Reasons['String Swap'] | Should -Be '2 String (non-counter, 2 in a row), ends 2 String w/ Jones'
+                                                $r.Breakdown.Contains('Break String') | Should -BeFalse
+                                }
+
+                                It 'the non-counter''s 2-string can then be zippered and broken like any other' {
+                                                $r = Get-NextSoft (New-StringStudent 'JJNN') 'Ortiz, Sam'
+                                                $r.Reasons['Zipper'] | Should -Be "Zipper: Leech's 2 String waits on the next ride"
+                                                $r = Get-NextSoft (New-StringStudent 'JJNNO') 'Lee, Ann'
+                                                $r.Breakdown['Break String'] | Should -Be -5
+                                                $r.Reasons['Break String'] | Should -Be 'Breaks 2 String w/ Leech'
                                 }
 
                                 It 'a non-counter zippered (Leech, J + Leech) is still a non-counter' {
                                                 $r = Get-NextSoft (New-StringStudent 'NJ') 'Leech, Tom'
-                                                $r.Breakdown['Non-Counter'] | Should -Be -15
+                                                $r.Breakdown['Non-Counter'] | Should -Be 0
                                                 $r.Breakdown.Contains('Counter Continuity') | Should -BeFalse
                                 }
 
@@ -1702,7 +1711,7 @@ Describe 'SoftRules -Detailed' {
                                                 $blank.Reasons['Continue String'] | Should -Be '2 String'
                                                 $s = New-TestStudent -Name 'B' -Done 'FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-26 08:00|Ortiz, Sam'
                                                 $text = Get-Soft -Student $s -Instructor 'Text, Ty' -Mission 'FT5104' -Instructors $ips
-                                                $text.Breakdown['Non-Counter'] | Should -Be -15
+                                                $text.Breakdown['Non-Counter'] | Should -Be 0
                                                 $text.Reasons['Non-Counter'] | Should -Be 'Text is a non-counter (breaks no strings)'
                                 }
 
@@ -1752,11 +1761,6 @@ Describe 'SoftRules -Detailed' {
                                                 $o.Alternating | Should -Be $Alternating
                                                 (@($o.Broken | ForEach-Object { "$($_.IP)$($_.Length)" }) -join ',') | Should -Be $Broken
                                                 (@($o.Bridged | ForEach-Object { "$($_.IP)$($_.Length)" }) -join ',') | Should -Be $Bridged
-                                }
-
-                                It 'Opening: the string began the category' {
-                                                (Get-StringOutlook -Sorties @('A', 'B', 'A') -IP 'A').Opening | Should -BeTrue
-                                                (Get-StringOutlook -Sorties @('A', 'A', 'B', 'B') -IP 'B').Opening | Should -BeFalse
                                 }
                 }
 
@@ -1858,14 +1862,14 @@ Describe 'SoftRules -Detailed' {
                                                 # CAP, sim debt 2, Jones flew last ride 3 days ago, plus an older sim
                                                 $s = New-TestStudent -Name 'A' -IsCap -SimDebt 2 -Priority 1 -Done 'FI3101|2026-02-26 08:00', 'FT5001|2026-02-28 08:00|Jones, Bob'
                                                 $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5102'
-                                                @($r.Breakdown.Keys) | Should -Be @('Sim Debt (flight)', 'CAP Bonus', 'Continue String', 'CAP Bonus (string)', 'Opening String', 'Counter Continuity', 'Exhaustion', 'BIT Tracker', 'Student Priority')
-                                                @($r.Breakdown.Values) | Should -Be @(-2, 8, 10, 8, 5, 5, -3, 6, 1)
+                                                @($r.Breakdown.Keys) | Should -Be @('Sim Debt (flight)', 'CAP Bonus', 'Continue String', 'CAP Bonus (string)', 'Counter Continuity', 'Exhaustion', 'BIT Tracker', 'Student Priority')
+                                                @($r.Breakdown.Values) | Should -Be @(-2, 8, 10, 8, 5, -3, 6, 1)
                                                 @($r.Reasons.Values) | Should -Be @(
-                                                                'Sim Debt 2, flight adds to it', 'CAP student', '2 String', 'CAP student, 2 String', 'Opening FT string, ride 2 of 3',
+                                                                'Sim Debt 2, flight adds to it', 'CAP student', '2 String', 'CAP student, 2 String',
                                                                 'Jones already counts (1 of 6 Fundamental counters)', '1 Flight and 1 Sim in last 5 Days',
                                                                 '2 days without a flight (last flew Sat 2/28), CAP x2', 'Student Priority'
                                                 )
-                                                $r.Score | Should -Be 38
+                                                $r.Score | Should -Be 33
                                 }
 
                                 It 'Get-EventScore scores a copy of the line and leaves the real line alone' {

@@ -767,13 +767,14 @@ Describe 'Get-PlacementAssessment: cache by Board.Version' {
                                 (Get-Viol $a2 'TURN_TIME').Message | Should -Be 'Turn time 1.5 hr < 3.25 hr minimum (vs 0900)'
                 }
 
-                It 'recomputes after an IP change (non-counter penalty appears)' {
+                It 'recomputes after an IP change (the non-counter line appears, at 0)' {
                                 $a1 = Get-Assess $board 'K1' 'Able, Amy' $data
                                 Set-BoardInstructor -Board $board -Id 'K1' -Name 'Leech, Tom'
                                 $a2 = Get-Assess $board 'K1' 'Able, Amy' $data
-                                $a1.Score | Should -Be 20
-                                $a2.Score | Should -Be 5
-                                Get-Points $a2.EventDetails[0] 'Non-Counter' | Should -Be -15
+                                [object]::ReferenceEquals($a1, $a2) | Should -BeFalse
+                                Get-Points $a1.EventDetails[0] 'Non-Counter' | Should -BeNullOrEmpty
+                                Get-Points $a2.EventDetails[0] 'Non-Counter' | Should -Be 0
+                                $a2.Score | Should -Be 20
                 }
 
                 It 'recomputes after Undo-Board' {
@@ -791,8 +792,9 @@ Describe 'Get-PlacementAssessment: cache by Board.Version' {
                                 $other.Version | Should -Be $board.Version
                                 $a1 = Get-Assess $board 'K1' 'Able, Amy' $data
                                 $a2 = Get-Assess $other 'K1' 'Able, Amy' $data
-                                $a1.Score | Should -Be 20
-                                $a2.Score | Should -Be 5
+                                [object]::ReferenceEquals($a1, $a2) | Should -BeFalse
+                                Get-Points $a1.EventDetails[0] 'Non-Counter' | Should -BeNullOrEmpty
+                                Get-Points $a2.EventDetails[0] 'Non-Counter' | Should -Be 0
                 }
 
                 It 'keeps separate entries per mission, exclude list and -Quick' {

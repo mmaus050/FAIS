@@ -705,7 +705,6 @@ function Get-StringCounts {
 #   Zipper       the string goes on over one different counter (A,A,B + A)
 #   LastIP       the counter who flew the ride before (the one zippered over)
 #   Alternating  that counter's own ride was a zipper too (A,B,A + B): the pattern the AETCI rules out
-#   Opening      the string began the category (a 3-string should normally begin each category)
 #   Broken       strings this ride ends (two different counters in a row): { IP, Length }
 #   Bridged      strings this ride sits in the middle of, still alive: { IP, Length }
 function Get-StringOutlook {
@@ -725,10 +724,6 @@ function Get-StringOutlook {
                                 $alternating = ($Sorties[$counterAt[$counterAt.Count - 2]] -ne $lastIP) -and ((Get-StringLength $Sorties[0..$j] $NonCounters) -ge 2)
                 }
 
-                # Every one of this IP's rides is in this string, and the first of them opened the category
-                $ipRides = @($counterAt | Where-Object { $Sorties[$_] -eq $IP }).Count
-                $opening = ($counterAt.Count -eq 0) -or ($Sorties[$counterAt[0]] -eq $IP -and $ipRides -eq ($length - 1))
-
                 $broken = New-Object System.Collections.Generic.List[object]
                 $bridged = New-Object System.Collections.Generic.List[object]
                 foreach ($other in @($counterAt | ForEach-Object { $Sorties[$_] } | Sort-Object -Unique)) {
@@ -745,7 +740,6 @@ function Get-StringOutlook {
                                 Zipper      = $zipper
                                 LastIP      = $lastIP
                                 Alternating = $alternating
-                                Opening     = $opening
                                 Broken      = $broken.ToArray()
                                 Bridged     = $bridged.ToArray()
                 }

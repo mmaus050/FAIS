@@ -223,9 +223,9 @@ This checks the engine, an Excel round trip (temp files only) and the puck board
 The scheduler follows the AETCI instructor continuity rules, counted the same way as the **String Tracker**:
 
 - **An IP who flies a sortie with a student is a counter**, and that sortie is part of a string. Three sorties in a row with one counter is the goal; a 2 or 4-sortie string is acceptable (to prevent BITs); 5 or more is not.
-- **Each category (FT, FF, AA) is its own string**, in mission order. A new category starts a new string; a 3-sortie string should begin each one.
+- **Each category (FT, FF, AA) is its own string**, in mission order. A new category starts a new string.
 - **One different counter in between doesn't break a string.** `Lee, Lee, Ortiz, Lee` is a 3-string with Lee. Two different counters in a row end it.
-- **Non-counters** (supervisors, `IsCounter` FALSE on the Instructors sheet) break no strings and aren't counters, unless they fly the student two rides in a row: then they count, for that student.
+- **Non-counters** (supervisors, `IsCounter` FALSE on the Instructors sheet) score 0, break no strings and aren't counters, unless they fly the student two rides in a row: then they count, for that student, and their 2-string can be zippered or broken like anyone's.
 - **Sims, solos and check rides** are left out entirely.
 - **Counter limit:** at most **6 counters in Fundamental** (FT, FF) and **3 in Airmanship** (AA). A new counter past the limit is a hard rule (`... would be counter 4 of 3 max in Airmanship (SQ/CC deviation, AF Form 4293)`): the fill won't do it, and a hardcoded line is flagged OVERRIDE.
 
@@ -234,16 +234,16 @@ How a ride with that IP scores (SoftWeights column in brackets):
 | The ride | Score |
 |---|---|
 | Continues a string to 2 or 3 rides, a zipper return (`Lee, Lee, Ortiz` + Lee) included | **Continue String** (`ContString`) |
-| Ride 2 or 3 of the category's first string | also **Opening String** (`OpeningString`, default +5) |
 | Makes it a 4-string / 5+ string | **String 4** (`String4`) / **String 5** (`String5`) |
 | The zipper ride itself (`Lee, Lee` + Ortiz): Lee's 2-string waits on the next ride | **Zipper** (`Zipper`) only. Not Break String |
-| Really ends a 2-string (two different counters in a row: `Lee, Lee, Ortiz` + anyone but Lee) | **Break String** (`BreakString`). A one-ride IP has no string to break |
+| Really ends a 2-string (two different counters in a row: `Lee, Lee, Ortiz` + Smith) | **Break String** (`BreakString`). A one-ride IP, or a string already 3+, has nothing to lose |
+| Ends a 2-string to make a new 2-string (`Lee, Lee, Ortiz` + Ortiz) | **String Swap**, 0: even |
 | Alternating counters (`Lee, Ortiz, Lee` + Ortiz) | **Alternating** (`Alternating`, default −10), instead of Continue String |
-| A non-counter who didn't fly the ride before | **Non-Counter** (`NonCounter`), nothing else |
+| A non-counter who didn't fly the ride before | **Non-Counter**, 0 (the `NonCounter` column is no longer used) |
 | An IP who already counts in this phase | **Counter Continuity** (`CounterContinuity`) |
 | A new counter | **New Counter** (`NewCounter`, default 0; shown when it scores or for the phase's last counter) |
 
-`Alternating`, `OpeningString` and `NewCounter` are optional SoftWeights columns: leave them out and the defaults apply.
+`Alternating` and `NewCounter` are optional SoftWeights columns: leave them out and the defaults apply.
 
 ## Scoring changes from the old version
 These are deliberate fixes, so expect some different picks:
