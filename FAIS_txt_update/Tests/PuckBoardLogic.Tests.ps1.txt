@@ -495,6 +495,9 @@ Describe 'Puck board: missions picked by hand, Add Bulk Lines, Update Syllabi (n
         & (Get-Module PuckBoard) { Format-PBBulkTimes -Times @('0730', '0733', '0736') -Every '3' -SortieType 'Day Local' } | Should -BeExactly '3 Day Local lines: 0730 to 0736, every 3 min'
         & (Get-Module PuckBoard) { Format-PBBulkTimes -Times @('0900') -Every '3' -SortieType 'OFT' -DayText 'Tue 20 Oct' } | Should -BeExactly '1 OFT line on Tue 20 Oct at 0900'
         & (Get-Module PuckBoard) { Format-PBBulkTimes -Times @('1000', '1005') -Every '5' -SortieType 'O&B' } | Should -BeExactly '2 O&B lines: 1000 to 1005, every 5 min (each with its return leg)'
+        & (Get-Module PuckBoard) { Format-PBBulkTimes -Times @('1000') -Every '5' -SortieType 'O&B' } | Should -BeExactly '1 O&B line at 1000 (with its return leg)'
+        & (Get-Module PuckBoard) { Format-PBBulkTimes -Times @('0800', '0800', '0800') -Every '0' -SortieType 'OFT' -DayText 'Wed 21 Oct' } | Should -BeExactly '3 OFT lines on Wed 21 Oct, all at 0800'
+        & (Get-Module PuckBoard) { Format-PBBulkTimes -Times @('0730', '0735') -Every ' 05 ' -SortieType 'Day Local' } | Should -BeExactly '2 Day Local lines: 0730 to 0735, every 5 min'
     }
 
     Context 'Update Syllabi' {

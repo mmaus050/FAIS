@@ -676,7 +676,8 @@ function ConvertFrom-QuickEntry {
 
 # Add Bulk Lines: -Count lines of -SortieType on -Day, the first at -StartTime and each one
 # -Every minutes after the one before (3 by default). Values come straight from the dialog's
-# boxes, so they are checked here. An O&B gets its linked return leg, like a typed one.
+# boxes, so they are checked here. An O&B gets its linked return leg, like a typed one; a
+# return type on its own is refused (it would be a return leg with no O&B).
 # Returns {Lines; Times ('HHmm' of each line); Errors}. Lines is empty when there are errors.
 function New-BulkBoardLines {
                 param (
@@ -704,6 +705,9 @@ function New-BulkBoardLines {
                 if (-not [int]::TryParse(([string]$Every).Trim(), [ref]$gap) -or $gap -lt 0 -or $gap -gt 240) { $errors.Add('Minutes between lines must be a whole number from 0 to 240.') }
                 $type = ([string]$SortieType).Trim()
                 if ($type -eq '') { $errors.Add('Pick a sortie type.') }
+                elseif ((Test-IsReturnSortieType $type) -or $type -eq ([string]$Settings.ReturnSortieType).Trim()) {
+                                $errors.Add("Return lines can't be added on their own: pick O&B and each one gets its return leg.")
+                }
                 $dayText = ConvertTo-BoardDay $Day
                 if ($null -eq $dayText) { $errors.Add("'$Day' isn't a day.") }
 

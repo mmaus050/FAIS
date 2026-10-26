@@ -2094,6 +2094,9 @@ Describe 'New-BulkBoardLines (Add Bulk Lines)' {
         $r = New-BulkBoardLines -Day $script:D1 -StartTime '1000' -Count '1' -SortieType 'O&B' -Settings @{ OBReturnOffsetMinutes = 120; ReturnSortieType = 'OB RTN' }
         $r.Lines[1].ETD | Should -Be ([datetime]'2026-10-20 12:00')
         $r.Lines[1].SortieType | Should -BeExactly 'OB RTN'
+        $alone = New-BulkBoardLines -Day $script:D1 -StartTime '1000' -Count '2' -SortieType 'OB RTN' -Settings @{ OBReturnOffsetMinutes = 120; ReturnSortieType = 'OB RTN' }
+        @($alone.Errors).Count | Should -Be 1 -Because "the board's return type on its own would be return legs with no O&B"
+        @($alone.Lines).Count | Should -Be 0
     }
 
     It 'goes on a board as one undo step' {
@@ -2113,6 +2116,7 @@ Describe 'New-BulkBoardLines (Add Bulk Lines)' {
         @{ Why = 'too many'; Start = '0730'; Count = '61'; Every = '3'; Type = 'Day Local'; Want = 'Number of lines must be a whole number from 1 to 60.' }
         @{ Why = 'negative gap'; Start = '0730'; Count = '3'; Every = '-3'; Type = 'Day Local'; Want = 'Minutes between lines must be a whole number from 0 to 240.' }
         @{ Why = 'no type'; Start = '0730'; Count = '3'; Every = '3'; Type = ' '; Want = 'Pick a sortie type.' }
+        @{ Why = 'return legs on their own'; Start = '1300'; Count = '3'; Every = '3'; Type = 'O&B Return'; Want = "Return lines can't be added on their own: pick O&B and each one gets its return leg." }
         @{ Why = 'past midnight'; Start = '2330'; Count = '20'; Every = '3'; Type = 'Day Local'; Want = 'The last line would be at 0027 the next day. Start earlier, add fewer lines or put them closer together.' }
         @{ Why = 'O&B return past midnight'; Start = '2200'; Count = '1'; Every = '3'; Type = 'O&B'; Want = "The last O&B's return leg would be at 0100 the next day. Start earlier or add fewer lines." }
     ) {
