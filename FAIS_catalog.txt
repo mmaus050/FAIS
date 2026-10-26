@@ -262,7 +262,7 @@ catch { Write-Host "Could not show the export result window: $($_.Exception.Mess
 
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
             <Button x:Name="AddButton" Content="Add absence" Padding="18,4" Margin="3,0" FontWeight="Bold" IsDefault="True"/>
-            <Button x:Name="CancelButton" Content="Cancel" Padding="10,3" Margin="3,0" IsCancel="True"/>
+            <Button x:Name="CancelButton" Content="Cancel" Padding="10,4" Margin="3,0" IsCancel="True"/>
         </StackPanel>
 
         <!-- Right: every student -->
@@ -270,7 +270,7 @@ catch { Write-Host "Could not show the export result window: $($_.Exception.Mess
                 Padding="6" Tag="AbsencePool" AllowDrop="True">
             <DockPanel>
                 <TextBlock DockPanel.Dock="Top" Text="STUDENTS" FontWeight="Bold" Foreground="#14532D" Margin="2,0,0,4"/>
-                <TextBox DockPanel.Dock="Top" x:Name="SearchBox" Margin="0,0,0,4" Padding="3" ToolTip="Filter students by name"/>
+                <TextBox DockPanel.Dock="Top" x:Name="SearchBox" Height="26" Margin="0,0,0,4" Padding="3,0" VerticalContentAlignment="Center" ToolTip="Filter students by name"/>
                 <TextBlock DockPanel.Dock="Top" FontSize="10" Foreground="#64748B" TextWrapping="Wrap" Margin="2,0,0,6"
                            Text="Drag a student into the box, or click them and then click the box. Double-click adds them straight away."/>
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -301,9 +301,9 @@ catch { Write-Host "Could not show the export result window: $($_.Exception.Mess
                 </Border>
                 <DockPanel Margin="0,4,0,0">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                        <Button x:Name="PasteButton" Content="Paste names" Padding="10,2" Margin="3,0"
+                        <Button x:Name="PasteButton" Content="Paste names" Padding="10,4" Margin="3,0"
                                 ToolTip="Add the students named in what you copied: one name per line or cell (Ctrl+V does the same)"/>
-                        <Button x:Name="ClearButton" Content="Clear" Padding="10,2" Margin="3,0,0,0" ToolTip="Take every student out of the box"/>
+                        <Button x:Name="ClearButton" Content="Clear" Padding="10,4" Margin="3,0,0,0" ToolTip="Take every student out of the box"/>
                     </StackPanel>
                     <TextBlock x:Name="HoldText" TextWrapping="Wrap" Foreground="#1E3A8A" FontWeight="SemiBold" VerticalAlignment="Center"/>
                 </DockPanel>
@@ -322,27 +322,27 @@ catch { Write-Host "Could not show the export result window: $($_.Exception.Mess
                     </Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0" Text="Day:" VerticalAlignment="Center"/>
-                    <DatePicker x:Name="DayPicker" Grid.Row="0" Grid.Column="1" Width="150" HorizontalAlignment="Left" Margin="0,3"
+                    <DatePicker x:Name="DayPicker" Grid.Row="0" Grid.Column="1" Width="150" Height="26" HorizontalAlignment="Left" VerticalContentAlignment="Center" Margin="0,3"
                                 ToolTip="The day the absence starts"/>
 
                     <TextBlock Grid.Row="1" Text="From:" VerticalAlignment="Center"/>
                     <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="0,3">
-                        <TextBox x:Name="FromBox" Width="90" FontFamily="Consolas" FontSize="13" Padding="3,2" MaxLength="12"
+                        <TextBox x:Name="FromBox" Width="90" Height="26" FontFamily="Consolas" FontSize="13" Padding="3,0" VerticalContentAlignment="Center" MaxLength="12"
                                  ToolTip="24-hour time (0730, 1530) or 12-hour time with AM or PM (0730 AM, 0330 PM)"/>
                         <TextBlock Text="e.g. 0730, 1530 or 0330 PM" Foreground="#94A3B8" VerticalAlignment="Center" Margin="8,0,0,0"/>
                     </StackPanel>
 
                     <TextBlock Grid.Row="2" Text="To:" VerticalAlignment="Center"/>
                     <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="0,3">
-                        <TextBox x:Name="ToBox" Width="90" FontFamily="Consolas" FontSize="13" Padding="3,2" MaxLength="12"
+                        <TextBox x:Name="ToBox" Width="90" Height="26" FontFamily="Consolas" FontSize="13" Padding="3,0" VerticalContentAlignment="Center" MaxLength="12"
                                  ToolTip="24-hour time (1130, 1700) or 12-hour time with AM or PM (1130 AM, 0500 PM)"/>
                         <TextBlock Text="on" VerticalAlignment="Center" Margin="10,0,6,0"/>
-                        <DatePicker x:Name="EndDayPicker" Width="150"
+                        <DatePicker x:Name="EndDayPicker" Width="150" Height="26" VerticalContentAlignment="Center"
                                     ToolTip="The same day as the start, unless the absence runs past midnight or over several days"/>
                     </StackPanel>
 
                     <TextBlock Grid.Row="3" Text="Reason:" VerticalAlignment="Center"/>
-                    <TextBox x:Name="ReasonBox" Grid.Row="3" Grid.Column="1" Padding="3,2" Margin="0,3" MaxLength="120"
+                    <TextBox x:Name="ReasonBox" Grid.Row="3" Grid.Column="1" Height="26" Padding="3,0" VerticalContentAlignment="Center" Margin="0,3" MaxLength="120"
                              ToolTip="Optional, e.g. Dentist, Leave, Medical. It shows on the board and in the rule flag."/>
                 </Grid>
 
@@ -2589,18 +2589,18 @@ function Get-NextFlyingDay {
 
             <TextBlock Grid.Row="0" Text="Start time:" VerticalAlignment="Center"/>
             <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Margin="0,3">
-                <TextBox x:Name="StartTimeBox" Width="70" FontFamily="Consolas" FontSize="13" Padding="3,2"/>
+                <TextBox x:Name="StartTimeBox" Width="100" Height="26" FontFamily="Consolas" FontSize="13" Padding="3,0" VerticalContentAlignment="Center"/>
                 <TextBlock Text="e.g. 0730" Foreground="#94A3B8" VerticalAlignment="Center" Margin="8,0,0,0"/>
             </StackPanel>
 
             <TextBlock Grid.Row="1" Text="Number of lines:" VerticalAlignment="Center"/>
-            <TextBox x:Name="CountBox" Grid.Row="1" Grid.Column="1" Width="70" HorizontalAlignment="Left" FontFamily="Consolas" FontSize="13" Padding="3,2" Margin="0,3"/>
+            <TextBox x:Name="CountBox" Grid.Row="1" Grid.Column="1" Width="100" Height="26" HorizontalAlignment="Left" FontFamily="Consolas" FontSize="13" Padding="3,0" VerticalContentAlignment="Center" Margin="0,3"/>
 
             <TextBlock Grid.Row="2" Text="Minutes between lines:" VerticalAlignment="Center"/>
-            <TextBox x:Name="IntervalBox" Grid.Row="2" Grid.Column="1" Width="70" HorizontalAlignment="Left" FontFamily="Consolas" FontSize="13" Padding="3,2" Margin="0,3"/>
+            <TextBox x:Name="IntervalBox" Grid.Row="2" Grid.Column="1" Width="100" Height="26" HorizontalAlignment="Left" FontFamily="Consolas" FontSize="13" Padding="3,0" VerticalContentAlignment="Center" Margin="0,3"/>
 
             <TextBlock Grid.Row="3" Text="Line type:" VerticalAlignment="Center"/>
-            <ComboBox x:Name="TypeCombo" Grid.Row="3" Grid.Column="1" Width="140" HorizontalAlignment="Left" Margin="0,3"/>
+            <ComboBox x:Name="TypeCombo" Grid.Row="3" Grid.Column="1" Width="100" Height="26" HorizontalAlignment="Left" VerticalContentAlignment="Center" Margin="0,3"/>
         </Grid>
 
         <Border Background="White" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,12,0,0">
@@ -2609,7 +2609,7 @@ function Get-NextFlyingDay {
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
             <Button x:Name="AddButton" Content="Add lines" Padding="18,4" Margin="3,0" FontWeight="Bold" IsDefault="True"/>
-            <Button x:Name="CancelButton" Content="Cancel" Padding="10,3" Margin="3,0" IsCancel="True"/>
+            <Button x:Name="CancelButton" Content="Cancel" Padding="10,4" Margin="3,0" IsCancel="True"/>
         </StackPanel>
     </StackPanel>
 </Window>
@@ -5286,16 +5286,16 @@ function Open-FaisWorkbooks {
         <TextBlock DockPanel.Dock="Top" x:Name="SourceInfoText" TextWrapping="Wrap" Foreground="#475569" Margin="0,2,0,8"/>
 
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
-            <Button x:Name="RefreshButton" Content="Read the file again" Padding="10,3" Margin="3,0"/>
+            <Button x:Name="RefreshButton" Content="Read the file again" Padding="10,4" Margin="3,0"/>
             <Button x:Name="LoadButton" Content="Load" Padding="18,4" Margin="3,0" FontWeight="Bold" IsDefault="True"/>
-            <Button x:Name="CancelButton" Content="Cancel" Padding="10,3" Margin="3,0" IsCancel="True"/>
+            <Button x:Name="CancelButton" Content="Cancel" Padding="10,4" Margin="3,0" IsCancel="True"/>
         </StackPanel>
 
         <Border DockPanel.Dock="Bottom" Background="White" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,10,0,0">
             <StackPanel>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                     <TextBlock Text="Put the lines on:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <DatePicker x:Name="TargetDayPicker" Width="140"/>
+                    <DatePicker x:Name="TargetDayPicker" Width="140" Height="26" VerticalContentAlignment="Center"/>
                     <TextBlock x:Name="TargetInfoText" VerticalAlignment="Center" Foreground="#64748B" Margin="10,0,0,0"/>
                 </StackPanel>
                 <RadioButton x:Name="ReplaceRadio" GroupName="Mode" Content="Replace that day's lines on the board" IsChecked="True" Margin="0,0,0,2"/>
@@ -5913,6 +5913,10 @@ $script:PBColors = @{
                 HeatClean      = '#BBF7D0'
                 HeatWarn       = '#FDE68A'
                 HeatHard       = '#FECACA'
+                IPPuck         = '#DBEAFE'
+                IPPuckBorder   = '#93C5FD'
+                IPPuckNC       = '#EDE9FE'
+                IPPuckNCBorder = '#C4B5FD'
 }
 
 # Runs queued board commands after the WPF event that asked for them has finished
@@ -6640,9 +6644,10 @@ function New-PBLineVM {
 
                 $stripe = if ($isReturn) { $K.StripeReturn } elseif ($isOB) { $K.StripeOB } elseif ($isSim) { $K.StripeSim } elseif ($Line.SortieType -like '*Day Local*') { $K.StripeDayLocal } else { $K.StripeOther }
 
-                # IP slot
+                # IP slot (a non-counter keeps its puck color on the line)
                 $ipText = [string]$Line.Instructor
-                $ipFg = '#1E3A8A'; $ipBg = '#DBEAFE'; $ipBorder = '#93C5FD'; $ipStyle = 'Normal'
+                $ipColors = Get-PBIPPuckColors (Find-PBInstructor $ipText)
+                $ipFg = '#1E3A8A'; $ipBg = $ipColors.Background; $ipBorder = $ipColors.Border; $ipStyle = 'Normal'
                 $ipTip = 'Drag an IP puck here. Drag it to another line to move it (Ctrl = copy).'
                 if ([string]::IsNullOrWhiteSpace($ipText)) {
                                 $ipFg = '#94A3B8'; $ipBg = '#F8FAFC'; $ipBorder = '#CBD5E1'; $ipStyle = 'Italic'
@@ -6787,6 +6792,26 @@ function Get-PBRowColors {
                 return @{ Background = $bg; Border = $border }
 }
 
+# An IP puck's fill and outline, in the pool and on a line: non-counters get their own color
+function Get-PBIPPuckColors {
+                param ($Instructor)
+
+                $K = $script:PBColors
+                if ($null -ne $Instructor -and -not (ConvertTo-FaisBool $Instructor.IsCounter -Default $true)) {
+                                return @{ Background = $K.IPPuckNC; Border = $K.IPPuckNCBorder }
+                }
+                return @{ Background = $K.IPPuck; Border = $K.IPPuckBorder }
+}
+
+# The IP with that name (capital letters aside), or $null
+function Find-PBInstructor {
+                param ([string]$Name)
+
+                if ([string]::IsNullOrWhiteSpace($Name)) { return $null }
+                foreach ($ip in @($script:PB.Data.Instructors)) { if ([string]$ip.Name -ieq $Name) { return $ip } }
+                return $null
+}
+
 function Update-PBPools {
                 $day = Get-PBActiveDay
                 $board = $script:PB.Board
@@ -6800,13 +6825,15 @@ function Update-PBPools {
                                 if ($ipFilter -and ([string]$ip.Name -notlike "*$ipFilter*") -and ([string]$ip.Callsign -notlike "*$ipFilter*")) { continue }
                                 $info = Get-InstructorPuckInfo -Instructor $ip -Board $board -Day $day
                                 $isHeld = ($null -ne $held -and $held.Kind -eq 'IP' -and [string]$held.Name -eq [string]$info.Name)
+                                $colors = Get-PBIPPuckColors $ip
                                 [PSCustomObject]@{
                                                 Name            = $info.Name
                                                 SubText         = ("{0}  {1}" -f $info.Callsign, ($info.Badges -join ' ')).Trim()
                                                 CountText       = "x$($info.Lines)"
                                                 CountVisibility = $(if ($info.Lines -gt 0) { 'Visible' } else { 'Collapsed' })
                                                 ToolTipText     = $(if ($info.Lines -gt 0) { "On $($info.Lines) line(s) this day: $($info.Times -join ', ')" } else { 'Not on any line this day' }) + $clickTip
-                                                BorderBrush     = $(if ($isHeld) { '#1E3A8A' } else { '#93C5FD' })
+                                                Background      = $colors.Background
+                                                BorderBrush     = $(if ($isHeld) { '#1E3A8A' } else { $colors.Border })
                                                 PuckBorderThickness = $(if ($isHeld) { '3' } else { '1' })
                                 }
                 }
@@ -8387,8 +8414,9 @@ function Get-PBColorKey {
                                                 (& $item 'Badge' '#D97706' '2 turns that day' '' 1 '2 turns')
                                                 (& $item 'Badge' '#DC2626' '3 or more turns that day' '' 1 '3 turns')
                                                 (& $item 'None' '' 'CAP: one flight a day, no O&Bs, needs an experienced IP. INTL: international, needs an experienced IP. U-SIM / U-FLT: unsat sim / flight. ABS: absent at those times.')) }
-                                @{ Title = 'IP pucks (left)'; Items = @(
-                                                (& $item 'Pill' '#DBEAFE' 'IP' '#93C5FD')
+                                @{ Title = 'IP pucks (left, and the IP slot on a line)'; Items = @(
+                                                (& $item 'Pill' $K.IPPuck 'Counter IP' $K.IPPuckBorder)
+                                                (& $item 'Pill' $K.IPPuckNC 'Non-counter IP (NC)' $K.IPPuckNCBorder)
                                                 (& $item 'Badge' '#1D4ED8' 'Lines that IP has that day' '' 1 'x2')
                                                 (& $item 'None' '' 'EXP: experienced IP. CHK: check IP. NC: non-counter.')) }
                                 @{ Title = 'Picking and holding'; Items = @(
@@ -10575,8 +10603,16 @@ function Test-PuckBoardWindow {
         <Style x:Key="BarButton" TargetType="Button">
             <Setter Property="Padding" Value="10,3"/>
             <Setter Property="Margin" Value="3,0"/>
+            <Setter Property="MinHeight" Value="26"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <!-- Text boxes, dropdowns and date boxes in the bars: all one height -->
+        <Style x:Key="BarField" TargetType="Control">
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
 
         <Style x:Key="PuckBorder" TargetType="Border">
@@ -10587,10 +10623,18 @@ function Test-PuckBoardWindow {
             <Setter Property="Cursor" Value="Hand"/>
         </Style>
 
+        <!-- Every cell on a line is the same height (26) -->
         <Style x:Key="CellBox" TargetType="TextBox">
             <Setter Property="Margin" Value="2"/>
+            <Setter Property="Height" Value="26"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
             <Setter Property="BorderBrush" Value="#CBD5E1"/>
+        </Style>
+
+        <Style x:Key="CellCombo" TargetType="ComboBox">
+            <Setter Property="Margin" Value="2"/>
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
 
         <Style x:Key="HeaderText" TargetType="TextBlock">
@@ -10601,9 +10645,9 @@ function Test-PuckBoardWindow {
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
 
-        <!-- IP puck in the left pool -->
+        <!-- IP puck in the left pool (non-counters get their own fill) -->
         <DataTemplate x:Key="IPPuckTemplate">
-            <Border Tag="IPPuck" Style="{StaticResource PuckBorder}" Background="#DBEAFE" BorderBrush="{Binding BorderBrush}"
+            <Border Tag="IPPuck" Style="{StaticResource PuckBorder}" Background="{Binding Background}" BorderBrush="{Binding BorderBrush}"
                     BorderThickness="{Binding PuckBorderThickness}" ToolTip="{Binding ToolTipText}" ToolTipService.ShowDuration="30000">
                 <DockPanel LastChildFill="True">
                     <Border DockPanel.Dock="Right" Background="#1D4ED8" CornerRadius="8" Padding="6,0" Margin="6,0,0,0"
@@ -10639,7 +10683,7 @@ function Test-PuckBoardWindow {
 
         <!-- Column headers above each day's lines -->
         <DataTemplate x:Key="LineHeaderTemplate">
-            <Grid Margin="3,0,3,2">
+            <Grid Margin="4,0,4,2">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="8"/>
                     <ColumnDefinition Width="64"/>
@@ -10698,10 +10742,10 @@ function Test-PuckBoardWindow {
                              FontFamily="Consolas" FontSize="13" FontWeight="SemiBold" MaxLength="6" HorizontalContentAlignment="Center"
                              ToolTip="Type 0730, 730 or 7:30 then Enter. Up/Down = 5 min, Shift+Up/Down = 30 min, Esc = undo typing."/>
 
-                    <ComboBox Grid.Column="2" Tag="TypeBox" Margin="2" VerticalContentAlignment="Center"
+                    <ComboBox Grid.Column="2" Tag="TypeBox" Style="{StaticResource CellCombo}"
                               ItemsSource="{Binding TypeOptions}" SelectedItem="{Binding SortieType, Mode=OneWay}"/>
 
-                    <Border Grid.Column="3" Tag="IPSlot" AllowDrop="True" Focusable="True" Margin="2" MinHeight="26" Padding="9,2"
+                    <Border Grid.Column="3" Tag="IPSlot" AllowDrop="True" Focusable="True" Margin="2" Height="26" Padding="9,2"
                             CornerRadius="13" BorderThickness="1" Background="{Binding IPBackground}" BorderBrush="{Binding IPBorder}"
                             ToolTip="{Binding IPToolTip}">
                         <Border.ContextMenu>
@@ -10711,7 +10755,7 @@ function Test-PuckBoardWindow {
                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                     </Border>
 
-                    <Border Grid.Column="4" Tag="StudentSlot" AllowDrop="{Binding AllowStudentDrop}" Focusable="True" Margin="2" MinHeight="26"
+                    <Border Grid.Column="4" Tag="StudentSlot" AllowDrop="{Binding AllowStudentDrop}" Focusable="True" Margin="2" Height="26"
                             Padding="9,2,15,2" CornerRadius="13" BorderThickness="{Binding StudentBorderThickness}"
                             Background="{Binding StudentBackground}" BorderBrush="{Binding StudentBorder}"
                             ToolTip=" " ToolTipService.ShowDuration="60000" ToolTipService.InitialShowDelay="300">
@@ -10729,7 +10773,7 @@ function Test-PuckBoardWindow {
                         </Grid>
                     </Border>
 
-                    <ComboBox Grid.Column="5" Tag="MissionBox" Margin="2" VerticalContentAlignment="Center" IsTextSearchEnabled="False"
+                    <ComboBox Grid.Column="5" Tag="MissionBox" Style="{StaticResource CellCombo}" IsTextSearchEnabled="False"
                               ItemsSource="{Binding MissionOptions}" SelectedItem="{Binding MissionSelected, Mode=OneWay}"
                               IsEnabled="{Binding MissionEnabled}"
                               ToolTip="(auto) = the best-scoring event that passes the hard rules. Pick one to hardcode it, or Type a mission... for any other."/>
@@ -10745,7 +10789,7 @@ function Test-PuckBoardWindow {
                              IsReadOnly="{Binding ReadOnlyFields}" TextWrapping="NoWrap" ToolTip="{Binding NotesToolTip}"
                              Foreground="{Binding NotesForeground}"/>
 
-                    <Button Grid.Column="8" Tag="DeleteLine" Content="&#x2715;" Margin="2" Padding="0" Width="24" Height="24"
+                    <Button Grid.Column="8" Tag="DeleteLine" Content="&#x2715;" Margin="2" Padding="0" Width="26" Height="26"
                             Background="Transparent" BorderThickness="0" Foreground="#94A3B8" Cursor="Hand" ToolTip="Delete line (Ctrl+Z undoes)"/>
                 </Grid>
             </Border>
@@ -10814,7 +10858,7 @@ function Test-PuckBoardWindow {
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                         <Button x:Name="UndoButton" Content="Undo (Ctrl+Z)" Style="{StaticResource BarButton}"/>
-                        <Button x:Name="ColorKeyButton" Content="Colors" Style="{StaticResource BarButton}" Padding="6,1" FontSize="11"
+                        <Button x:Name="ColorKeyButton" Content="Colors" Style="{StaticResource BarButton}"
                                 ToolTip="What the colors on the board mean"/>
                         <Button x:Name="HelpButton" Content="Help" Style="{StaticResource BarButton}"/>
                     </StackPanel>
@@ -10823,7 +10867,7 @@ function Test-PuckBoardWindow {
                            RenderOptions.BitmapScalingMode="HighQuality" ToolTip="FAIP Mafia"/>
                     <TextBlock Text="FAIS PUCK BOARD" Foreground="White" FontWeight="Bold" FontSize="16" VerticalAlignment="Center" Margin="0,0,18,0"/>
                     <TextBlock Text="Add lines:" Foreground="#CBD5E1" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                    <TextBox x:Name="QuickEntryBox" Width="420" FontFamily="Consolas" FontSize="13" Padding="4,3" VerticalContentAlignment="Center"
+                    <TextBox x:Name="QuickEntryBox" Style="{StaticResource BarField}" Width="420" FontFamily="Consolas" FontSize="13" Padding="4,0"
                              ToolTip="Examples: 0730 DL | 1015 O&amp;B (return at +3 hr) | 1015 OB 1330 | 1300 OFT x2 | 0800 DL Jones sp:Smith | separate several with commas. Ctrl+L jumps here."/>
                     <Button x:Name="AddLineButton" Content="Add" Style="{StaticResource BarButton}" FontWeight="SemiBold"/>
                     <Button x:Name="BulkLinesButton" Content="Add Bulk Lines" Style="{StaticResource BarButton}"
@@ -10836,7 +10880,7 @@ function Test-PuckBoardWindow {
             <Border DockPanel.Dock="Top" Background="#E2E8F0" Padding="12,5">
                 <WrapPanel VerticalAlignment="Center">
                     <TextBlock Text="Template:" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                    <ComboBox x:Name="TemplateCombo" Width="170" DisplayMemberPath="Name" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="TemplateCombo" Style="{StaticResource BarField}" Width="170" DisplayMemberPath="Name"/>
                     <Button x:Name="LoadTemplateButton" Content="Load" Style="{StaticResource BarButton}"/>
                     <Button x:Name="SaveTemplateButton" Content="Save day as template..." Style="{StaticResource BarButton}"/>
                     <Rectangle Width="1" Height="20" Fill="#94A3B8" Margin="8,0"/>
@@ -10849,7 +10893,7 @@ function Test-PuckBoardWindow {
                     <Button x:Name="AddAbsenceButton" Content="Add Student Absence" Style="{StaticResource BarButton}" FontWeight="SemiBold"
                             ToolTip="Block students off for a stretch of time (an appointment, leave...): drag or paste them in, pick the day and type the times. It goes on MasterData's StudentAbsences sheet, and the board and the scheduler keep them off every line inside it."/>
                     <Rectangle Width="1" Height="20" Fill="#94A3B8" Margin="8,0"/>
-                    <DatePicker x:Name="AddDayPicker" Width="125" VerticalAlignment="Center"/>
+                    <DatePicker x:Name="AddDayPicker" Style="{StaticResource BarField}" Width="125"/>
                     <Button x:Name="AddDayButton" Content="Add day" Style="{StaticResource BarButton}"/>
                     <Button x:Name="RemoveDayButton" Content="Remove this day" Style="{StaticResource BarButton}"/>
                 </WrapPanel>
@@ -10859,14 +10903,14 @@ function Test-PuckBoardWindow {
             <Border DockPanel.Dock="Bottom" Background="White" Padding="12,7" BorderBrush="#CBD5E1" BorderThickness="0,1,0,0">
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                        <Button x:Name="CancelButton" Content="Close" Style="{StaticResource BarButton}"/>
-                        <Button x:Name="BackToEditButton" Content="Back to edit" Style="{StaticResource BarButton}" Visibility="Collapsed"/>
-                        <Button x:Name="RefillButton" Content="Re-fill" Style="{StaticResource BarButton}" Visibility="Collapsed"/>
+                        <Button x:Name="CancelButton" Content="Close" Style="{StaticResource BarButton}" Padding="12,6"/>
+                        <Button x:Name="BackToEditButton" Content="Back to edit" Style="{StaticResource BarButton}" Padding="12,6" Visibility="Collapsed"/>
+                        <Button x:Name="RefillButton" Content="Re-fill" Style="{StaticResource BarButton}" Padding="12,6" Visibility="Collapsed"/>
                         <Button x:Name="ExportButton" Content="Export to OutputSchedule" Style="{StaticResource BarButton}" Visibility="Collapsed"
                                 Background="#1D4ED8" Foreground="White" FontWeight="Bold" Padding="16,6"/>
                         <!-- Fill all days only shows when the board has more than one day -->
                         <Button x:Name="FillAllButton" Content="Fill all days" Style="{StaticResource BarButton}"
-                                Background="White" Foreground="#15803D" BorderBrush="#16A34A" FontWeight="Bold" Padding="14,6"
+                                Background="White" Foreground="#15803D" BorderBrush="#16A34A" FontWeight="Bold" Padding="16,6"
                                 ToolTip="Fill the open lines on every day on the board, then review and export them all (Ctrl+Enter)."/>
                         <Button x:Name="FillDayButton" Content="Fill this day" Style="{StaticResource BarButton}"
                                 Background="#16A34A" Foreground="White" FontWeight="Bold" Padding="16,6"
@@ -10880,10 +10924,10 @@ function Test-PuckBoardWindow {
             </Border>
 
             <!-- Left: IP pool -->
-            <Border DockPanel.Dock="Left" Width="235" Margin="8,8,4,8" Background="White" CornerRadius="6" Tag="IPPool" AllowDrop="True" Padding="6">
+            <Border DockPanel.Dock="Left" Width="250" Margin="8,8,4,8" Background="White" CornerRadius="6" Tag="IPPool" AllowDrop="True" Padding="6">
                 <DockPanel>
                     <TextBlock DockPanel.Dock="Top" Text="IP PUCKS" FontWeight="Bold" Foreground="#1E3A8A" Margin="2,0,0,4"/>
-                    <TextBox DockPanel.Dock="Top" x:Name="IPSearchBox" Margin="0,0,0,4" Padding="3" ToolTip="Filter IPs by name or callsign"/>
+                    <TextBox DockPanel.Dock="Top" x:Name="IPSearchBox" Style="{StaticResource BarField}" Margin="0,0,0,4" Padding="3,0" ToolTip="Filter IPs by name or callsign"/>
                     <TextBlock DockPanel.Dock="Top" Text="Drag onto a line's IP slot, or click to pick up and click the slot. Double-click puts the IP on the selected line. Drop a line's IP here to take it off." FontSize="10"
                                Foreground="#64748B" TextWrapping="Wrap" Margin="2,0,0,6"/>
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -10893,10 +10937,10 @@ function Test-PuckBoardWindow {
             </Border>
 
             <!-- Right: student pool -->
-            <Border DockPanel.Dock="Right" Width="265" Margin="4,8,8,8" Background="White" CornerRadius="6" Tag="StudentPool" AllowDrop="True" Padding="6">
+            <Border DockPanel.Dock="Right" Width="250" Margin="4,8,8,8" Background="White" CornerRadius="6" Tag="StudentPool" AllowDrop="True" Padding="6">
                 <DockPanel>
                     <TextBlock DockPanel.Dock="Top" Text="STUDENT PUCKS" FontWeight="Bold" Foreground="#14532D" Margin="2,0,0,4"/>
-                    <TextBox DockPanel.Dock="Top" x:Name="StudentSearchBox" Margin="0,0,0,4" Padding="3" ToolTip="Filter students by name"/>
+                    <TextBox DockPanel.Dock="Top" x:Name="StudentSearchBox" Style="{StaticResource BarField}" Margin="0,0,0,4" Padding="3,0" ToolTip="Filter students by name"/>
                     <TextBlock DockPanel.Dock="Top" Text="Drag onto a line to hardcode the student, or click to pick up and click the slot. Double-click puts them on the selected line. Drop a line's student here to take it off." FontSize="10"
                                Foreground="#64748B" TextWrapping="Wrap" Margin="2,0,0,6"/>
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -10950,7 +10994,7 @@ function Test-PuckBoardWindow {
                         <DockPanel>
                             <Border DockPanel.Dock="Top" Background="#E2E8F0" Padding="8,3" CornerRadius="4,4,0,0">
                                 <DockPanel>
-                                    <Button x:Name="DetailsHideButton" DockPanel.Dock="Right" Content="Hide" Padding="8,0" Margin="4,0,0,0" Cursor="Hand"
+                                    <Button x:Name="DetailsHideButton" DockPanel.Dock="Right" Content="Hide" Padding="8,1" Margin="4,0,0,0" Cursor="Hand"
                                             ToolTip="Hide the Line details panel (View menu brings it back)"/>
                                     <TextBlock Text="LINE DETAILS" FontWeight="Bold" Foreground="#334155" VerticalAlignment="Center" Margin="0,0,10,0"/>
                                     <TextBlock x:Name="DetailsTitle" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="#0F172A"/>
@@ -21972,7 +22016,7 @@ An absence a student already has (same start and end) is not added twice.
 | **Line details** (under the days) | The selected line's student against every rule, and every student ranked for that line. See *Line details* below. |
 | **Colors** (top right) | A small window that says what every color on the board means (also Help > What the colors mean). |
 | **Day tabs** | One tab per day. **Add day** builds several days at once; crew rest is checked across them. |
-| **IP pucks** (left) | Drag onto a line's IP slot. The badge shows how many lines that IP has that day. |
+| **IP pucks** (left) | Drag onto a line's IP slot. The badge shows how many lines that IP has that day. Non-counter IPs (NC) are purple instead of blue, in the pool and on the lines. |
 | **Student pucks** (right) | Drag onto a line's student slot to hardcode them. Badges: CAP, INTL, HOLD, U-SIM, U-FLT, ABS times, turns that day. |
 
 - **Two ways to put a puck on a line:** drag it onto the slot, or **click it to pick it up** (it gets a thick outline and a dark banner says what you are holding) and then **click the slot**. Hold **Ctrl** as you click the slot to keep holding the puck for another line; **Esc** or **Let go** puts it down. **Double-click** a puck to put it straight on the selected line.
@@ -32148,6 +32192,35 @@ Describe 'Puck board: click and place, Line details, fill buttons, export result
                 if ($it.Swatch -ne 'None') { $it.Fill | Should -Match '^#[0-9A-Fa-f]{6}$' -Because "$($section.Title): $($it.Text)" }
             }
         }
+    }
+
+    It 'a non-counter IP puck has its own fill, in the pool and on a line' {
+        $r = & (Get-Module PuckBoard) {
+            @{
+                K          = $script:PBColors
+                Counter    = Get-PBIPPuckColors (Find-PBInstructor 'jones, bob')
+                NonCounter = Get-PBIPPuckColors (Find-PBInstructor 'Leech, Tom')
+                TextFalse  = Get-PBIPPuckColors ([PSCustomObject]@{ Name = 'Text, Ty'; IsCounter = 'FALSE' })
+                Blank      = Get-PBIPPuckColors ([PSCustomObject]@{ Name = 'Blank, Bo'; IsCounter = '' })
+                Unknown    = Get-PBIPPuckColors (Find-PBInstructor 'Nobody, Ned')
+            }
+        }
+        $r.K.IPPuckNC | Should -Not -Be $r.K.IPPuck
+        $r.Counter.Background | Should -Be $r.K.IPPuck
+        $r.Counter.Border | Should -Be $r.K.IPPuckBorder
+        $r.NonCounter.Background | Should -Be $r.K.IPPuckNC
+        $r.NonCounter.Border | Should -Be $r.K.IPPuckNCBorder
+        $r.TextFalse.Background | Should -Be $r.K.IPPuckNC
+        $r.Blank.Background | Should -Be $r.K.IPPuck -Because 'a blank IsCounter counts as a counter'
+        $r.Unknown.Background | Should -Be $r.K.IPPuck
+
+        Invoke-PB @{ Cmd = 'SetIP'; LineId = 'L1'; Name = 'Leech, Tom' }
+        $vm = & (Get-Module PuckBoard) { param($l) New-PBLineVM $l } (Get-Line 'L1')
+        $vm.IPBackground | Should -Be $r.K.IPPuckNC
+        $vm.IPBorder | Should -Be $r.K.IPPuckNCBorder
+        Invoke-PB @{ Cmd = 'SetIP'; LineId = 'L1'; Name = 'Lee, Ann' }
+        $vm = & (Get-Module PuckBoard) { param($l) New-PBLineVM $l } (Get-Line 'L1')
+        $vm.IPBackground | Should -Be $r.K.IPPuck
     }
 }
 
