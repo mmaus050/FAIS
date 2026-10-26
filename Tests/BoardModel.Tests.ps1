@@ -2122,3 +2122,114 @@ Describe 'New-BulkBoardLines (Add Bulk Lines)' {
         @($r.Times).Count | Should -Be 0
     }
 }
+
+Describe 'Add Student Absence: times, pasted names and the absences' {
+    It 'reads <T> as <Want>' -TestCases @(
+        @{ T = '0730'; Want = '07:30' }
+        @{ T = '730'; Want = '07:30' }
+        @{ T = '7:30'; Want = '07:30' }
+        @{ T = '1530'; Want = '15:30' }
+        @{ T = '0730 AM'; Want = '07:30' }
+        @{ T = '0330 PM'; Want = '15:30' }
+        @{ T = '0330PM'; Want = '15:30' }
+        @{ T = '330pm'; Want = '15:30' }
+        @{ T = '3:30 p.m.'; Want = '15:30' }
+        @{ T = '3 PM'; Want = '15:00' }
+        @{ T = '12:00 AM'; Want = '00:00' }
+        @{ T = '1230 am'; Want = '00:30' }
+        @{ T = '1200 PM'; Want = '12:00' }
+        @{ T = '1159 pm'; Want = '23:59' }
+        @{ T = ' 0900 '; Want = '09:00' }
+    ) {
+        $ts = ConvertTo-ClockTime $T
+        $ts | Should -BeOfType [timespan]
+        $ts.ToString('hh\:mm') | Should -BeExactly $Want
+    }
+
+    It 'rejects <T>' -TestCases @(
+        @{ T = '1530 PM' }
+        @{ T = '0030 AM' }
+        @{ T = '13 PM' }
+        @{ T = '2500' }
+        @{ T = '0760' }
+        @{ T = 'noon' }
+        @{ T = 'PM' }
+        @{ T = '' }
+    ) {
+        $null -eq (ConvertTo-ClockTime $T) | Should -BeTrue
+    }
+
+    It 'pasted names: one per line, cell or ";", matched exactly or as First Last or with a rank, in the order pasted, each once' {
+        $stu = @((New-TestStudent -Name 'Quill, Casey'), (New-TestStudent -Name 'Adams, Amy'), (New-TestStudent -Name 'Baker, Ben'), (New-TestStudent -Name 'SP1'))
+        $r = Resolve-PastedStudents -Text "Casey B. Quill`r`nadams, amy`tSP1; Baker, Ben [2d Lt]`n`nQuill, Casey" -Students $stu
+        @($r.Students | ForEach-Object { $_.Name }) | Should -Be @('Quill, Casey', 'Adams, Amy', 'SP1', 'Baker, Ben')
+        @($r.Unknown) | Should -BeNullOrEmpty
+    }
+
+    It 'pasted names: "Adams, Baker" is two names; a name that is no one, or more than one, is listed' {
+        $stu = @($script:Stu) + @((New-TestStudent -Name 'Lee, Ann'), (New-TestStudent -Name 'Lee, Bob'))
+        $r = Resolve-PastedStudents -Text "Adams, Baker`nNobody, No`nLee`nCruz" -Students $stu
+        @($r.Students | ForEach-Object { $_.Name }) | Should -Be @('Adams, Amy', 'Baker, Ben', 'Cruz, Cal')
+        @($r.Unknown) | Should -Be @('Nobody, No', 'Lee')
+        @((Resolve-PastedStudents -Text "  `r`n " -Students $stu).Students).Count | Should -Be 0
+    }
+
+    It 'one absence per student, on the day and at the times typed, the reason trimmed, not in MasterData yet' {
+        $r = New-StudentAbsences -Students @('Adams, Amy', 'Baker, Ben', 'Adams, Amy') -Day ([datetime]'2026-10-20') -From '0730' -To '0330 PM' -Reason ' Dentist '
+        @($r.Errors) | Should -BeNullOrEmpty
+        @($r.Absences).Count | Should -Be 2
+        $r.Absences[0].Student | Should -BeExactly 'Adams, Amy'
+        $r.Absences[0].StartTime | Should -Be ([datetime]'2026-10-20 07:30')
+        $r.Absences[0].EndTime | Should -Be ([datetime]'2026-10-20 15:30')
+        $r.Absences[1].Student | Should -BeExactly 'Baker, Ben'
+        $r.Absences[1].Reason | Should -BeExactly 'Dentist'
+        $r.Absences[1].InMasterData | Should -BeFalse
+        Format-AbsenceTime $r.Absences[0] | Should -BeExactly 'Tue 20 Oct 0730-1530'
+    }
+
+    It 'ends on a later day when one is picked (past midnight, or over several days)' {
+        $r = New-StudentAbsences -Students @('Adams, Amy') -Day '2026-10-20' -From '2200' -To '0600' -EndDay '2026-10-21'
+        $r.Absences[0].EndTime | Should -Be ([datetime]'2026-10-21 06:00')
+        Format-AbsenceTime $r.Absences[0] | Should -BeExactly 'Tue 20 Oct 2200 - Wed 21 Oct 0600'
+    }
+
+    It 'says what is missing or wrong, and makes nothing: <Why>' -TestCases @(
+        @{ Why = 'no student'; Students = @(); Day = '2026-10-20'; From = '0730'; To = '0900'; End = $null; Want = 'Add at least one student.' }
+        @{ Why = 'no day'; Students = @('A'); Day = $null; From = '0730'; To = '0900'; End = $null; Want = 'Pick the day on the calendar.' }
+        @{ Why = 'no start time'; Students = @('A'); Day = '2026-10-20'; From = ' '; To = '0900'; End = $null; Want = 'Type the start time. *' }
+        @{ Why = 'a 24-hour time with PM'; Students = @('A'); Day = '2026-10-20'; From = '0730'; To = '1530 PM'; End = $null; Want = "End time '1530 PM' isn't a time. Type 24-hour time (0730, 1530) or 12-hour time with AM or PM (0730 AM, 0330 PM)." }
+        @{ Why = 'ends before it starts'; Students = @('A'); Day = '2026-10-20'; From = '1300'; To = '0900'; End = $null; Want = 'It ends (Tue 20 Oct 0900) before it starts (Tue 20 Oct 1300). For an absence past midnight, pick the next day for the end.' }
+        @{ Why = 'ends the day before'; Students = @('A'); Day = '2026-10-20'; From = '0730'; To = '0900'; End = '2026-10-19'; Want = 'It ends (Mon 19 Oct 0900) before it starts*' }
+    ) {
+        $r = New-StudentAbsences -Students $Students -Day $Day -From $From -To $To -EndDay $End
+        @($r.Absences).Count | Should -Be 0
+        @($r.Errors).Count | Should -Be 1
+        $r.Errors[0] | Should -BeLike $Want
+    }
+
+    It 'gives each student their absences once, a student with none yet included; a name that is no one is left out' {
+        $a = New-TestStudent -Name 'Adams, Amy'
+        $b = [PSCustomObject]@{ Name = 'Baker, Ben' }
+        $r = New-StudentAbsences -Students @('Adams, Amy', 'baker, ben', 'Nobody, No') -Day '2026-10-20' -From '0900' -To '1100'
+        @(Add-StudentAbsences -Absences $r.Absences -Students @($a, $b)).Count | Should -Be 2
+        @($a.Absences).Count | Should -Be 1
+        @($b.Absences).Count | Should -Be 1
+        @(Add-StudentAbsences -Absences $r.Absences -Students @($a, $b)).Count | Should -Be 0 -Because 'they already have them'
+        @($a.Absences).Count | Should -Be 1
+        $later = New-StudentAbsences -Students @('Adams, Amy') -Day '2026-10-20' -From '1300' -To '1400'
+        @(Add-StudentAbsences -Absences $later.Absences -Students @($a)).Count | Should -Be 1
+        @($a.Absences | ForEach-Object { Format-AbsenceTime $_ }) | Should -Be @('Tue 20 Oct 0900-1100', 'Tue 20 Oct 1300-1400')
+    }
+
+    It 'the ABSENCE hard rule sees an absence added this way' {
+        $a = New-TestStudent -Name 'Adams, Amy' -Done 'FI3101|2026-10-15 08:00'
+        $board = New-TB
+        Add-BoardLine -Board $board -Line @(New-TL -At '2026-10-20 10:00' -IP 'Jones, Bob' -Student 'Adams, Amy') -NoUndo
+        $data = @{ Students = @($a); Instructors = $script:IPs; SoftWeights = (New-TestSoftWeights); Formations = (New-TestFormations) }
+        $r = New-StudentAbsences -Students @('Adams, Amy') -Day '2026-10-20' -From '0800' -To '0900 AM' -Reason 'Dentist'
+        [void](Add-StudentAbsences -Absences $r.Absences -Students @($a))
+        Clear-AssessmentCache
+        $check = Get-PlacementAssessment -Board $board -LineId $board.Lines[0].Id -StudentName 'Adams, Amy' -Data $data
+        @($check.Violations | Where-Object { $_.Rule -eq 'ABSENCE' } | ForEach-Object { $_.Message }) | Should -Be @('Unavailable 0800-0900 (Dentist); sortie window 0830-1230')
+    }
+}

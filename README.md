@@ -14,13 +14,14 @@ Add `-Trace` to print every scheduling decision to the console. FAIS restarts it
 **You can leave Excel open.** If MasterData or OutputSchedule is open in Excel, FAIS saves it before reading it (so edits you have not saved yet are read too), and saves and closes it before writing it (so there is no "file is open" error), then opens it again afterwards. You only see a "file is open" box if Excel can't be reached, for example while a cell is still being edited.
 
 **What happens:**
-1. **Pre-run pop-ups.** Log any hooked (unsat) or incomplete events from the last schedule, then click **Open Puck Board**. These are saved right away (see *Data in and out*).
-2. **Puck board.** Each day on MasterData's **Schedule** sheet opens as its own tab with its lines (or you type them), and you hardcode whoever you want. *(details below)*
+1. **Pre-run pop-ups.** Log any hooked (unsat) or incomplete events from the last schedule, put students on or off hold with **Change Student HOLD status** (checked = on hold), and block students off with **Add Student Absence**, then click **Open Puck Board**. These are saved right away (see *Data in and out*).
+2. **Puck board.** Each day on MasterData's **Schedule** sheet opens as its own tab with its lines (or you type them), and you hardcode whoever you want. **Add Student Absence** is on the board too. *(details below)*
 3. **Fill.** The scheduler fills every open line: formation wingmen, direct support, O&B return legs and For Sale lines included. **Fill <day>** fills just the day on screen; **Fill all N days** (shown when the board has more than one day) fills them all. You review the result on the board.
 4. **Export.** All or nothing: if any part fails, none of the files change. It writes the days you filled:
    - OutputSchedule: the **MasterSchedule** sheet (first tab). Only the filled days are replaced; other days already exported (today onward) are kept, so you can update **one day at a time**,
    - OutputSchedule: **each student's syllabus tab** (tomorrow's run starts from it),
-   - MasterData: **SimDebt**, and **UnsatSim / UnsatFlight** reset to FALSE for students whose schedule cleans up the unsat.
+   - MasterData: **SimDebt**, and **UnsatSim / UnsatFlight** reset to FALSE for students whose schedule cleans up the unsat,
+   - MasterData: the **String Tracker** sheet, one row per student: 5+, 4, 3, 2 and 1-strings and unique counters, counted from each student's syllabus (the exported rides included). Each category (FT, FF, AA) is counted in mission order; sims, solos and check rides are left out; a non-counter counts only for a student they flew two rides in a row.
 
    It also writes **ATIS.xlsx**: one tab per day (named like `Wednesday. October 21, 2026`). Each tab lists that day's flights in ETD order, then a thick border, then that day's sims (OFT / IFT) in ETD order, in the same columns as MasterSchedule. Each export rebuilds the tabs for the days it covers and keeps every other day's tab, so ATIS builds up a day-by-day history. The file opens on the first day you just exported. Set `WriteAtis = $false` in `$OutputSettings` to turn it off.
 
@@ -35,13 +36,15 @@ Closing the board without exporting writes nothing (only the pre-run pop-ups hav
 | Start | MasterData: Schedule (see *MasterData's Schedule sheet*), Instructors, Students (first 100), SoftWeights, FormCallsigns, StudentAbsences. OutputSchedule: each student's tab (a student with no tab starts from the MasterData Syllabus sheet). Workbooks open in Excel are saved first. | Nothing |
 | **Log Hooked Event** | | MasterData: UnsatSim or UnsatFlight = TRUE |
 | **Log Incomplete Event** | | MasterData: SimDebt (only that event's debt comes off). OutputSchedule: that event's cells on the student's tab |
+| **Change Student HOLD status** | | MasterData: OnHold = TRUE or FALSE for the students you changed |
 | Puck board and fill | MasterData's Schedule sheet again whenever MasterData is saved; **Load a day...** reads it (or the last exported MasterSchedule) fresh | Nothing (the board's own autosave in `Boards\` aside) |
 | **Update Syllabi** | The training file you pick (flying schedule or Big Board) | OutputSchedule: the changed events' cells on the students' tabs (a student with no tab gets one). MasterData: SimDebt |
-| **Export** | | OutputSchedule: MasterSchedule (the filled days), student tabs. MasterData: SimDebt, unsat resets. ATIS: the exported days' tabs |
+| **Add Student Absence** | | MasterData: a line on StudentAbsences for each student (Student, StartTime, EndTime, Reason, IsActive = TRUE) |
+| **Export** | | OutputSchedule: MasterSchedule (the filled days), student tabs. MasterData: SimDebt, unsat resets, String Tracker, and any absence **Add Student Absence** could not save. ATIS: the exported days' tabs |
 
 - **MasterSchedule is the only sheet of OutputSchedule that is rewritten**, and only the filled days in it change (ATIS rebuilds the tabs of the days it exports). A student's tab is updated in place: only the Instructor, ETD and IsComplete cells of events that changed are written, so your own columns, notes and formatting stay. A student with no tab gets a new one.
 - **MasterData Students sheet:** students are matched by the column headed SPName and SimDebt goes to the column headed SimDebt (columns B and P when those headings are missing). UnsatSim and UnsatFlight are written to the columns with those headings.
-- **Absences** are attached only when the name matches a student's name exactly (capital letters aside). A name that matches no one is reported in the console.
+- **Absences** are attached only when the name matches a student's name exactly (capital letters aside). A name that matches no one is reported in the console. **Add Student Absence** always writes the name exactly as the Students sheet has it.
 - **Unsat clean-up:** after a hooked OFT, the student can't fly until an OFT. After a hooked IFT, an OFT or IFT will do. After a hooked flight, the student can't sim until they fly. The scheduler and the board treat the unsat as cleaned up for every line after that sim or flight, and the line's Notes say `Clears Unsat Sim (OFT)` (or IFT, or `Clears Unsat Flight`). MasterData only says TRUE or FALSE, so for an unsat typed into MasterData the hooked sim is taken to be the student's last sim flown (an OFT if unknown). If you re-plan a day whose schedule cleaned up an unsat, the unsat comes back until the new schedule cleans it up again.
 
 ## MasterData's Schedule sheet
@@ -95,6 +98,27 @@ The board reads the **Schedule** sheet and keeps watching it:
 
 Both files are saved or neither. If they can't be saved (still open), the change is kept for this run and Export writes it. If you are reviewing a fill, it is thrown away (it was made from the old syllabi), so fill again.
 
+## Add Student Absence
+
+**Add Student Absence** (on the Pre-Run menu, and on the puck board's toolbar and File menu) blocks students off for a stretch of time: an appointment, leave, a duty. It does the same as typing a line on MasterData's **StudentAbsences** sheet, without opening Excel.
+
+1. **Put the students in the box.** Any of these, as many students as you like:
+   - drag a student from the list on the right into the box;
+   - click a student (thick outline: you are holding them), then click the box; **Esc** lets go;
+   - double-click a student;
+   - copy names (a column in Excel, a list in an email) and press **Ctrl+V**, or **Paste names**. One name per line or cell. Names are matched like *Update Syllabi* does (`Casey B. Quill` or `Quill, Casey [2d Lt]` is `Quill, Casey`); a name that is no one, or more than one student, is listed under the box.
+
+   A student you were holding on the board starts in the box. Drag a student back to the list, or press their **x**, to take them out.
+2. **Pick the day** on the calendar. It starts on the day on screen (from the Pre-Run menu: the board's first day).
+3. **Type the times** in **From** and **To**: 24-hour (`0730`, `1530`) or 12-hour with AM / PM (`0730 AM`, `0330 PM`; `330pm` and `3:30 p.m.` work too). **on** is the day it ends: the same day unless you change it, for an absence past midnight or over several days.
+4. A **Reason** is optional (it shows on the student's puck and in the rule flag).
+
+The box under the form says what will be added, or what is missing. **Add absence** then:
+- puts the absence on the students straight away: their pucks show `ABS 0900-1130` on that day, the scheduler keeps them off every line inside it, and a line they are already hardcoded on turns red (the status line names it). A fill you are reviewing is thrown away, so fill again;
+- saves a line for each student to the StudentAbsences sheet (under the last line there, IsActive TRUE). MasterData open in Excel is saved and closed for the write, then opened again. If it can't be saved, the absence holds for this run and **Export** writes it (the export window lists it).
+
+An absence a student already has (same start and end) is not added twice.
+
 ## Changing a day you already exported
 
 1. Open FAIS, click **Load a day...**, choose **Last exported schedule (OutputSchedule)** and the day (it is added to the board if it isn't there). Everyone goes back on the board where they were exported, hardcoded.
@@ -110,8 +134,9 @@ Both files are saved or neither. If they can't be saved (still open), the change
 | **Template / Copy previous day's lines** | Reuse a saved wave, or copy the last flying day's times, types and IPs. |
 | **Load a day...** | Load one day from MasterData's Schedule sheet or from the last exported schedule. |
 | **Update Syllabi** | Pick the day's flying schedule or the Big Board; FAIS works out which it is and marks each student's events complete or not complete from it. See *Update Syllabi*. |
+| **Add Student Absence** | Block students off for a stretch of time: drag, click or paste them in, pick the day on the calendar, type the times (`0730`, `1530` or `0330 PM`). See *Add Student Absence*. |
 | **Blue banner** | MasterData's Schedule sheet has lines the board doesn't: load them or keep the board's lines. |
-| **Menu bar** (very top) | Every action in one place, with its key: File (load a day, templates, Update Syllabi), Edit (undo, type lines, bulk lines, re-check), **Line** (what can be done to the selected line), Day, Fill, View, Help. |
+| **Menu bar** (very top) | Every action in one place, with its key: File (load a day, templates, Update Syllabi, Add student absence), Edit (undo, type lines, bulk lines, re-check), **Line** (what can be done to the selected line), Day, Fill, View, Help. |
 | **Fill <day> / Fill all N days** (bottom) | Fill and export just the day on screen, or every day on the board. |
 | **Line details** (under the days) | The selected line's student against every rule, and every student ranked for that line. See *Line details* below. |
 | **Colors** (top right) | A small window that says what every color on the board means (also Help > What the colors mean). |
@@ -168,7 +193,7 @@ Click a student in the list to see their full check on the left. **Double-click*
 | Path | What |
 |---|---|
 | `FAIS.ps1` | Entry point and settings (`$BoardSettings`, `$OutputSettings`; the Teams copy is off by default) |
-| `Modules\` | Code: engine (`SchedulingEngine`, `Syllabus`), board (`PuckBoard.xaml/.psm1`, `LoadDayDialog.xaml`, `BulkLinesDialog.xaml`, `ExportResultDialog.xaml`, `BoardLogo.png` (the title-bar logo), `BoardModel`, `Assessment`), Excel in/out (`DataDownload`, `DataUpload`, `ExcelFiles`), Update Syllabi (`SyllabusImport`), pre-run pop-ups (`PreRunMenu`), helpers (`DataManipulation`) |
+| `Modules\` | Code: engine (`SchedulingEngine`, `Syllabus`), board (`PuckBoard.xaml/.psm1`, `LoadDayDialog.xaml`, `BulkLinesDialog.xaml`, `AbsenceDialog.xaml`, `ExportResultDialog.xaml`, `BoardLogo.png` (the title-bar logo), `BoardModel`, `Assessment`), Excel in/out (`DataDownload`, `DataUpload`, `ExcelFiles`), Update Syllabi (`SyllabusImport`), pre-run pop-ups (`PreRunMenu`), helpers (`DataManipulation`) |
 | `Boards\` | Autosaved board, one file per day (created on first run) |
 | `Templates\` | Saved wave templates |
 | `OldFunctions.psm1` | Legacy code, kept for reference only; not loaded |

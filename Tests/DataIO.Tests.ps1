@@ -16,10 +16,10 @@ BeforeAll {
 
                 # Students sheet laid out like MasterData: SPName in B, SimDebt in P
                 function New-TStudentRow {
-                                param ([string]$Name, [int]$Key = 1, $UnsatSim = $false, $UnsatFlight = $false, [double]$SimDebt = 0)
+                                param ([string]$Name, [int]$Key = 1, $UnsatSim = $false, $UnsatFlight = $false, [double]$SimDebt = 0, $OnHold = $false)
                                 return [PSCustomObject][ordered]@{
                                                 SPKey = $Key; SPName = $Name; IsCap = $false; IsInternational = $false; Priority = 0
-                                                UnsatSim = $UnsatSim; UnsatFlight = $UnsatFlight; OnHold = $false
+                                                UnsatSim = $UnsatSim; UnsatFlight = $UnsatFlight; OnHold = $OnHold
                                                 Col9 = ''; Col10 = ''; Col11 = ''; Col12 = ''; Col13 = ''; Col14 = 'keep'; Col15 = ''
                                                 SimDebt = $SimDebt
                                 }
@@ -82,6 +82,86 @@ Describe 'Get-UnsatFlagUpdates' {
                                 $u['A']['UnsatSim'] | Should -BeFalse
                                 $u['B'].Count | Should -Be 1
                                 $u['B']['UnsatFlight'] | Should -BeTrue
+                }
+
+                It 'lists a HOLD change MasterData does not have yet' {
+                                $held = New-TestStudent -Name 'E' -OnHold
+                                $held | Add-Member -NotePropertyName 'OnHoldInMasterData' -NotePropertyValue $false
+                                $same = New-TestStudent -Name 'F' -OnHold
+                                $same | Add-Member -NotePropertyName 'OnHoldInMasterData' -NotePropertyValue $true
+                                $u = Get-UnsatFlagUpdates -Students @($held, $same)
+                                @($u.Keys) | Should -Be @('E')
+                                $u['E'].Count | Should -Be 1
+                                $u['E']['OnHold'] | Should -BeTrue
+                }
+}
+
+Describe 'Get-StringCounts' {
+                BeforeAll {
+                                # One completed ride per letter, in mission order per category (FT5001, FT5002, ...),
+                                # with ETDs running backwards so only mission order can give the right answer
+                                function New-TStringSyllabus {
+                                                param ([hashtable]$Rides, [array]$Extra = @())
+                                                $id = 0
+                                                $etd = [datetime]'2026-06-01'
+                                                $rows = @(foreach ($cat in $Rides.Keys) {
+                                                                $num = 5000
+                                                                foreach ($ip in $Rides[$cat].ToCharArray()) {
+                                                                                $id++; $num++; $etd = $etd.AddDays(-1)
+                                                                                [PSCustomObject]@{ SyllabusID = $id; Mission = "$cat$num"; Instructor = "IP $ip [Capt]"; ETD = $etd.ToString('yyyy-MM-dd HH:mm:ss'); Type = 'Single'; IsCheck = $false; IsComplete = $true }
+                                                                }
+                                                })
+                                                return @($rows + $Extra)
+                                }
+                                function New-TStringIPs {
+                                                param ([string]$NonCounters = '')
+                                                foreach ($c in 'ABCDS'.ToCharArray()) { [PSCustomObject]@{ Name = "IP $c [Capt]"; IsCounter = -not $NonCounters.Contains([string]$c) } }
+                                }
+                }
+
+                It 'returns 5+, 4, 3, 2, 1-strings and counters (<Case>)' -ForEach @(
+                                @{ Case = 'AABABB'; Rides = @{ FT = 'AABABB' }; NC = ''; Expected = @(0, 0, 2, 0, 0, 2) }
+                                @{ Case = 'ABABAB'; Rides = @{ FT = 'ABABAB' }; NC = ''; Expected = @(0, 0, 2, 0, 0, 2) }
+                                @{ Case = 'AABAAA'; Rides = @{ FT = 'AABAAA' }; NC = ''; Expected = @(1, 0, 0, 0, 1, 2) }
+                                @{ Case = 'AAABCA, single non-counters'; Rides = @{ FT = 'AAABCA' }; NC = 'BC'; Expected = @(0, 1, 0, 0, 0, 1) }
+                                @{ Case = 'AAAAAAA counts as a 5-string'; Rides = @{ FT = 'AAAAAAA' }; NC = ''; Expected = @(1, 0, 0, 0, 0, 1) }
+                                @{ Case = 'ASSA, non-counter back to back'; Rides = @{ FT = 'ASSA' }; NC = 'S'; Expected = @(0, 0, 0, 1, 2, 2) }
+                                @{ Case = 'ASAS, non-counter zippered'; Rides = @{ FT = 'ASAS' }; NC = 'S'; Expected = @(0, 0, 0, 1, 0, 1) }
+                                @{ Case = 'categories counted apart'; Rides = @{ FT = 'AAA'; AA = 'AAA' }; NC = ''; Expected = @(0, 0, 2, 0, 0, 1) }
+                                @{ Case = 'nothing flown'; Rides = @{}; NC = ''; Expected = @(0, 0, 0, 0, 0, 0) }
+                ) {
+                                $counts = @(Get-StringCounts -Syllabus (New-TStringSyllabus -Rides $Rides) -Instructors @(New-TStringIPs -NonCounters $NC))
+                                $counts | Should -Be $Expected
+                }
+
+                It 'leaves out sims, solos, check rides and rides not flown' {
+                                $extra = @(
+                                                [PSCustomObject]@{ SyllabusID = 90; Mission = 'FE4001'; Instructor = 'IP B'; ETD = '2026-05-30 08:00:00'; Type = 'OFT'; IsCheck = $false; IsComplete = $true }
+                                                [PSCustomObject]@{ SyllabusID = 91; Mission = 'FT5003'; Instructor = 'IP B'; ETD = '2026-05-30 09:00:00'; Type = 'SingleSolo'; IsCheck = $false; IsComplete = $true }
+                                                [PSCustomObject]@{ SyllabusID = 92; Mission = 'FT5390'; Instructor = 'IP C'; ETD = '2026-05-30 10:00:00'; Type = 'Single'; IsCheck = $true; IsComplete = $true }
+                                                [PSCustomObject]@{ SyllabusID = 93; Mission = 'FT5004'; Instructor = 'IP D'; ETD = ''; Type = 'Single'; IsCheck = $false; IsComplete = $false }
+                                )
+                                @(Get-StringCounts -Syllabus (New-TStringSyllabus -Rides @{ FT = 'AA' } -Extra $extra) -Instructors @(New-TStringIPs)) | Should -Be @(0, 0, 0, 1, 0, 1)
+                }
+}
+
+Describe 'Update-StudentHoldStatus' {
+                It 'changes only the students whose box changed and returns them for MasterData' {
+                                $a = New-TestStudent -Name 'Adams, Al'
+                                $b = New-TestStudent -Name 'Brown, Bea' -OnHold
+                                $c = New-TestStudent -Name 'Cole, Cy' -OnHold
+                                $d = New-TestStudent -Name 'Dunn, Di'
+                                $changes = Update-StudentHoldStatus -HoldByName @{ 'Adams, Al' = $true; 'Brown, Bea' = $false; 'Cole, Cy' = $true } -Students @($a, $b, $c, $d) 6>$null
+                                @($changes.Keys | Sort-Object) | Should -Be @('Adams, Al', 'Brown, Bea')
+                                $changes['Adams, Al']['OnHold'] | Should -BeTrue
+                                $changes['Brown, Bea']['OnHold'] | Should -BeFalse
+                                @($a, $b, $c, $d | ForEach-Object { $_.OnHold }) | Should -Be @($true, $false, $true, $false)
+                }
+
+                It 'returns no changes when no box changed' {
+                                $a = New-TestStudent -Name 'Adams, Al' -OnHold
+                                (Update-StudentHoldStatus -HoldByName @{ 'Adams, Al' = $true } -Students @($a) 6>$null).Count | Should -Be 0
+                                $a.OnHold | Should -BeTrue
                 }
 }
 
@@ -211,6 +291,18 @@ Describe 'Update-MasterDataStudents' -Skip:(-not $script:HasExcel) {
                                 (Get-TCell -Path $script:MD -Sheet 'Students' -Row 1 -Col 16) | Should -Be 'SimDebt'
                 }
 
+                It 'writes OnHold to its headed column, on and off, nothing else' {
+                                $path = Join-Path $TestDrive 'Hold.xlsx'
+                                New-TMasterData -Path $path -Students @((New-TStudentRow -Name 'Adams, Al' -Key 1 -SimDebt 1), (New-TStudentRow -Name 'Brown, Bea' -Key 2 -OnHold $true -SimDebt 2))
+                                Update-MasterDataStudents -MasterDataPath $path -FlagsByName @{ 'Adams, Al' = @{ OnHold = $true }; 'Brown, Bea' = @{ OnHold = $false } } 6>$null
+                                $rows = @(Import-Excel -Path $path -WorksheetName 'Students')
+                                ConvertTo-FaisBool $rows[0].OnHold | Should -BeTrue
+                                ConvertTo-FaisBool $rows[1].OnHold | Should -BeFalse
+                                ConvertTo-FaisBool $rows[0].UnsatSim | Should -BeFalse
+                                $rows[0].SimDebt | Should -Be 1
+                                $rows[1].SimDebt | Should -Be 2
+                }
+
                 It 'warns about names it can''t find and still writes the rest' {
                                 $w = Update-MasterDataStudents -MasterDataPath $script:MD -SimDebtByName @{ 'Adams, Al' = 9; 'Nobody, No' = 1 } 6>$null 3>&1
                                 ($w | Out-String) | Should -Match 'Nobody, No'
@@ -230,6 +322,33 @@ Describe 'Update-MasterDataStudents' -Skip:(-not $script:HasExcel) {
                                 $path = Join-Path $TestDrive 'NoStudents.xlsx'
                                 New-TMasterData -Path $path -Students @(New-TStudentRow -Name 'Adams, Al') -NoStudentsSheet
                                 { Update-MasterDataStudents -MasterDataPath $path -SimDebtByName @{ 'Adams, Al' = 1 } } | Should -Throw "*'Students' not found*"
+                }
+}
+
+Describe 'Update-StringTracker' -Skip:(-not $script:HasExcel) {
+                It 'rewrites the sheet: headings, one row per student, old rows cleared' {
+                                $path = Join-Path $TestDrive 'Strings.xlsx'
+                                New-TMasterData -Path $path -Students @(New-TStudentRow -Name 'Adams, Al')
+                                @('Old1', 'Old2', 'Old3') | ForEach-Object { [PSCustomObject][ordered]@{ StudentName = $_; TotalUniqueCounters = 9; '1-Strings' = 9 } } | Export-Excel -Path $path -WorksheetName 'String Tracker' 3>$null
+                                $a = New-TestStudent -Name 'Adams, Al' -Done 'FI3101|2026-02-20 08:00', 'FT5001|2026-02-21 08:00|Jones, Bob', 'FT5102|2026-02-22 08:00|Jones, Bob'
+                                $b = New-TestStudent -Name 'Brown, Bea'
+                                Update-StringTracker -MasterDataPath $path -Students @($a, $b) -Instructors @() 6>$null
+                                $rows = @(Import-Excel -Path $path -WorksheetName 'String Tracker')
+                                @($rows[0].PSObject.Properties.Name) | Should -Be @('StudentName', '5+ Strings', '4-Strings', '3-Strings', '2-Strings', '1-Strings', 'TotalUniqueCounters')
+                                $rows.Count | Should -Be 2
+                                $rows[0].StudentName | Should -Be 'Adams, Al'
+                                @($rows[0].'5+ Strings', $rows[0].'4-Strings', $rows[0].'3-Strings', $rows[0].'2-Strings', $rows[0].'1-Strings', $rows[0].TotalUniqueCounters) | Should -Be @(0, 0, 0, 1, 0, 1)
+                                $rows[1].StudentName | Should -Be 'Brown, Bea'
+                                $rows[1].TotalUniqueCounters | Should -Be 0
+                                # The other sheets are untouched
+                                @(Import-Excel -Path $path -WorksheetName 'Students')[0].SPName | Should -Be 'Adams, Al'
+                }
+
+                It 'makes the sheet when MasterData has none' {
+                                $path = Join-Path $TestDrive 'NoStrings.xlsx'
+                                New-TMasterData -Path $path -Students @(New-TStudentRow -Name 'Adams, Al')
+                                Update-StringTracker -MasterDataPath $path -Students @(New-TestStudent -Name 'Adams, Al') 6>$null
+                                @(Import-Excel -Path $path -WorksheetName 'String Tracker')[0].StudentName | Should -Be 'Adams, Al'
                 }
 }
 
@@ -353,6 +472,24 @@ Describe 'Pre-run saves (incomplete and hooked events)' -Skip:(-not $script:HasE
                                 ConvertTo-FaisBool $rows[1].UnsatSim | Should -BeFalse
                 }
 
+                It 'a HOLD change sets OnHold in MasterData right away, on and then off' {
+                                $students = $script:PIng.Students
+                                ($students | Where-Object { $_.Name -eq 'Adams, Al' }).OnHoldInMasterData | Should -BeFalse
+                                $changes = Update-StudentHoldStatus -HoldByName @{ 'Adams, Al' = $true; 'Brown, Bea' = $false } -Students $students 6>$null
+                                @($changes.Keys) | Should -Be @('Adams, Al')
+                                # Not saved yet: Export would write it
+                                (Get-UnsatFlagUpdates -Students $students)['Adams, Al']['OnHold'] | Should -BeTrue
+                                Save-PreRunChanges -MasterDataPath $script:PMD -OutputPath $script:POut -FlagsByName $changes 3>$null 6>$null | Should -BeTrue
+                                $rows = @(Import-Excel -Path $script:PMD -WorksheetName 'Students')
+                                ConvertTo-FaisBool $rows[0].OnHold | Should -BeTrue
+                                ConvertTo-FaisBool $rows[1].OnHold | Should -BeFalse
+
+                                $changes = Update-StudentHoldStatus -HoldByName @{ 'Adams, Al' = $false } -Students $students 6>$null
+                                Save-PreRunChanges -MasterDataPath $script:PMD -OutputPath $script:POut -FlagsByName $changes 3>$null 6>$null | Should -BeTrue
+                                ConvertTo-FaisBool @(Import-Excel -Path $script:PMD -WorksheetName 'Students')[0].OnHold | Should -BeFalse
+                                (IngestData -excelInputPath $script:PMD -excelOutputPath $script:POut 3>$null 6>$null).Students[0].OnHold | Should -BeFalse
+                }
+
                 It 'keeps the change in memory, and saves nothing, when MasterData is missing' {
                                 Save-PreRunChanges -MasterDataPath (Join-Path $TestDrive 'gone.xlsx') -OutputPath $script:POut -SimDebtByName @{ 'Adams, Al' = 1 } 3>$null 6>$null | Should -BeFalse
                 }
@@ -411,5 +548,127 @@ Describe 'IngestData' -Skip:(-not $script:HasExcel) {
                                 $lee.UnsatSimType | Should -Be ''
                                 $lee.UnsatFlightInMasterData | Should -BeTrue
                                 $adams.SimDebt | Should -Be 1.5
+                }
+}
+
+Describe 'Get-PendingStudentAbsences' {
+                It 'lists only the absences added this run that MasterData does not have yet, each once' {
+                                $read = [PSCustomObject]@{ Student = 'A'; StartTime = [datetime]'2026-03-03 08:00'; EndTime = [datetime]'2026-03-03 09:00'; Reason = '' }
+                                $saved = [PSCustomObject]@{ Student = 'A'; StartTime = [datetime]'2026-03-03 10:00'; EndTime = [datetime]'2026-03-03 11:00'; Reason = ''; InMasterData = $true }
+                                $new = [PSCustomObject]@{ Student = 'A'; StartTime = [datetime]'2026-03-03 12:00'; EndTime = [datetime]'2026-03-03 13:00'; Reason = ''; InMasterData = $false }
+                                $a = New-TestStudent -Name 'A' -Absences @($read, $saved, $new)
+                                $pending = @(Get-PendingStudentAbsences -Students @($a, (Copy-StudentForEval $a), $null, (New-TestStudent -Name 'B')))
+                                $pending.Count | Should -Be 1
+                                [object]::ReferenceEquals($pending[0], $new) | Should -BeTrue
+                }
+}
+
+Describe 'Add Student Absence: lines on the StudentAbsences sheet' -Skip:(-not $script:HasExcel) {
+                BeforeAll {
+                                function New-TAbsence {
+                                                param ([string]$Student, [string]$From, [string]$To, [string]$Reason = '')
+                                                return [PSCustomObject]@{ Student = $Student; StartTime = [datetime]$From; EndTime = [datetime]$To; Reason = $Reason; InMasterData = $false }
+                                }
+                                $script:AbsStudents = @((New-TStudentRow -Name 'Adams, Al' -Key 1), (New-TStudentRow -Name 'Brown, Bea' -Key 2))
+                                $script:OldAbsence = [PSCustomObject]@{ Student = 'Adams, Al'; StartTime = '2026-03-02 08:00'; EndTime = '2026-03-02 09:00'; Reason = 'Old'; IsActive = $true }
+                }
+
+                It 'adds a line under the last one with IsActive TRUE, and IngestData gives it to the student' {
+                                $md = Join-Path $TestDrive 'Abs-MD.xlsx'
+                                New-TMasterData -Path $md -Students $script:AbsStudents -Absences @($script:OldAbsence)
+                                Add-MasterDataAbsences -MasterDataPath $md -Absences @((New-TAbsence 'Brown, Bea' '2026-03-03 13:00' '2026-03-03 15:30' ' Dentist '), (New-TAbsence 'Adams, Al' '2026-03-03 22:00' '2026-03-04 06:00')) 6>$null
+                                $rows = @(Import-Excel -Path $md -WorksheetName 'StudentAbsences')
+                                $rows.Count | Should -Be 3
+                                $rows[0].Reason | Should -Be 'Old'
+                                $rows[1].Student | Should -Be 'Brown, Bea'
+                                $rows[1].Reason | Should -Be 'Dentist'
+                                ConvertTo-FaisBool $rows[1].IsActive | Should -BeTrue
+                                (Parse-ETD $rows[2].EndTime) | Should -Be ([datetime]'2026-03-04 06:00')
+                                [string]::IsNullOrWhiteSpace([string]$rows[2].Reason) | Should -BeTrue
+
+                                $ing = IngestData -excelInputPath $md -excelOutputPath (Join-Path $TestDrive 'Abs-Out.xlsx') 3>$null 6>$null
+                                $brown = $ing.Students | Where-Object { $_.Name -eq 'Brown, Bea' }
+                                @($brown.Absences).Count | Should -Be 1
+                                $brown.Absences[0].StartTime | Should -Be ([datetime]'2026-03-03 13:00')
+                                $brown.Absences[0].EndTime | Should -Be ([datetime]'2026-03-03 15:30')
+                                $brown.Absences[0].Reason | Should -Be 'Dentist'
+                                @(($ing.Students | Where-Object { $_.Name -eq 'Adams, Al' }).Absences).Count | Should -Be 2
+                }
+
+                It 'fills in blank lines formatted ahead of time, keeping their date format' {
+                                $md = Join-Path $TestDrive 'Abs-Formatted.xlsx'
+                                New-TMasterData -Path $md -Students $script:AbsStudents -Absences @($script:OldAbsence)
+                                $pkg = Open-ExcelPackage -Path $md
+                                $ws = $pkg.Workbook.Worksheets['StudentAbsences']
+                                foreach ($r in 3..6) { foreach ($c in 2..3) { $ws.Cells[$r, $c].Style.Numberformat.Format = 'd mmm yy hh:mm' } }
+                                Close-ExcelPackage -ExcelPackage $pkg
+                                Add-MasterDataAbsences -MasterDataPath $md -Absences @(New-TAbsence 'Brown, Bea' '2026-03-03 13:00' '2026-03-03 15:30') 6>$null
+                                $pkg = Open-ExcelPackage -Path $md
+                                try {
+                                                $ws = $pkg.Workbook.Worksheets['StudentAbsences']
+                                                $ws.Cells[3, 1].Value | Should -Be 'Brown, Bea'
+                                                $ws.Cells[3, 2].Style.Numberformat.Format | Should -Be 'd mmm yy hh:mm'
+                                                $ws.Cells[4, 1].Value | Should -BeNullOrEmpty
+                                }
+                                finally { Close-ExcelPackage -ExcelPackage $pkg -NoSave }
+                }
+
+                It 'adds the sheet, with its headings, when MasterData has none' {
+                                $md = Join-Path $TestDrive 'Abs-NoSheet.xlsx'
+                                New-TMasterData -Path $md -Students $script:AbsStudents
+                                $pkg = Open-ExcelPackage -Path $md
+                                $pkg.Workbook.Worksheets.Delete('StudentAbsences')
+                                Close-ExcelPackage -ExcelPackage $pkg
+                                Add-MasterDataAbsences -MasterDataPath $md -Absences @(New-TAbsence 'Adams, Al' '2026-03-03 08:00' '2026-03-03 09:00' 'Leave') 6>$null
+                                $rows = @(Import-Excel -Path $md -WorksheetName 'StudentAbsences')
+                                @($rows[0].PSObject.Properties.Name) | Should -Be @('Student', 'StartTime', 'EndTime', 'Reason', 'IsActive')
+                                $rows.Count | Should -Be 1
+                                $rows[0].Student | Should -Be 'Adams, Al'
+                }
+
+                It 'throws, and saves nothing, when a heading IngestData reads is missing' {
+                                $path = Join-Path $TestDrive 'Abs-NoActive.xlsx'
+                                @([PSCustomObject][ordered]@{ Student = 'Adams, Al'; StartTime = '2026-03-02 08:00'; EndTime = '2026-03-02 09:00' }) | Export-Excel -Path $path -WorksheetName 'StudentAbsences' 3>$null
+                                $before = [System.IO.File]::ReadAllBytes($path)
+                                { Add-MasterDataAbsences -MasterDataPath $path -Absences @(New-TAbsence 'Brown, Bea' '2026-03-03 13:00' '2026-03-03 14:00') 6>$null } | Should -Throw "*no 'IsActive' heading*"
+                                [System.IO.File]::ReadAllBytes($path) | Should -Be $before
+                }
+
+                It 'Save-StudentAbsences saves what MasterData does not have yet and marks it saved; a missing file keeps it for Export' {
+                                $md = Join-Path $TestDrive 'Abs-Save.xlsx'
+                                New-TMasterData -Path $md -Students $script:AbsStudents -Absences @($script:OldAbsence)
+                                $a = New-TestStudent -Name 'Adams, Al'
+                                $b = New-TestStudent -Name 'Brown, Bea'
+                                $made = New-StudentAbsences -Students @('Adams, Al', 'Brown, Bea') -Day '2026-03-03' -From '1300' -To '0230 PM' -Reason 'Brief'
+                                [void](Add-StudentAbsences -Absences $made.Absences -Students @($a, $b))
+
+                                $r = Save-StudentAbsences -MasterDataPath $md -Students @($a, $b) 6>$null
+                                $r.Saved | Should -BeTrue
+                                $r.Count | Should -Be 2
+                                @(Get-PendingStudentAbsences -Students @($a, $b)).Count | Should -Be 0
+                                @(Import-Excel -Path $md -WorksheetName 'StudentAbsences' | ForEach-Object { $_.Student }) | Should -Be @('Adams, Al', 'Adams, Al', 'Brown, Bea')
+                                (Save-StudentAbsences -MasterDataPath $md -Students @($a, $b) 6>$null).Count | Should -Be 0 -Because 'nothing is left to save'
+
+                                $later = New-StudentAbsences -Students @('Brown, Bea') -Day '2026-03-04' -From '0800' -To '0900'
+                                [void](Add-StudentAbsences -Absences $later.Absences -Students @($b))
+                                $gone = Save-StudentAbsences -MasterDataPath (Join-Path $TestDrive 'nope.xlsx') -Students @($a, $b) 6>$null
+                                $gone.Saved | Should -BeFalse
+                                $gone.Message | Should -Be 'MasterData.xlsx was not found'
+                                @(Get-PendingStudentAbsences -Students @($a, $b)).Count | Should -Be 1
+                }
+
+                It 'Export writes an absence that could not be saved before, with everything else' {
+                                $md = Join-Path $TestDrive 'Abs-Export-MD.xlsx'
+                                $out = Join-Path $TestDrive 'Abs-Export-Out.xlsx'
+                                New-TMasterData -Path $md -Students $script:AbsStudents -Absences @($script:OldAbsence)
+                                $a = New-TestStudent -Name 'Adams, Al' -Done 'FI3101|2026-02-20 08:00'
+                                $made = New-StudentAbsences -Students @('Adams, Al') -Day '2026-03-03' -From '1500' -To '1600' -Reason 'Medical'
+                                [void](Add-StudentAbsences -Absences $made.Absences -Students @($a))
+                                $fill = [PSCustomObject]@{ Schedule = @(New-TestRow -ETD '2026-03-03 07:30' -Instructor 'Jones, Bob' -Student 'Adams, Al' -Mission 'FT5001'); Students = @(Copy-StudentForEval $a) }
+                                Export-FaisOutput -FillResult $fill -OutputPath $out -MasterDataPath $md 3>$null 6>$null | Should -BeTrue
+                                $rows = @(Import-Excel -Path $md -WorksheetName 'StudentAbsences')
+                                $rows.Count | Should -Be 2
+                                $rows[1].Reason | Should -Be 'Medical'
+                                $a.Absences[0].InMasterData | Should -BeTrue
                 }
 }

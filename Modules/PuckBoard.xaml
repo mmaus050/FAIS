@@ -216,6 +216,7 @@
                     <MenuItem x:Name="MenuCopyPrevDay" Header="_Copy the previous day's lines"/>
                     <Separator/>
                     <MenuItem x:Name="MenuUpdateSyllabi" Header="_Update Syllabi..."/>
+                    <MenuItem x:Name="MenuAddAbsence" Header="Add student _absence..."/>
                     <Separator/>
                     <MenuItem x:Name="MenuClose" Header="Close the board"/>
                 </MenuItem>
@@ -294,6 +295,8 @@
                     <Rectangle Width="1" Height="20" Fill="#94A3B8" Margin="8,0"/>
                     <Button x:Name="UpdateSyllabiButton" Content="Update Syllabi" Style="{StaticResource BarButton}"
                             ToolTip="Pick the day's flying schedule or the Big Board: FAIS works out which it is and marks each student's events complete or not complete from it. You see what will change before anything is saved."/>
+                    <Button x:Name="AddAbsenceButton" Content="Add Student Absence" Style="{StaticResource BarButton}" FontWeight="SemiBold"
+                            ToolTip="Block students off for a stretch of time (an appointment, leave...): drag or paste them in, pick the day and type the times. It goes on MasterData's StudentAbsences sheet, and the board and the scheduler keep them off every line inside it."/>
                     <Rectangle Width="1" Height="20" Fill="#94A3B8" Margin="8,0"/>
                     <DatePicker x:Name="AddDayPicker" Style="{StaticResource BarField}" Width="125"/>
                     <Button x:Name="AddDayButton" Content="Add day" Style="{StaticResource BarButton}"/>

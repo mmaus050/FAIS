@@ -1613,6 +1613,15 @@ Describe 'SoftRules -Detailed' {
                                                 $text.Reasons['Non-Counter'] | Should -Be 'Text is a non-counter'
                                 }
 
+                                It 'no string or counter scoring on a sim, even with a named IP (<SortieType> <Mission>)' -TestCases @(
+                                                @{ SortieType = 'OFT'; Mission = 'FE3102'; Instructor = 'Jones, Bob' }
+                                                @{ SortieType = 'IFT'; Mission = 'FE3102'; Instructor = 'Leech, Tom' }
+                                ) {
+                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-26 08:00|Ortiz, Sam'
+                                                $r = Get-Soft -Student $s -SortieType $SortieType -Instructor $Instructor -Mission $Mission
+                                                foreach ($k in 'Non-Counter', 'Continue String', 'String 4', 'String 5', 'Zipper', 'Break String', 'Counter Continuity', 'CAP Bonus (string)') { $r.Breakdown.Contains($k) | Should -BeFalse }
+                                }
+
                                 It 'no string or counter scoring with SIM IP or no IP' {
                                                 $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-26 08:00|Jones, Bob'
                                                 foreach ($r in @((Get-Soft -Student $s -SortieType 'OFT' -Mission 'FE3102'), (Get-Soft -Student $s -Instructor '' -Mission 'FT5103'))) {

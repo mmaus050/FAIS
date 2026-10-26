@@ -751,6 +751,7 @@ function SoftRules {
                 #####################################
                 # RULE: STRINGS AND COUNTERS
                 # Rewards three strings, penalizes everything else to varying degrees
+                # Flights only: a sim line never scores here, and past sims never count
                 #####################################
                 $PastFlights = @(
                                 $Student.Syllabus | Where-Object {
@@ -768,8 +769,9 @@ function SoftRules {
 
                 $IsEffectiveCounter = ConvertTo-FaisBool $ip.IsCounter -Default $true
                 $hasRealIP = ($CurrentIP -ne '' -and $CurrentIP -notmatch 'SIM IP' -and $CurrentIP -ne 'NEED IP')
+                $isFlightSortie = -not (Test-IsSimSortieType $sortieType) -and $missionType -notmatch '(?i)^\s*(IFT|OFT)\s*$'
 
-                if ($hasRealIP) {
+                if ($hasRealIP -and $isFlightSortie) {
                                 $CurrentIP_Base = Get-BaseName $CurrentIP
                                 $CurrentIP_Short = Get-ShortIPName $CurrentIP
                                 $nonCounterTag = ''

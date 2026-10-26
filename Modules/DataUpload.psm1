@@ -5,6 +5,8 @@
 # Export-FormattedMasterSchedule / Apply-GroupBorders / Set-MasterScheduleFirst
 # Export-StudentSyllabusTabs / ConvertTo-SyllabusTabRow / Update-SyllabusTabCells / Format-TabEtd
 # Update-MasterDataStudents / Get-UnsatFlagUpdates
+# Update-StringTracker (MasterData's String Tracker sheet)
+# Add-MasterDataAbsences / Get-PendingStudentAbsences / Save-StudentAbsences (Add Student Absence)
 # Export-AtisWorkbook (ATIS.xlsx, one tab per day)
 # Export-DailyScheduleSheets (Teams) / Get-DaySheetName
 # Invoke-WithFileBackup / Export-FaisOutput
@@ -399,7 +401,7 @@ function Format-TabEtd {
 # UnsatFlight into the columns with those headings.
 # Only the cells passed in change. Throws when MasterData can't be written.
 #   -SimDebtDeltaByName: name -> amount added to the SimDebt already there (Update Syllabi)
-#   -FlagsByName: name -> @{ UnsatSim = $true/$false; UnsatFlight = $true/$false } (either key)
+#   -FlagsByName: name -> @{ UnsatSim = $true/$false; UnsatFlight = $true/$false; OnHold = $true/$false } (any of the keys)
 # ==========================================
 function Update-MasterDataStudents {
                 param (
@@ -427,7 +429,7 @@ function Update-MasterDataStudents {
                                 $seenName = $false; $seenDebt = $false
                                 for ($c = 1; $c -le $lastCol; $c++) {
                                                 $heading = ([string]$ws.Cells[1, $c].Value).Trim()
-                                                if ($heading -in @('UnsatSim', 'UnsatFlight') -and -not $flagCol.ContainsKey($heading)) { $flagCol[$heading] = $c }
+                                                if ($heading -in @('UnsatSim', 'UnsatFlight', 'OnHold') -and -not $flagCol.ContainsKey($heading)) { $flagCol[$heading] = $c }
                                                 elseif ($heading -ieq 'SPName' -and -not $seenName) { $nameCol = $c; $seenName = $true }
                                                 elseif ($heading -ieq 'SimDebt' -and -not $seenDebt) { $debtCol = $c; $seenDebt = $true }
                                 }
@@ -472,7 +474,7 @@ function Update-MasterDataStudents {
                                                 Write-Warning "Not found in the SPName column of the MasterData Students sheet (above the first blank name), so nothing was written for: $($missing -join '; ')"
                                 }
                                 $debtNames = @(@($SimDebtByName.Keys) + @($SimDebtDeltaByName.Keys) | Sort-Object -Unique | Where-Object { $found.ContainsKey($_) })
-                                Write-Host ("MasterData updated: SimDebt for {0} student(s), unsat flags for {1}." -f $debtNames.Count, @($FlagsByName.Keys | Where-Object { $found.ContainsKey($_) }).Count) -ForegroundColor Green
+                                Write-Host ("MasterData updated: SimDebt for {0} student(s), unsat / HOLD flags for {1}." -f $debtNames.Count, @($FlagsByName.Keys | Where-Object { $found.ContainsKey($_) }).Count) -ForegroundColor Green
                 }
                 catch {
                                 if ($null -ne $package) { Close-ExcelPackage -ExcelPackage $package -NoSave }
@@ -480,9 +482,10 @@ function Update-MasterDataStudents {
                 }
 }
 
-# The UnsatSim / UnsatFlight values that no longer match what was read from MasterData:
+# The UnsatSim / UnsatFlight / OnHold values that no longer match what was read from MasterData:
 # $false where this run's schedule cleaned up the unsat, $true where a hook (or a re-planned
-# clean-up) set one that MasterData doesn't have yet. Same shape as -FlagsByName above.
+# clean-up) set one that MasterData doesn't have yet, and a HOLD change the pre-run menu
+# could not save. Same shape as -FlagsByName above.
 function Get-UnsatFlagUpdates {
                 param ([array]$Students)
 
@@ -492,7 +495,7 @@ function Get-UnsatFlagUpdates {
                                 $name = ([string]$s.Name).Trim()
                                 if ($name -eq '') { continue }
                                 $flags = @{}
-                                foreach ($key in @('UnsatSim', 'UnsatFlight')) {
+                                foreach ($key in @('UnsatSim', 'UnsatFlight', 'OnHold')) {
                                                 $saved = $s.PSObject.Properties["${key}InMasterData"]
                                                 if ($null -eq $saved) { continue }
                                                 $now = ConvertTo-FaisBool $s.$key
@@ -501,6 +504,183 @@ function Get-UnsatFlagUpdates {
                                 if ($flags.Count -gt 0) { $out[$name] = $flags }
                 }
                 return $out
+}
+
+# MasterData's String Tracker sheet: one row per student with Get-StringCounts, in the
+# order of the Students list. The sheet is rewritten each time (made if it is missing).
+# Throws when MasterData can't be written.
+function Update-StringTracker {
+                param (
+                                [Parameter(Mandatory)] [string]$MasterDataPath,
+                                [array]$Students = @(),
+                                [array]$Instructors = @()
+                )
+
+                if (-not (Test-Path -LiteralPath $MasterDataPath)) { throw "MasterData.xlsx not found at: $MasterDataPath" }
+
+                $headings = @('StudentName', '5+ Strings', '4-Strings', '3-Strings', '2-Strings', '1-Strings', 'TotalUniqueCounters')
+                $package = $null
+                try {
+                                $package = Open-ExcelPackage -Path $MasterDataPath
+                                $ws = $package.Workbook.Worksheets['String Tracker']
+                                if ($null -eq $ws) { $ws = $package.Workbook.Worksheets.Add('String Tracker') }
+                                $oldLastRow = if ($null -ne $ws.Dimension) { $ws.Dimension.End.Row } else { 0 }
+
+                                for ($c = 0; $c -lt $headings.Count; $c++) { $ws.Cells[1, ($c + 1)].Value = $headings[$c] }
+                                $row = 2
+                                foreach ($s in @($Students)) {
+                                                if ($null -eq $s) { continue }
+                                                $name = ([string]$s.Name).Trim()
+                                                if ($name -eq '') { continue }
+                                                $counts = @(Get-StringCounts -Syllabus @($s.Syllabus) -Instructors $Instructors)
+                                                $ws.Cells[$row, 1].Value = $name
+                                                for ($c = 0; $c -lt $counts.Count; $c++) { $ws.Cells[$row, ($c + 2)].Value = [int]$counts[$c] }
+                                                $row++
+                                }
+                                # Rows left over from a longer student list
+                                for ($r = $row; $r -le $oldLastRow; $r++) {
+                                                for ($c = 1; $c -le $headings.Count; $c++) { $ws.Cells[$r, $c].Value = $null }
+                                }
+
+                                Close-ExcelPackage -ExcelPackage $package
+                                $package = $null
+                                Write-Host ("MasterData updated: String Tracker for {0} student(s)." -f ($row - 2)) -ForegroundColor Green
+                }
+                catch {
+                                if ($null -ne $package) { Close-ExcelPackage -ExcelPackage $package -NoSave }
+                                throw
+                }
+}
+
+
+# ==========================================
+# Adds a line to MasterData's StudentAbsences sheet for each absence ({Student; StartTime;
+# EndTime; Reason}), under the last line already there, with IsActive TRUE: the same as
+# typing it in. Columns are found by their headings (Student, StartTime, EndTime, IsActive,
+# and Reason when the sheet has it). A missing sheet is added with those headings.
+# Throws when MasterData can't be written.
+# ==========================================
+function Add-MasterDataAbsences {
+                param (
+                                [Parameter(Mandatory)] [string]$MasterDataPath,
+                                [array]$Absences = @()
+                )
+
+                if (-not (Test-Path -LiteralPath $MasterDataPath)) { throw "MasterData.xlsx not found at: $MasterDataPath" }
+                $rows = @($Absences | Where-Object { $null -ne $_ })
+                if ($rows.Count -eq 0) { return }
+
+                $package = $null
+                try {
+                                $package = Open-ExcelPackage -Path $MasterDataPath
+                                $ws = $package.Workbook.Worksheets['StudentAbsences']
+                                $headings = @('Student', 'StartTime', 'EndTime', 'Reason', 'IsActive')
+                                if ($null -eq $ws) {
+                                                $ws = $package.Workbook.Worksheets.Add('StudentAbsences')
+                                                for ($c = 1; $c -le $headings.Count; $c++) { $ws.Cells[1, $c].Value = $headings[$c - 1] }
+                                }
+
+                                # IngestData reads the sheet by its headings, so a line is only read with them
+                                $lastCol = if ($null -ne $ws.Dimension) { $ws.Dimension.End.Column } else { 0 }
+                                $col = @{}
+                                for ($c = 1; $c -le $lastCol; $c++) {
+                                                $heading = ([string]$ws.Cells[1, $c].Value).Trim()
+                                                foreach ($h in $headings) { if ($heading -ieq $h -and -not $col.ContainsKey($h)) { $col[$h] = $c } }
+                                }
+                                foreach ($h in @('Student', 'StartTime', 'EndTime', 'IsActive')) {
+                                                if (-not $col.ContainsKey($h)) { throw "The MasterData StudentAbsences sheet has no '$h' heading in row 1." }
+                                }
+
+                                # Under the last line with anything in it (blank lines formatted ahead of time are used)
+                                $last = 1
+                                $lastRow = if ($null -ne $ws.Dimension) { $ws.Dimension.End.Row } else { 1 }
+                                for ($r = $lastRow; $r -ge 2 -and $last -eq 1; $r--) {
+                                                for ($c = 1; $c -le $lastCol; $c++) {
+                                                                # Into a variable first: Windows PowerShell 5.1 can't parse $ws.Cells[$r, $c] inside a method call's brackets
+                                                                $cellValue = $ws.Cells[$r, $c].Value
+                                                                if (-not [string]::IsNullOrWhiteSpace([string]$cellValue)) { $last = $r; break }
+                                                }
+                                }
+
+                                $row = $last + 1
+                                foreach ($a in $rows) {
+                                                $ws.Cells[$row, $col['Student']].Value = ([string]$a.Student).Trim()
+                                                foreach ($key in @('StartTime', 'EndTime')) {
+                                                                $cell = $ws.Cells[$row, $col[$key]]
+                                                                $cell.Value = [datetime]$a.$key
+                                                                # A date and time, not a bare serial number (a line formatted ahead of time keeps its format)
+                                                                if (@('', 'General') -contains [string]$cell.Style.Numberformat.Format) { $cell.Style.Numberformat.Format = 'm/d/yy h:mm' }
+                                                }
+                                                if ($col.ContainsKey('Reason') -and -not [string]::IsNullOrWhiteSpace([string]$a.Reason)) { $ws.Cells[$row, $col['Reason']].Value = ([string]$a.Reason).Trim() }
+                                                $ws.Cells[$row, $col['IsActive']].Value = $true
+                                                $row++
+                                }
+
+                                Close-ExcelPackage -ExcelPackage $package
+                                $package = $null
+                                Write-Host ("MasterData updated: {0} line(s) added to StudentAbsences." -f $rows.Count) -ForegroundColor Green
+                }
+                catch {
+                                if ($null -ne $package) { Close-ExcelPackage -ExcelPackage $package -NoSave }
+                                throw
+                }
+}
+
+# The absences added this run that MasterData doesn't have yet (InMasterData = $false): ones
+# Add Student Absence could not save. Export writes them.
+function Get-PendingStudentAbsences {
+                param ([array]$Students)
+
+                $out = New-Object System.Collections.Generic.List[object]
+                foreach ($s in @($Students)) {
+                                if ($null -eq $s) { continue }
+                                foreach ($a in @($s.Absences)) {
+                                                if ($null -eq $a -or $null -eq $a.PSObject.Properties['InMasterData'] -or [bool]$a.InMasterData) { continue }
+                                                if (-not $out.Contains($a)) { $out.Add($a) }
+                                }
+                }
+                return $out.ToArray()
+}
+
+# Saves the absences that MasterData doesn't have yet (the ones just added, and any that
+# could not be saved earlier) to its StudentAbsences sheet right away. MasterData open in
+# Excel is saved and closed for the write, then opened again. Absences saved get
+# InMasterData = $true; the rest wait for Export. Returns {Saved; Count; Message}.
+function Save-StudentAbsences {
+                param (
+                                [string]$MasterDataPath,
+                                [array]$Students = @(),
+                                [scriptblock]$LockedPrompt
+                )
+
+                $result = [PSCustomObject]@{ Saved = $false; Count = 0; Message = '' }
+                $pending = @(Get-PendingStudentAbsences -Students $Students)
+                if ($pending.Count -eq 0) { $result.Saved = $true; return $result }
+                if ([string]::IsNullOrWhiteSpace($MasterDataPath) -or -not (Test-Path -LiteralPath $MasterDataPath)) {
+                                $result.Message = 'MasterData.xlsx was not found'
+                                return $result
+                }
+                $closed = New-Object System.Collections.Generic.List[string]
+                try {
+                                if (-not (Request-FaisFileWritable -Path $MasterDataPath -Prompt $LockedPrompt -Closed $closed)) {
+                                                $result.Message = 'MasterData.xlsx is still open'
+                                                return $result
+                                }
+                                try {
+                                                Invoke-WithFileBackup -Files @($MasterDataPath) -Action { Add-MasterDataAbsences -MasterDataPath $MasterDataPath -Absences $pending }
+                                }
+                                catch {
+                                                $result.Message = $_.Exception.Message
+                                                return $result
+                                }
+                                foreach ($a in $pending) { $a.InMasterData = $true }
+                                $result.Saved = $true
+                                $result.Count = $pending.Count
+                                return $result
+                }
+                finally {
+                                if ($closed.Count -gt 0) { Open-FaisWorkbooks -Path $closed.ToArray() }
+                }
 }
 
 
@@ -722,7 +902,7 @@ function Get-OutputSetting {
 }
 
 # Writes everything a run produces, or nothing: MasterSchedule, each student's syllabus
-# tab, SimDebt and the unsat flags that changed to MasterData, ATIS, then the optional Teams
+# tab, SimDebt, the unsat flags that changed and the String Tracker to MasterData, ATIS, then the optional Teams
 # copy. If any write fails, all of them are put back as they were.
 # Only the days that were filled (-Days; default: every day in the fill) are written:
 # MasterSchedule keeps the other days already exported (from today on, plus KeepPastDays),
@@ -738,7 +918,8 @@ function Export-FaisOutput {
                                 $Settings = @{},
                                 [scriptblock]$LockedPrompt,
                                 [string[]]$Days = @(),
-                                [datetime]$Today = (Get-Date)
+                                [datetime]$Today = (Get-Date),
+                                [array]$Instructors = @()
                 )
 
                 $allRows = @(ConvertTo-ExportRows -Schedule $FillResult.Schedule)
@@ -751,6 +932,7 @@ function Export-FaisOutput {
                                 if (-not [string]::IsNullOrWhiteSpace([string]$s.Name)) { $debts[([string]$s.Name).Trim()] = [double]$s.SimDebt }
                 }
                 $flags = Get-UnsatFlagUpdates -Students $FillResult.Students
+                $absences = @(Get-PendingStudentAbsences -Students $FillResult.Students)
 
                 $writeAtis = -not [string]::IsNullOrWhiteSpace($AtisPath)
                 if ($writeAtis) { $writeAtis = [bool](Get-OutputSetting $Settings 'WriteAtis' $true) }
@@ -791,6 +973,8 @@ function Export-FaisOutput {
                                                                 Export-StudentSyllabusTabs -Students $FillResult.Students -FilePath $OutputPath
                                                                 Set-MasterScheduleFirst -FilePath $OutputPath
                                                                 Update-MasterDataStudents -MasterDataPath $MasterDataPath -SimDebtByName $debts -FlagsByName $flags
+                                                                Update-StringTracker -MasterDataPath $MasterDataPath -Students $FillResult.Students -Instructors $Instructors
+                                                                if ($absences.Count -gt 0) { Add-MasterDataAbsences -MasterDataPath $MasterDataPath -Absences $absences }
                                                                 if ($writeAtis) { Export-AtisWorkbook -ScheduleData $rows -FilePath $AtisPath }
                                                 }
                                 }
@@ -803,6 +987,10 @@ function Export-FaisOutput {
                                 Write-Host ("MasterSchedule: wrote {0}." -f ($wrote -join ', ')) -ForegroundColor Green
                                 $otherDays = @($merged | ForEach-Object { Get-ExportRowDay $_ } | Where-Object { $_ -and $Days -notcontains $_ } | Sort-Object -Unique)
                                 if ($otherDays.Count -gt 0) { Write-Host ("MasterSchedule: kept {0} as exported before." -f (@($otherDays | ForEach-Object { Format-ExportDay $_ }) -join ', ')) -ForegroundColor Green }
+                                foreach ($a in $absences) {
+                                                $a.InMasterData = $true
+                                                Write-Host "  Absence added for $($a.Student): $(Format-AbsenceTime $a)" -ForegroundColor Cyan
+                                }
                                 foreach ($name in @($flags.Keys | Sort-Object)) {
                                                 foreach ($key in @($flags[$name].Keys | Sort-Object)) {
                                                                 $what = if ($flags[$name][$key]) { 'set' } else { 'cleared (cleaned up on this schedule)' }

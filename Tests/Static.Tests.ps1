@@ -47,6 +47,25 @@ Describe 'Source file <Name>' -ForEach $script:SourceFiles {
                                 @($found | ForEach-Object { "$($_.Extent.StartLineNumber): $($_.Extent.Text)" }) | Should -BeNullOrEmpty
                 }
 
+                It 'has no comma index inside a method call''s brackets (Windows PowerShell 5.1 can''t parse it)' {
+                                # [string]::IsNullOrWhiteSpace($ws.Cells[$r, $c].Value) fails to load on 5.1; read the cell into a variable first
+                                $found = $parsed.Ast.FindAll({
+                                                param($n)
+                                                if (-not ($n -is [System.Management.Automation.Language.IndexExpressionAst] -and $n.Index -is [System.Management.Automation.Language.ArrayLiteralAst])) { return $false }
+                                                for ($p = $n.Parent; $null -ne $p; $p = $p.Parent) {
+                                                                # A script block, $( ) or ( ) starts a fresh expression, where 5.1 is fine
+                                                                if ($p -is [System.Management.Automation.Language.ScriptBlockExpressionAst] -or $p -is [System.Management.Automation.Language.SubExpressionAst] -or $p -is [System.Management.Automation.Language.ParenExpressionAst]) { return $false }
+                                                                if ($p -is [System.Management.Automation.Language.InvokeMemberExpressionAst]) {
+                                                                                foreach ($arg in @($p.Arguments)) {
+                                                                                                if ($arg.Extent.StartOffset -le $n.Extent.StartOffset -and $arg.Extent.EndOffset -ge $n.Extent.EndOffset) { return $true }
+                                                                                }
+                                                                }
+                                                }
+                                                return $false
+                                }, $true)
+                                @($found | ForEach-Object { "$($_.Extent.StartLineNumber): $($_.Extent.Text)" }) | Should -BeNullOrEmpty
+                }
+
                 It 'has no variables that differ only by case inside one function' {
                                 $clashes = foreach ($fn in $parsed.Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
                                                 $names = @{}
@@ -79,6 +98,16 @@ Describe 'Source file <Name>' -ForEach $script:SourceFiles {
                                                 if ($text -match '^\$(\w+)$' -and $listVars.Contains($Matches[1].ToLowerInvariant())) { "$($sub.Extent.StartLineNumber): $($sub.Extent.Text)" }
                                 }
                                 @($bad) | Should -BeNullOrEmpty
+                }
+
+                It 'never indexes with a sum after a comma ($ws.Cells[1, $c + 1] is $ws.Cells[@(1, $c, 1)]: the comma binds first)' {
+                                $bad = $parsed.Ast.FindAll({
+                                                param($n)
+                                                $n -is [System.Management.Automation.Language.IndexExpressionAst] -and
+                                                $n.Index -is [System.Management.Automation.Language.BinaryExpressionAst] -and
+                                                $n.Index.Left -is [System.Management.Automation.Language.ArrayLiteralAst]
+                                }, $true)
+                                @($bad | ForEach-Object { "$($_.Extent.StartLineNumber): $($_.Extent.Text)" }) | Should -BeNullOrEmpty
                 }
 
                 It 'never wraps the board''s Lines list in @() (it is a generic List[object])' {
@@ -262,6 +291,41 @@ Describe 'ExportResultDialog.xaml' {
 
                 It 'is plain ASCII' {
                                 $bytes = [System.IO.File]::ReadAllBytes((Join-Path $script:Root 'Modules/ExportResultDialog.xaml'))
+                                @($bytes | Where-Object { $_ -gt 127 }).Count | Should -Be 0
+                }
+}
+
+Describe 'AbsenceDialog.xaml' {
+                BeforeAll {
+                                $script:AbsText = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Modules/AbsenceDialog.xaml'))
+                                $script:BoardCode5 = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Modules/PuckBoard.psm1'))
+                }
+
+                It 'is well-formed XML with no code-behind hooks' {
+                                { [xml]$script:AbsText } | Should -Not -Throw
+                                $script:AbsText | Should -Not -Match 'x:Class='
+                                $script:AbsText | Should -Not -Match '\sClick='
+                }
+
+                It 'has every named element the board code looks up' {
+                                $names = @([regex]::Matches($script:AbsText, 'x:Name="([^"]+)"') | ForEach-Object { $_.Groups[1].Value })
+                                $listBlock = [regex]::Match($script:BoardCode5, "foreach \(\`$item in @\(([^)]*)\)\)").Groups[1].Value
+                                $wanted = @([regex]::Matches($listBlock, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value })
+                                $wanted.Count | Should -BeGreaterThan 10
+                                @($wanted | Where-Object { $names -notcontains $_ }) | Should -BeNullOrEmpty
+                }
+
+                It 'only binds to properties the view models provide, and uses only Tags the board code knows' {
+                                $bound = @([regex]::Matches($script:AbsText, '\{Binding (\w+)') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
+                                $provided = @([regex]::Matches($script:BoardCode5, '(?m)^\s+(\w+)\s+=\s') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
+                                @($bound | Where-Object { $provided -notcontains $_ }) | Should -BeNullOrEmpty
+                                $tags = @([regex]::Matches($script:AbsText, '\bTag="([^"{]+)"') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
+                                $tags.Count | Should -BeGreaterThan 3
+                                foreach ($t in $tags) { $script:BoardCode5 | Should -Match ([regex]::Escape("'$t'")) }
+                }
+
+                It 'is plain ASCII' {
+                                $bytes = [System.IO.File]::ReadAllBytes((Join-Path $script:Root 'Modules/AbsenceDialog.xaml'))
                                 @($bytes | Where-Object { $_ -gt 127 }).Count | Should -Be 0
                 }
 }
