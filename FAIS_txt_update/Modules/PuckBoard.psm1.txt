@@ -2794,7 +2794,8 @@ function Add-PBBulkLines {
                 return $true
 }
 
-# "10 Day Local lines: 0730 to 0757, every 3 min" (-DayText adds " on Tue 20 Oct" before the colon)
+# "10 Day Local lines: 0730 to 0757, every 3 min" (-DayText adds " on Tue 20 Oct" before the colon).
+# 0 minutes apart: "3 OFT lines, all at 0800".
 function Format-PBBulkTimes {
                 param ([string[]]$Times, [string]$Every, [string]$SortieType, [string]$DayText = '')
 
@@ -2802,9 +2803,14 @@ function Format-PBBulkTimes {
                 if ($n -eq 0) { return '' }
                 $noun = if ($n -eq 1) { 'line' } else { 'lines' }
                 $on = if ($DayText) { " on $DayText" } else { '' }
+                # The minutes as a number: "05" or " 5 " reads "5"
+                $gap = ([string]$Every).Trim()
+                $g = 0
+                if ([int]::TryParse($gap, [ref]$g)) { $gap = [string]$g }
                 $text = "$n $SortieType $noun$on at $($Times[0])"
-                if ($n -gt 1) { $text = "$n $SortieType $noun$on`: $($Times[0]) to $($Times[$n - 1]), every $($Every.Trim()) min" }
-                if (Test-IsOBSortieType $SortieType) { $text += ' (each with its return leg)' }
+                if ($n -gt 1 -and $Times[0] -eq $Times[$n - 1]) { $text = "$n $SortieType $noun$on, all at $($Times[0])" }
+                elseif ($n -gt 1) { $text = "$n $SortieType $noun$on`: $($Times[0]) to $($Times[$n - 1]), every $gap min" }
+                if (Test-IsOBSortieType $SortieType) { $text += $(if ($n -eq 1) { ' (with its return leg)' } else { ' (each with its return leg)' }) }
                 return $text
 }
 
