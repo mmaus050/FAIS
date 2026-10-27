@@ -16,8 +16,8 @@ Add `-Trace` to print every scheduling decision to the console. FAIS restarts it
 **What happens:**
 1. **Pre-run pop-ups.** Log any hooked (unsat) or incomplete events from the last schedule, put students on or off hold with **Change Student HOLD status** (checked = on hold), and block students off with **Add Student Absence**, then click **Open Puck Board**. These are saved right away (see *Data in and out*).
 2. **Puck board.** Each day on MasterData's **Schedule** sheet opens as its own tab with its lines (or you type them), and you hardcode whoever you want. **Add Student Absence** is on the board too. *(details below)*
-3. **Fill.** The scheduler fills every open line: formation wingmen, direct support, O&B return legs and For Sale lines included. **Fill <day>** fills just the day on screen; **Fill all N days** (shown when the board has more than one day) fills them all. You review the result on the board.
-4. **Export.** All or nothing: if any part fails, none of the files change. It writes the days you filled:
+3. **Fill.** The scheduler fills every open line: formation wingmen, direct support and O&B return legs included. **Fill <day>** fills just the day on screen; **Fill all N days** (shown when the board has more than one day) fills them all. Its picks go **on the board** (blue italics, `AUTO`), so you can still drag them between lines, swap them, change missions, add or delete lines, and fill another day: the Fill buttons stay. A line nobody could fly shows **NEED SP** in red. **Clear fill** takes the scheduler's picks off the day on screen (students you hardcoded or moved stay), **Re-fill** does that and fills the day again, and **Ctrl+Z** takes a fill back off.
+4. **Export** (always on the bottom bar). Writes the board **as it stands**: nobody is picked, every student stays where they are (rule breaks flagged `OVERRIDE`), and a line with no student goes out as **NEED SP**. All or nothing: if any part fails, none of the files change. It writes the day on screen and every day you filled since the board opened (the button names them):
    - OutputSchedule: the **MasterSchedule** sheet (first tab). Only the filled days are replaced; other days already exported (today onward) are kept, so you can update **one day at a time**,
    - OutputSchedule: **each student's syllabus tab** (tomorrow's run starts from it),
    - MasterData: **SimDebt**, **DiscontinuityScore** (see *Discontinuity score*), and **UnsatSim / UnsatFlight** reset to FALSE for students whose schedule cleans up the unsat,
@@ -27,7 +27,7 @@ Add `-Trace` to print every scheduling decision to the console. FAIS restarts it
 
    Afterwards a window says what was written (days, line counts, files, unsats cleared, OVERRIDE lines), or, if the export failed, that nothing was written and why. **Open OutputSchedule** and **Open ATIS** open the files.
 
-Closing the board without exporting writes nothing (only the pre-run pop-ups have already saved). Your lines are autosaved either way.
+Closing the board without exporting writes nothing (only the pre-run pop-ups have already saved). Your lines, the scheduler's picks included, are autosaved either way.
 
 ## Data in and out
 
@@ -40,9 +40,9 @@ Closing the board without exporting writes nothing (only the pre-run pop-ups hav
 | Puck board and fill | MasterData's Schedule sheet again whenever MasterData is saved; **Load a day...** reads it (or the last exported MasterSchedule) fresh | Nothing (the board's own autosave in `Boards\` aside) |
 | **Update Syllabi** | The training file you pick (flying schedule or Big Board) | OutputSchedule: the changed events' cells on the students' tabs (a student with no tab gets one). MasterData: SimDebt, DiscontinuityScore |
 | **Add Student Absence** | | MasterData: a line on StudentAbsences for each student (Student, StartTime, EndTime, Reason, IsActive = TRUE) |
-| **Export** | | OutputSchedule: MasterSchedule (the filled days), student tabs. MasterData: SimDebt, DiscontinuityScore, unsat resets, String Tracker, and any absence **Add Student Absence** could not save. ATIS: the exported days' tabs |
+| **Export** | | OutputSchedule: MasterSchedule (the day on screen and the days filled), student tabs. MasterData: SimDebt, DiscontinuityScore, unsat resets, String Tracker, and any absence **Add Student Absence** could not save. ATIS: the exported days' tabs |
 
-- **MasterSchedule is the only sheet of OutputSchedule that is rewritten**, and only the filled days in it change (ATIS rebuilds the tabs of the days it exports). A student's tab is updated in place: only the Instructor, ETD and IsComplete cells of events that changed are written, so your own columns, notes and formatting stay. A student with no tab gets a new one.
+- **MasterSchedule is the only sheet of OutputSchedule that is rewritten**, and only the exported days in it change (ATIS rebuilds the tabs of the days it exports). A student's tab is updated in place: only the Instructor, ETD and IsComplete cells of events that changed are written, so your own columns, notes and formatting stay. A student with no tab gets a new one.
 - **MasterData Students sheet:** students are matched by the column headed SPName and SimDebt goes to the column headed SimDebt (columns B and P when those headings are missing). DiscontinuityScore goes to the column headed DiscontinuityScore; the first time, FAIS adds that heading after the last one (column Q on the usual sheet). UnsatSim and UnsatFlight are written to the columns with those headings.
 - **Absences** are attached only when the name matches a student's name exactly (capital letters aside). A name that matches no one is reported in the console. **Add Student Absence** always writes the name exactly as the Students sheet has it.
 - **Unsat clean-up:** after a hooked OFT, the student can't fly until an OFT. After a hooked IFT, an OFT or IFT will do. After a hooked flight, the student can't sim until they fly. The scheduler and the board treat the unsat as cleaned up for every line after that sim or flight, and the line's Notes say `Clears Unsat Sim (OFT)` (or IFT, or `Clears Unsat Flight`). MasterData only says TRUE or FALSE, so for an unsat typed into MasterData the hooked sim is taken to be the student's last sim flown (an OFT if unknown). If you re-plan a day whose schedule cleaned up an unsat, the unsat comes back until the new schedule cleans it up again.
@@ -97,7 +97,7 @@ The board reads the **Schedule** sheet and keeps watching it:
 - SimDebt in MasterData, moved by each changed event, the same way a scheduled event or a logged incomplete moves it;
 - DiscontinuityScore in MasterData, moved by what the changes did to the student's strings (a blank cell stays blank and is counted at the next start).
 
-Both files are saved or neither. If they can't be saved (still open), the change is kept for this run and Export writes it. If you are reviewing a fill, it is thrown away (it was made from the old syllabi), so fill again.
+Both files are saved or neither. If they can't be saved (still open), the change is kept for this run and Export writes it. Students already on lines stay there and are checked again against the new syllabi (their corner markers show any rule they now break).
 
 ## Discontinuity score
 
@@ -138,7 +138,7 @@ Add `Disc1String`, `DiscCounter` and `Disc3PlusString` columns to the SoftWeight
 4. A **Reason** is optional (it shows on the student's puck and in the rule flag).
 
 The box under the form says what will be added, or what is missing. **Add absence** then:
-- puts the absence on the students straight away: their pucks show `ABS 0900-1130` on that day, the scheduler keeps them off every line inside it, and a line they are already hardcoded on turns red (the status line names it). A fill you are reviewing is thrown away, so fill again;
+- puts the absence on the students straight away: their pucks show `ABS 0900-1130` on that day, the scheduler keeps them off every line inside it, and a line they are already on turns red (the status line names it);
 - saves a line for each student to the StudentAbsences sheet (under the last line there, IsActive TRUE). MasterData open in Excel is saved and closed for the write, then opened again. If it can't be saved, the absence holds for this run and **Export** writes it (the export window lists it).
 
 An absence a student already has (same start and end) is not added twice.
@@ -147,7 +147,7 @@ An absence a student already has (same start and end) is not added twice.
 
 1. Open FAIS, click **Load a day...**, choose **Last exported schedule (OutputSchedule)** and the day (it is added to the board if it isn't there). Everyone goes back on the board where they were exported, hardcoded.
 2. Change what changed (take a student off, swap an IP, add a line).
-3. Press **Fill <day>** (the day on screen), then **Export**. Only the open lines are filled, and only that day is replaced in OutputSchedule. Other exported days are filled in as fixed context, so no student is double-booked or flown out of order; if your change breaks a line on another exported day, the status line says which.
+3. Press **Fill <day>** (the day on screen), change anything you like, then **Export**. Only the open lines are filled, and only that day is replaced in OutputSchedule. Other exported days are filled in as fixed context, so no student is double-booked or flown out of order; if your change breaks a line on another exported day, the status line says which.
 
 ## The puck board
 
@@ -161,8 +161,10 @@ An absence a student already has (same start and end) is not added twice.
 | **Add Student Absence** | Block students off for a stretch of time: drag, click or paste them in, pick the day on the calendar, type the times (`0730`, `1530` or `0330 PM`). See *Add Student Absence*. |
 | **Blue banner** | MasterData's Schedule sheet has lines the board doesn't: load them or keep the board's lines. |
 | **Menu bar** (very top) | Every action in one place, with its key: File (load a day, templates, Update Syllabi, Add student absence), Edit (undo, type lines, bulk lines, re-check), **Line** (what can be done to the selected line), Day, Fill, View, Help. |
-| **Fill <day> / Fill all N days** (bottom) | Fill and export just the day on screen, or every day on the board. |
-| **Line details** (under the days) | The selected line's student against every rule, and every student ranked for that line. See *Line details* below. |
+| **Fill <day> / Fill all N days** (bottom) | Fill the open lines on the day on screen, or on every day on the board. The picks go on the board to move or change; the buttons stay for the next day. |
+| **Clear fill / Re-fill** (bottom) | Shown when the day on screen has the scheduler's picks: take them off, or take them off and fill again. |
+| **Export** (bottom) | Write the board as it stands (open lines as NEED SP) for the day on screen and every day filled since the board opened. |
+| **Line details** (under the days) | The selected line's student against every rule; **See options** ranks every student for that line. See *Line details* below. |
 | **Colors** (top right) | A small window that says what every color on the board means (also Help > What the colors mean). |
 | **Day tabs** | One tab per day. **Add day** builds several days at once; crew rest is checked across them. |
 | **IP pucks** (left) | Drag onto a line's IP slot. The badge shows how many lines that IP has that day. Non-counter IPs (NC) are purple instead of blue, in the pool and on the lines. |
@@ -170,22 +172,22 @@ An absence a student already has (same start and end) is not added twice.
 
 - **Two ways to put a puck on a line:** drag it onto the slot, or **click it to pick it up** (it gets a thick outline and a dark banner says what you are holding) and then **click the slot**. Hold **Ctrl** as you click the slot to keep holding the puck for another line; **Esc** or **Let go** puts it down. **Double-click** a puck to put it straight on the selected line.
 - **Moving pucks:** drag between lines to move a puck (hold **Ctrl** to copy). Drop it back on its pool to take it off the line.
-- **While you drag or hold a student,** slots turn **green** (fine), **amber** (needs a look) or **red** (breaks a hard rule).
-- **When you drop a student,** a pop-up lists:
+- **Nothing is checked while you drag or hold a student** (it used to color every slot, which was slow).
+- **When you drop a student,** their hard and soft rules are checked once and the line is selected, so the **Line details** panel shows:
   - hard-rule flags (red ✖), for example `Turn time 2.8 hr < 3.25 hr minimum (vs 0730 FT5103)` or `Not opted for FE3102: FT5001 isn't complete yet` (a sim whose prerequisite is the dollar ride);
   - warnings, for example `Less than 3.5 hr TT, Flt/CC Approval Required`;
   - the **+ / −** score reasons, spelled out, for example `3 String +10`, `Discontinuity 4, 3 String +4`, `Breaks 4 String w/ Lee −5` or `2 Flights and 2 Sims in last 5 Days −6`.
 - **Rule breaks are allowed.** The line is hardcoded anyway and marked `OVERRIDE: ...` on the output.
 - **Corner marker** on every hardcoded student: green, amber, red, or grey while checking. Hover for the reasons; right-click for more (explain, take off, *Fly wing to...*, duplicate, delete line).
 - **Mission dropdown:** `(auto)` picks the best-scoring event that passes the rules. Choose an event to hardcode it. After the events the student can fly on the line come the next ones they are **not opted for** yet (marked `(not opted)`), then **Type a mission...** for anything else.
-- **A mission picked or typed in the dropdown that breaks a rule** (not opted, already flown, not in the syllabus, wrong line type) is explained before it goes on, with the mission the scheduler would put there: **Yes** puts the recommended mission on, **No** keeps yours (the line is flagged `OVERRIDE: Not opted for ...` on the output), **Cancel** changes nothing. You always have the final say. A line typed with `sp:` and `m:` in the Add lines box goes on as typed and opens the rule-check pop-up, so its flags show straight away.
+- **A mission picked or typed in the dropdown that breaks a rule** (not opted, already flown, not in the syllabus, wrong line type) is explained before it goes on, with the mission the scheduler would put there: **Yes** puts the recommended mission on, **No** keeps yours (the line is flagged `OVERRIDE: Not opted for ...` on the output), **Cancel** changes nothing. You always have the final say. A line typed with `sp:` and `m:` in the Add lines box goes on as typed and its rule check shows in Line details straight away.
 - **Keyboard:** arrow keys on a mission dropdown open it; move with the arrows and press **Enter** to pick.
 - **IFT / OFT lines** are never wingmen or direct support.
 
 ### Line details
 Click anywhere on a line (or right-click it, or tab into it) to select it: it gets a blue outline, and the **Line details** panel under the days shows
-- **left:** the line's student against the **hard rules** (✖ broken, or none broken), the **warnings**, and the **soft rules** (the + / − score reasons and the total), the same check as the pop-up after a drop. For an open line it explains that the scheduler fills it.
-- **right:** **every student ranked for that line**: ✔ fits, ! fits with warnings, ✖ breaks a hard rule (with the first rule it breaks), each with the mission (auto) would pick and its score. Fits come first, best score first. The list fills in a few students at a time. **Hide rule breaks** leaves out the ✖ students.
+- **left:** the line's student against the **hard rules** (✖ broken, or none broken), the **warnings**, and the **soft rules** (the + / − score reasons and the total), the same check you get after a drop. For an open line it explains that the scheduler fills it (or that Export writes it as NEED SP).
+- **right:** press **See options** to check **every student against that line** and rank them: ✔ fits, ! fits with warnings, ✖ breaks a hard rule (with the first rule it breaks), each with the mission (auto) would pick and its score. Fits come first, best score first. The list fills in a few students at a time. Nothing is ranked until you ask (it takes a while), and a change to the board clears the list until you press See options again. **Hide rule breaks** leaves out the ✖ students.
 
 Click a student in the list to see their full check on the left. **Double-click** them, or press **Put on this line**, to hardcode them there. Drag the bar above the panel to resize it; **Hide** (or View > Line details panel) closes it.
 
