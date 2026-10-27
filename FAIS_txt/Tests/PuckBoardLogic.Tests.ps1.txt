@@ -849,6 +849,35 @@ Describe 'Puck board: click and place, Line details, fill buttons, export result
             }
         }
     }
+
+    It 'a non-counter IP puck has its own fill, in the pool and on a line' {
+        $r = & (Get-Module PuckBoard) {
+            @{
+                K          = $script:PBColors
+                Counter    = Get-PBIPPuckColors (Find-PBInstructor 'jones, bob')
+                NonCounter = Get-PBIPPuckColors (Find-PBInstructor 'Leech, Tom')
+                TextFalse  = Get-PBIPPuckColors ([PSCustomObject]@{ Name = 'Text, Ty'; IsCounter = 'FALSE' })
+                Blank      = Get-PBIPPuckColors ([PSCustomObject]@{ Name = 'Blank, Bo'; IsCounter = '' })
+                Unknown    = Get-PBIPPuckColors (Find-PBInstructor 'Nobody, Ned')
+            }
+        }
+        $r.K.IPPuckNC | Should -Not -Be $r.K.IPPuck
+        $r.Counter.Background | Should -Be $r.K.IPPuck
+        $r.Counter.Border | Should -Be $r.K.IPPuckBorder
+        $r.NonCounter.Background | Should -Be $r.K.IPPuckNC
+        $r.NonCounter.Border | Should -Be $r.K.IPPuckNCBorder
+        $r.TextFalse.Background | Should -Be $r.K.IPPuckNC
+        $r.Blank.Background | Should -Be $r.K.IPPuck -Because 'a blank IsCounter counts as a counter'
+        $r.Unknown.Background | Should -Be $r.K.IPPuck
+
+        Invoke-PB @{ Cmd = 'SetIP'; LineId = 'L1'; Name = 'Leech, Tom' }
+        $vm = & (Get-Module PuckBoard) { param($l) New-PBLineVM $l } (Get-Line 'L1')
+        $vm.IPBackground | Should -Be $r.K.IPPuckNC
+        $vm.IPBorder | Should -Be $r.K.IPPuckNCBorder
+        Invoke-PB @{ Cmd = 'SetIP'; LineId = 'L1'; Name = 'Lee, Ann' }
+        $vm = & (Get-Module PuckBoard) { param($l) New-PBLineVM $l } (Get-Line 'L1')
+        $vm.IPBackground | Should -Be $r.K.IPPuck
+    }
 }
 
 Describe 'Puck board: Add Student Absence (no window)' {
@@ -953,7 +982,7 @@ Describe 'Puck board: Add Student Absence (no window)' {
         $abs = @([PSCustomObject]@{ Student = 'Adams, Al'; StartTime = [datetime]'2026-10-20 13:00'; EndTime = [datetime]'2026-10-20 15:30'; Reason = 'Dentist'; InMasterData = $false })
         $s = Get-FaisExportSummary -Ok $true -FillResult $fill -Days @($script:D1) -OutputPath 'C:\o.xlsx' -MasterDataPath 'C:\m.xlsx' -Absences $abs
         $texts = @($s.Lines | ForEach-Object { "$($_.Kind)|$($_.Text)" })
-        $texts | Should -Contain 'Text|MasterData: SimDebt; StudentAbsences: 1 line(s) Add Student Absence could not save'
+        $texts | Should -Contain 'Text|MasterData: SimDebt, DiscontinuityScore; StudentAbsences: 1 line(s) Add Student Absence could not save'
         $texts | Should -Contain 'Head|Student absences'
         $texts | Should -Contain 'Text|Adams, Al: Tue 20 Oct 1300-1530 (Dentist)'
         @((Get-FaisExportSummary -Ok $true -FillResult $fill -Days @($script:D1)).Lines | Where-Object { $_.Text -like '*absence*' }).Count | Should -Be 0

@@ -49,6 +49,10 @@ $script:PBColors = @{
                 HeatClean      = '#BBF7D0'
                 HeatWarn       = '#FDE68A'
                 HeatHard       = '#FECACA'
+                IPPuck         = '#DBEAFE'
+                IPPuckBorder   = '#93C5FD'
+                IPPuckNC       = '#EDE9FE'
+                IPPuckNCBorder = '#C4B5FD'
 }
 
 # Runs queued board commands after the WPF event that asked for them has finished
@@ -111,7 +115,7 @@ function Initialize-PuckBoardWindow {
                 $board = Open-BoardState -Dir $set.BoardDir -Days $allDays -Settings $set
 
                 # Events a previous run planned on these days are plans, not flown events
-                $reset = @(Reset-PlannedCompletions -Students $Data.Students -FromDate $firstDate -SoftWeights $Data.SoftWeights -PrevSchedule @($Data.PrevSchedule))
+                $reset = @(Reset-PlannedCompletions -Students $Data.Students -FromDate $firstDate -SoftWeights $Data.SoftWeights -PrevSchedule @($Data.PrevSchedule) -Instructors @($Data.Instructors))
                 Clear-AssessmentCache
 
                 $xamlPath = Join-Path $PSScriptRoot 'PuckBoard.xaml'
@@ -776,9 +780,10 @@ function New-PBLineVM {
 
                 $stripe = if ($isReturn) { $K.StripeReturn } elseif ($isOB) { $K.StripeOB } elseif ($isSim) { $K.StripeSim } elseif ($Line.SortieType -like '*Day Local*') { $K.StripeDayLocal } else { $K.StripeOther }
 
-                # IP slot
+                # IP slot (a non-counter keeps its puck color on the line)
                 $ipText = [string]$Line.Instructor
-                $ipFg = '#1E3A8A'; $ipBg = '#DBEAFE'; $ipBorder = '#93C5FD'; $ipStyle = 'Normal'
+                $ipColors = Get-PBIPPuckColors (Find-PBInstructor $ipText)
+                $ipFg = '#1E3A8A'; $ipBg = $ipColors.Background; $ipBorder = $ipColors.Border; $ipStyle = 'Normal'
                 $ipTip = 'Drag an IP puck here. Drag it to another line to move it (Ctrl = copy).'
                 if ([string]::IsNullOrWhiteSpace($ipText)) {
                                 $ipFg = '#94A3B8'; $ipBg = '#F8FAFC'; $ipBorder = '#CBD5E1'; $ipStyle = 'Italic'
@@ -923,6 +928,26 @@ function Get-PBRowColors {
                 return @{ Background = $bg; Border = $border }
 }
 
+# An IP puck's fill and outline, in the pool and on a line: non-counters get their own color
+function Get-PBIPPuckColors {
+                param ($Instructor)
+
+                $K = $script:PBColors
+                if ($null -ne $Instructor -and -not (ConvertTo-FaisBool $Instructor.IsCounter -Default $true)) {
+                                return @{ Background = $K.IPPuckNC; Border = $K.IPPuckNCBorder }
+                }
+                return @{ Background = $K.IPPuck; Border = $K.IPPuckBorder }
+}
+
+# The IP with that name (capital letters aside), or $null
+function Find-PBInstructor {
+                param ([string]$Name)
+
+                if ([string]::IsNullOrWhiteSpace($Name)) { return $null }
+                foreach ($ip in @($script:PB.Data.Instructors)) { if ([string]$ip.Name -ieq $Name) { return $ip } }
+                return $null
+}
+
 function Update-PBPools {
                 $day = Get-PBActiveDay
                 $board = $script:PB.Board
@@ -936,13 +961,15 @@ function Update-PBPools {
                                 if ($ipFilter -and ([string]$ip.Name -notlike "*$ipFilter*") -and ([string]$ip.Callsign -notlike "*$ipFilter*")) { continue }
                                 $info = Get-InstructorPuckInfo -Instructor $ip -Board $board -Day $day
                                 $isHeld = ($null -ne $held -and $held.Kind -eq 'IP' -and [string]$held.Name -eq [string]$info.Name)
+                                $colors = Get-PBIPPuckColors $ip
                                 [PSCustomObject]@{
                                                 Name            = $info.Name
                                                 SubText         = ("{0}  {1}" -f $info.Callsign, ($info.Badges -join ' ')).Trim()
                                                 CountText       = "x$($info.Lines)"
                                                 CountVisibility = $(if ($info.Lines -gt 0) { 'Visible' } else { 'Collapsed' })
                                                 ToolTipText     = $(if ($info.Lines -gt 0) { "On $($info.Lines) line(s) this day: $($info.Times -join ', ')" } else { 'Not on any line this day' }) + $clickTip
-                                                BorderBrush     = $(if ($isHeld) { '#1E3A8A' } else { '#93C5FD' })
+                                                Background      = $colors.Background
+                                                BorderBrush     = $(if ($isHeld) { '#1E3A8A' } else { $colors.Border })
                                                 PuckBorderThickness = $(if ($isHeld) { '3' } else { '1' })
                                 }
                 }
@@ -957,7 +984,7 @@ function Update-PBPools {
                                 if ($info.Blocked) { $bg = '#E5E7EB'; $bd = '#9CA3AF' }
                                 elseif ($info.Badges | Where-Object { $_ -like 'U-*' -or $_ -like 'ABS*' }) { $bg = '#FEF3C7'; $bd = '#FCD34D' }
                                 $turnsBrush = if ($info.Turns -ge 3) { '#DC2626' } elseif ($info.Turns -eq 2) { '#D97706' } else { '#16A34A' }
-                                $tip = @("Next: $($info.Next)", ("Sim debt: {0:0.##}" -f $info.SimDebt), "Priority: $($s.Priority)")
+                                $tip = @("Next: $($info.Next)", ("Sim debt: {0:0.##}" -f $info.SimDebt), ("Discontinuity: {0:0.##}" -f $info.Discontinuity), "Priority: $($s.Priority)")
                                 if ($info.Badges.Count -gt 0) { $tip += "Flags: $($info.Badges -join ', ')" }
                                 foreach ($a in $info.Absences) { $tip += "Absent $a" }
                                 $tip += $clickTip.Trim()
@@ -2523,8 +2550,9 @@ function Get-PBColorKey {
                                                 (& $item 'Badge' '#D97706' '2 turns that day' '' 1 '2 turns')
                                                 (& $item 'Badge' '#DC2626' '3 or more turns that day' '' 1 '3 turns')
                                                 (& $item 'None' '' 'CAP: one flight a day, no O&Bs, needs an experienced IP. INTL: international, needs an experienced IP. U-SIM / U-FLT: unsat sim / flight. ABS: absent at those times.')) }
-                                @{ Title = 'IP pucks (left)'; Items = @(
-                                                (& $item 'Pill' '#DBEAFE' 'IP' '#93C5FD')
+                                @{ Title = 'IP pucks (left, and the IP slot on a line)'; Items = @(
+                                                (& $item 'Pill' $K.IPPuck 'Counter IP' $K.IPPuckBorder)
+                                                (& $item 'Pill' $K.IPPuckNC 'Non-counter IP (NC)' $K.IPPuckNCBorder)
                                                 (& $item 'Badge' '#1D4ED8' 'Lines that IP has that day' '' 1 'x2')
                                                 (& $item 'None' '' 'EXP: experienced IP. CHK: check IP. NC: non-counter.')) }
                                 @{ Title = 'Picking and holding'; Items = @(
@@ -2929,7 +2957,7 @@ function Invoke-PBUpdateSyllabi {
                                 Set-PBStatus "Update Syllabi: every syllabus already matches $fileName - nothing was changed." 'Good'
                                 return
                 }
-                $question = "$summary`n`nUpdate these syllabi? Each student's tab in OutputSchedule and their SimDebt in MasterData are saved right away."
+                $question = "$summary`n`nUpdate these syllabi? Each student's tab in OutputSchedule and their SimDebt and DiscontinuityScore in MasterData are saved right away."
                 if ($script:PB.Mode -eq 'Review') { $question += "`n`nThe fill you are reviewing is thrown away (it was made from the old syllabi). Fill again afterwards." }
                 if ((Show-PBMessage -Text $question -Title 'Update Syllabi' -Buttons 'YesNo' -Icon 'Question') -ne 'Yes') {
                                 Set-PBStatus 'Update Syllabi cancelled - nothing was changed.'
@@ -2938,7 +2966,7 @@ function Invoke-PBUpdateSyllabi {
 
                 # A fill made from the old syllabi would put them back on Export
                 Exit-PBReview
-                $memory = @(Invoke-SyllabusUpdate -Targets $plan.Targets -SoftWeights $data.SoftWeights -Now $now)
+                $memory = @(Invoke-SyllabusUpdate -Targets $plan.Targets -SoftWeights $data.SoftWeights -Instructors @($data.Instructors) -Now $now)
                 $prompt = {
                                 param($file)
                                 $text = "$file is still open and FAIS could not close it (a cell may be in edit mode, or someone else has it open).`n`nClose it, then press OK to try again."
@@ -2946,7 +2974,8 @@ function Invoke-PBUpdateSyllabi {
                 }
                 Show-BusyOverlay 'Saving the syllabi...'
                 try {
-                                $saved = Save-SyllabusUpdate -Targets $plan.Targets -MemoryChanges $memory -OutputPath ([string]$data.OutputPath) -MasterDataPath ([string]$data.MasterDataPath) `
+                                $saved = Save-SyllabusUpdate -Targets $plan.Targets -MemoryChanges $memory -DiscontinuityDeltaByName $plan.Discontinuity `
+                                                -OutputPath ([string]$data.OutputPath) -MasterDataPath ([string]$data.MasterDataPath) `
                                                 -SoftWeights $data.SoftWeights -LockedPrompt $prompt -Now $now
                 }
                 finally { Hide-BusyOverlay }
@@ -3601,7 +3630,7 @@ function Invoke-PBAddDay {
 function Reset-PBPlannedFromBoard {
                 if ($script:PB.Board.Days.Count -eq 0) { return }
                 $first = [datetime]::ParseExact($script:PB.Board.Days[0], 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
-                $changed = @(Reset-PlannedCompletions -Students $script:PB.Data.Students -FromDate $first -SoftWeights $script:PB.Data.SoftWeights -PrevSchedule @($script:PB.Data.PrevSchedule))
+                $changed = @(Reset-PlannedCompletions -Students $script:PB.Data.Students -FromDate $first -SoftWeights $script:PB.Data.SoftWeights -PrevSchedule @($script:PB.Data.PrevSchedule) -Instructors @($script:PB.Data.Instructors))
                 if ($changed.Count -gt 0) {
                                 Clear-AssessmentCache
                                 $script:PB.Assess = @{}
@@ -3807,7 +3836,8 @@ UPDATE SYLLABI
   - the Big Board: an entry in an event's columns marks it complete with its IP and date;
     no entry makes sure it is not complete (an event FAIS has planned for later stays).
   Only events in a student's syllabus change. You see what will change first; Yes saves
-  each student's tab in OutputSchedule and their SimDebt in MasterData right away.
+  each student's tab in OutputSchedule and their SimDebt and DiscontinuityScore in
+  MasterData right away.
 
 ADD STUDENT ABSENCE
   Blocks students off for a stretch of time: the same as a line on MasterData's
@@ -4269,7 +4299,7 @@ function Get-FaisExportSummary {
                 & $add 'Path' $OutputPath
                 $unsatCount = @($UnsatChanges.Keys).Count
                 $absenceRows = @($Absences | Where-Object { $null -ne $_ })
-                $mdText = if ($unsatCount -gt 0) { "MasterData: SimDebt, and the unsat / HOLD flags of $unsatCount student(s)" } else { 'MasterData: SimDebt' }
+                $mdText = if ($unsatCount -gt 0) { "MasterData: SimDebt, DiscontinuityScore, and the unsat / HOLD flags of $unsatCount student(s)" } else { 'MasterData: SimDebt, DiscontinuityScore' }
                 if ($absenceRows.Count -gt 0) { $mdText += "; StudentAbsences: $($absenceRows.Count) line(s) Add Student Absence could not save" }
                 & $add 'Text' $mdText
                 & $add 'Path' $MasterDataPath

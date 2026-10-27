@@ -10,7 +10,7 @@
 #      Add Student Absence blocks students off (saved to MasterData's StudentAbsences sheet right away)
 #   4. "Fill this day" or "Fill all days": the scheduler fills the open lines, you review it
 #   5. Export, all or nothing, for the filled days: OutputSchedule.xlsx (MasterSchedule, other exported
-#      days kept, + each student's syllabus tab), SimDebt + cleaned-up unsats to MasterData, and
+#      days kept, + each student's syllabus tab), SimDebt, DiscontinuityScore + cleaned-up unsats to MasterData, and
 #      ATIS.xlsx (one tab per day: flights, then sims). Excel files are saved and closed first.
 #      A window then says what was written (or why nothing was), with buttons to open the files.
 #
@@ -144,7 +144,7 @@ Write-Host ("Loaded {0} students, {1} IPs, {2} formation callsigns from {3}." -f
 $PrevSchedule = @(DownloadPrevSchedule -Students $Students -Instructors $Instructors -excelOutputPath $excelOutputPath)
 # Add Student Absence (the same window as the board's button), on the board's first day
 $AddAbsence = { param($prompt) Invoke-FaisAddAbsence -Students $Students -MasterDataPath $excelInputPath -LockedPrompt $prompt }
-if (-not (Invoke-PreRunMenu -Schedule $PrevSchedule -Students $Students -SoftWeights $SoftWeights -MasterDataPath $excelInputPath -OutputPath $excelOutputPath -AddAbsence $AddAbsence)) {
+if (-not (Invoke-PreRunMenu -Schedule $PrevSchedule -Students $Students -SoftWeights $SoftWeights -Instructors $Instructors -MasterDataPath $excelInputPath -OutputPath $excelOutputPath -AddAbsence $AddAbsence)) {
     return
 }
 

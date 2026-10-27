@@ -303,6 +303,29 @@ Describe 'Update-MasterDataStudents' -Skip:(-not $script:HasExcel) {
                                 $rows[1].SimDebt | Should -Be 2
                 }
 
+                It 'writes DiscontinuityScore under its own heading, added after the last heading when there is none' {
+                                Update-MasterDataStudents -MasterDataPath $script:MD -DiscontinuityByName @{ 'Adams, Al' = 4; 'Cole, Cy' = -1 } 6>$null
+                                (Get-TCell -Path $script:MD -Sheet 'Students' -Row 1 -Col 17) | Should -Be 'DiscontinuityScore'
+                                $rows = @(Import-Excel -Path $script:MD -WorksheetName 'Students')
+                                $rows[0].DiscontinuityScore | Should -Be 4
+                                $rows[1].DiscontinuityScore | Should -BeNullOrEmpty
+                                $rows[2].DiscontinuityScore | Should -Be -1
+                                $rows[0].SimDebt | Should -Be 1
+                                
+                                # Written again: the same column, no second heading
+                                Update-MasterDataStudents -MasterDataPath $script:MD -DiscontinuityByName @{ 'Adams, Al' = 5 } 6>$null
+                                (Get-TCell -Path $script:MD -Sheet 'Students' -Row 1 -Col 18) | Should -BeNullOrEmpty
+                                @(Import-Excel -Path $script:MD -WorksheetName 'Students')[0].DiscontinuityScore | Should -Be 5
+                }
+
+                It 'moves DiscontinuityScore by -DiscontinuityDeltaByName, and leaves a blank cell blank' {
+                                Update-MasterDataStudents -MasterDataPath $script:MD -DiscontinuityByName @{ 'Adams, Al' = 4 } 6>$null
+                                Update-MasterDataStudents -MasterDataPath $script:MD -DiscontinuityDeltaByName @{ 'Adams, Al' = -1.5; 'Brown, Bea' = 3 } 6>$null
+                                $rows = @(Import-Excel -Path $script:MD -WorksheetName 'Students')
+                                $rows[0].DiscontinuityScore | Should -Be 2.5
+                                $rows[1].DiscontinuityScore | Should -BeNullOrEmpty
+                }
+
                 It 'warns about names it can''t find and still writes the rest' {
                                 $w = Update-MasterDataStudents -MasterDataPath $script:MD -SimDebtByName @{ 'Adams, Al' = 9; 'Nobody, No' = 1 } 6>$null 3>&1
                                 ($w | Out-String) | Should -Match 'Nobody, No'
@@ -548,6 +571,23 @@ Describe 'IngestData' -Skip:(-not $script:HasExcel) {
                                 $lee.UnsatSimType | Should -Be ''
                                 $lee.UnsatFlightInMasterData | Should -BeTrue
                                 $adams.SimDebt | Should -Be 1.5
+                }
+
+                It 'counts DiscontinuityScore from the syllabus when MasterData has no DiscontinuityScore column' {
+                                (Get-IStudent 'Adams, Al').DiscontinuityScore | Should -Be 2     # FT5001 with Jones: a 1-string and a counter
+                                (Get-IStudent 'Lee, Ann').DiscontinuityScore | Should -Be 0
+                }
+
+                It 'reads DiscontinuityScore from MasterData, counting only the blank cells' {
+                                $md = Join-Path $TestDrive 'Ingest-Disc.xlsx'
+                                $a = New-TStudentRow -Name 'Adams, Al' -Key 1
+                                $a | Add-Member -NotePropertyName DiscontinuityScore -NotePropertyValue $null
+                                $l = New-TStudentRow -Name 'Lee, Ann' -Key 2
+                                $l | Add-Member -NotePropertyName DiscontinuityScore -NotePropertyValue 9
+                                New-TMasterData -Path $md -Students @($a, $l)
+                                $ing = IngestData -excelInputPath $md -excelOutputPath $script:IOut 3>$null 6>$null
+                                ($ing.Students | Where-Object { $_.Name -eq 'Adams, Al' }).DiscontinuityScore | Should -Be 2
+                                ($ing.Students | Where-Object { $_.Name -eq 'Lee, Ann' }).DiscontinuityScore | Should -Be 9
                 }
 }
 

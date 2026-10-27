@@ -13,7 +13,7 @@ FAIS CATALOG - every source file in one text file
 #      Add Student Absence blocks students off (saved to MasterData's StudentAbsences sheet right away)
 #   4. "Fill this day" or "Fill all days": the scheduler fills the open lines, you review it
 #   5. Export, all or nothing, for the filled days: OutputSchedule.xlsx (MasterSchedule, other exported
-#      days kept, + each student's syllabus tab), SimDebt + cleaned-up unsats to MasterData, and
+#      days kept, + each student's syllabus tab), SimDebt, DiscontinuityScore + cleaned-up unsats to MasterData, and
 #      ATIS.xlsx (one tab per day: flights, then sims). Excel files are saved and closed first.
 #      A window then says what was written (or why nothing was), with buttons to open the files.
 #
@@ -147,7 +147,7 @@ Write-Host ("Loaded {0} students, {1} IPs, {2} formation callsigns from {3}." -f
 $PrevSchedule = @(DownloadPrevSchedule -Students $Students -Instructors $Instructors -excelOutputPath $excelOutputPath)
 # Add Student Absence (the same window as the board's button), on the board's first day
 $AddAbsence = { param($prompt) Invoke-FaisAddAbsence -Students $Students -MasterDataPath $excelInputPath -LockedPrompt $prompt }
-if (-not (Invoke-PreRunMenu -Schedule $PrevSchedule -Students $Students -SoftWeights $SoftWeights -MasterDataPath $excelInputPath -OutputPath $excelOutputPath -AddAbsence $AddAbsence)) {
+if (-not (Invoke-PreRunMenu -Schedule $PrevSchedule -Students $Students -SoftWeights $SoftWeights -Instructors $Instructors -MasterDataPath $excelInputPath -OutputPath $excelOutputPath -AddAbsence $AddAbsence)) {
     return
 }
 
@@ -262,7 +262,7 @@ catch { Write-Host "Could not show the export result window: $($_.Exception.Mess
 
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
             <Button x:Name="AddButton" Content="Add absence" Padding="18,4" Margin="3,0" FontWeight="Bold" IsDefault="True"/>
-            <Button x:Name="CancelButton" Content="Cancel" Padding="10,3" Margin="3,0" IsCancel="True"/>
+            <Button x:Name="CancelButton" Content="Cancel" Padding="10,4" Margin="3,0" IsCancel="True"/>
         </StackPanel>
 
         <!-- Right: every student -->
@@ -270,7 +270,7 @@ catch { Write-Host "Could not show the export result window: $($_.Exception.Mess
                 Padding="6" Tag="AbsencePool" AllowDrop="True">
             <DockPanel>
                 <TextBlock DockPanel.Dock="Top" Text="STUDENTS" FontWeight="Bold" Foreground="#14532D" Margin="2,0,0,4"/>
-                <TextBox DockPanel.Dock="Top" x:Name="SearchBox" Margin="0,0,0,4" Padding="3" ToolTip="Filter students by name"/>
+                <TextBox DockPanel.Dock="Top" x:Name="SearchBox" Height="26" Margin="0,0,0,4" Padding="3,0" VerticalContentAlignment="Center" ToolTip="Filter students by name"/>
                 <TextBlock DockPanel.Dock="Top" FontSize="10" Foreground="#64748B" TextWrapping="Wrap" Margin="2,0,0,6"
                            Text="Drag a student into the box, or click them and then click the box. Double-click adds them straight away."/>
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -301,9 +301,9 @@ catch { Write-Host "Could not show the export result window: $($_.Exception.Mess
                 </Border>
                 <DockPanel Margin="0,4,0,0">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                        <Button x:Name="PasteButton" Content="Paste names" Padding="10,2" Margin="3,0"
+                        <Button x:Name="PasteButton" Content="Paste names" Padding="10,4" Margin="3,0"
                                 ToolTip="Add the students named in what you copied: one name per line or cell (Ctrl+V does the same)"/>
-                        <Button x:Name="ClearButton" Content="Clear" Padding="10,2" Margin="3,0,0,0" ToolTip="Take every student out of the box"/>
+                        <Button x:Name="ClearButton" Content="Clear" Padding="10,4" Margin="3,0,0,0" ToolTip="Take every student out of the box"/>
                     </StackPanel>
                     <TextBlock x:Name="HoldText" TextWrapping="Wrap" Foreground="#1E3A8A" FontWeight="SemiBold" VerticalAlignment="Center"/>
                 </DockPanel>
@@ -322,27 +322,27 @@ catch { Write-Host "Could not show the export result window: $($_.Exception.Mess
                     </Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0" Text="Day:" VerticalAlignment="Center"/>
-                    <DatePicker x:Name="DayPicker" Grid.Row="0" Grid.Column="1" Width="150" HorizontalAlignment="Left" Margin="0,3"
+                    <DatePicker x:Name="DayPicker" Grid.Row="0" Grid.Column="1" Width="150" Height="26" HorizontalAlignment="Left" VerticalContentAlignment="Center" Margin="0,3"
                                 ToolTip="The day the absence starts"/>
 
                     <TextBlock Grid.Row="1" Text="From:" VerticalAlignment="Center"/>
                     <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="0,3">
-                        <TextBox x:Name="FromBox" Width="90" FontFamily="Consolas" FontSize="13" Padding="3,2" MaxLength="12"
+                        <TextBox x:Name="FromBox" Width="90" Height="26" FontFamily="Consolas" FontSize="13" Padding="3,0" VerticalContentAlignment="Center" MaxLength="12"
                                  ToolTip="24-hour time (0730, 1530) or 12-hour time with AM or PM (0730 AM, 0330 PM)"/>
                         <TextBlock Text="e.g. 0730, 1530 or 0330 PM" Foreground="#94A3B8" VerticalAlignment="Center" Margin="8,0,0,0"/>
                     </StackPanel>
 
                     <TextBlock Grid.Row="2" Text="To:" VerticalAlignment="Center"/>
                     <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="0,3">
-                        <TextBox x:Name="ToBox" Width="90" FontFamily="Consolas" FontSize="13" Padding="3,2" MaxLength="12"
+                        <TextBox x:Name="ToBox" Width="90" Height="26" FontFamily="Consolas" FontSize="13" Padding="3,0" VerticalContentAlignment="Center" MaxLength="12"
                                  ToolTip="24-hour time (1130, 1700) or 12-hour time with AM or PM (1130 AM, 0500 PM)"/>
                         <TextBlock Text="on" VerticalAlignment="Center" Margin="10,0,6,0"/>
-                        <DatePicker x:Name="EndDayPicker" Width="150"
+                        <DatePicker x:Name="EndDayPicker" Width="150" Height="26" VerticalContentAlignment="Center"
                                     ToolTip="The same day as the start, unless the absence runs past midnight or over several days"/>
                     </StackPanel>
 
                     <TextBlock Grid.Row="3" Text="Reason:" VerticalAlignment="Center"/>
-                    <TextBox x:Name="ReasonBox" Grid.Row="3" Grid.Column="1" Padding="3,2" Margin="0,3" MaxLength="120"
+                    <TextBox x:Name="ReasonBox" Grid.Row="3" Grid.Column="1" Height="26" Padding="3,0" VerticalContentAlignment="Center" Margin="0,3" MaxLength="120"
                              ToolTip="Optional, e.g. Dentist, Leave, Medical. It shows on the board and in the rule flag."/>
                 </Grid>
 
@@ -408,13 +408,15 @@ function Get-BoardEvalRows {
 
 # A copy of the student as they would be on -TargetRow's day: their other pins earlier
 # than the target are flown (marked complete), later ones hold the time as reservations.
+# -NoDiscontinuity leaves the copy's DiscontinuityScore as it is (nothing will be scored).
 function Get-BoardStudentContext {
                 param (
                                 [array]$Rows,
                                 $Student,
                                 $TargetRow,
                                 [string[]]$ExcludeLineIds = @(),
-                                $Data
+                                $Data,
+                                [switch]$NoDiscontinuity
                 )
 
                 $clone = Copy-StudentForEval $Student
@@ -437,7 +439,7 @@ function Get-BoardStudentContext {
                                                                 -FormLookAhead (Get-Weight $Data.SoftWeights 'FormLookAhead' 22)
                                                 $m = $pick.Mission
                                                 if ($null -ne $m -and -not (Test-MissionComplete $m)) {
-                                                                [void](Complete-StudentMission -Student $clone -Mission $m -InstructorName $ipName -ETD $pin.ETD -SoftWeights $Data.SoftWeights -SortieType ([string]$pin.SortieType))
+                                                                [void](Complete-StudentMission -Student $clone -Mission $m -InstructorName $ipName -ETD $pin.ETD -SoftWeights $Data.SoftWeights -SortieType ([string]$pin.SortieType) -Instructors @($Data.Instructors) -NoDiscontinuity:$NoDiscontinuity)
                                                 }
                                                 else {
                                                                 # No event could be flown: the student still occupies that time
@@ -445,7 +447,7 @@ function Get-BoardStudentContext {
                                                 }
                                                 if ($null -ne $ret) {
                                                                 $rm = @(Get-ValidOptedEvents -Student $clone -Sortie $ret -NoLookahead) | Select-Object -First 1
-                                                                if ($null -ne $m -and $null -ne $rm) { [void](Complete-StudentMission -Student $clone -Mission $rm -InstructorName $ipName -ETD $ret.ETD -SoftWeights $Data.SoftWeights -SortieType ([string]$ret.SortieType)) }
+                                                                if ($null -ne $m -and $null -ne $rm) { [void](Complete-StudentMission -Student $clone -Mission $rm -InstructorName $ipName -ETD $ret.ETD -SoftWeights $Data.SoftWeights -SortieType ([string]$ret.SortieType) -Instructors @($Data.Instructors) -NoDiscontinuity:$NoDiscontinuity) }
                                                                 else { Add-StudentReservation -Student $clone -LineId ([string]$ret.BoardLineId) -ETD $ret.ETD -SortieType ([string]$ret.SortieType) -Instructor $ipName }
                                                 }
                                 }
@@ -529,7 +531,7 @@ function Get-PlacementAssessment {
                 $probe.Student = $null
                 $probe.Mission = $null
 
-                $clone = Get-BoardStudentContext -Rows $rows -Student $student -TargetRow $probe -ExcludeLineIds $ExcludeLineIds -Data $Data
+                $clone = Get-BoardStudentContext -Rows $rows -Student $student -TargetRow $probe -ExcludeLineIds $ExcludeLineIds -Data $Data -NoDiscontinuity:$Quick
                 $formLookAhead = Get-Weight $Data.SoftWeights 'FormLookAhead' 22
                 if (-not $script:AssessCache.Lines.ContainsKey($LineId)) { $script:AssessCache.Lines[$LineId] = @{} }
                 $lineCtx = $script:AssessCache.Lines[$LineId]
@@ -820,15 +822,19 @@ function Get-StudentPuckInfo {
                 $next = if ($opted.Count -gt 0) { ((@($opted | Select-Object -First 2 | ForEach-Object { $_.Mission })) -join ' / ') } else { 'complete' }
                 $debt = 0.0
                 if ($null -ne $Student.SimDebt -and [string]$Student.SimDebt -ne '') { [void][double]::TryParse([string]$Student.SimDebt, [ref]$debt) }
+                $disc = 0.0
+                $discRaw = Get-OptionalProperty $Student 'DiscontinuityScore' $null
+                if ($null -ne $discRaw -and [string]$discRaw -ne '') { [void][double]::TryParse([string]$discRaw, [ref]$disc) }
 
                 return [PSCustomObject]@{
-                                Name     = [string]$Student.Name
-                                Badges   = $badges.ToArray()
-                                Absences = $absText.ToArray()
-                                Turns    = $turns
-                                Next     = $next
-                                SimDebt  = $debt
-                                Blocked  = ((ConvertTo-FaisBool $Student.OnHold))
+                                Name          = [string]$Student.Name
+                                Badges        = $badges.ToArray()
+                                Absences      = $absText.ToArray()
+                                Turns         = $turns
+                                Next          = $next
+                                SimDebt       = $debt
+                                Discontinuity = $disc
+                                Blocked       = ((ConvertTo-FaisBool $Student.OnHold))
                 }
 }
 
@@ -2589,18 +2595,18 @@ function Get-NextFlyingDay {
 
             <TextBlock Grid.Row="0" Text="Start time:" VerticalAlignment="Center"/>
             <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Margin="0,3">
-                <TextBox x:Name="StartTimeBox" Width="70" FontFamily="Consolas" FontSize="13" Padding="3,2"/>
+                <TextBox x:Name="StartTimeBox" Width="100" Height="26" FontFamily="Consolas" FontSize="13" Padding="3,0" VerticalContentAlignment="Center"/>
                 <TextBlock Text="e.g. 0730" Foreground="#94A3B8" VerticalAlignment="Center" Margin="8,0,0,0"/>
             </StackPanel>
 
             <TextBlock Grid.Row="1" Text="Number of lines:" VerticalAlignment="Center"/>
-            <TextBox x:Name="CountBox" Grid.Row="1" Grid.Column="1" Width="70" HorizontalAlignment="Left" FontFamily="Consolas" FontSize="13" Padding="3,2" Margin="0,3"/>
+            <TextBox x:Name="CountBox" Grid.Row="1" Grid.Column="1" Width="100" Height="26" HorizontalAlignment="Left" FontFamily="Consolas" FontSize="13" Padding="3,0" VerticalContentAlignment="Center" Margin="0,3"/>
 
             <TextBlock Grid.Row="2" Text="Minutes between lines:" VerticalAlignment="Center"/>
-            <TextBox x:Name="IntervalBox" Grid.Row="2" Grid.Column="1" Width="70" HorizontalAlignment="Left" FontFamily="Consolas" FontSize="13" Padding="3,2" Margin="0,3"/>
+            <TextBox x:Name="IntervalBox" Grid.Row="2" Grid.Column="1" Width="100" Height="26" HorizontalAlignment="Left" FontFamily="Consolas" FontSize="13" Padding="3,0" VerticalContentAlignment="Center" Margin="0,3"/>
 
             <TextBlock Grid.Row="3" Text="Line type:" VerticalAlignment="Center"/>
-            <ComboBox x:Name="TypeCombo" Grid.Row="3" Grid.Column="1" Width="140" HorizontalAlignment="Left" Margin="0,3"/>
+            <ComboBox x:Name="TypeCombo" Grid.Row="3" Grid.Column="1" Width="100" Height="26" HorizontalAlignment="Left" VerticalContentAlignment="Center" Margin="0,3"/>
         </Grid>
 
         <Border Background="White" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,12,0,0">
@@ -2609,7 +2615,7 @@ function Get-NextFlyingDay {
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
             <Button x:Name="AddButton" Content="Add lines" Padding="18,4" Margin="3,0" FontWeight="Bold" IsDefault="True"/>
-            <Button x:Name="CancelButton" Content="Cancel" Padding="10,3" Margin="3,0" IsCancel="True"/>
+            <Button x:Name="CancelButton" Content="Cancel" Padding="10,4" Margin="3,0" IsCancel="True"/>
         </StackPanel>
     </StackPanel>
 </Window>
@@ -2726,6 +2732,11 @@ function IngestData {
 
                                                 $debt = 0.0
                                                 if ($null -ne $Student.SimDebt -and [string]$Student.SimDebt -ne '') { [void][double]::TryParse([string]$Student.SimDebt, [ref]$debt) }
+                                                # Blank (or no DiscontinuityScore column): counted from the syllabus once SoftWeights is read
+                                                $disc = $null
+                                                $discNum = 0.0
+                                                if ($null -ne $Student.DiscontinuityScore -and [string]$Student.DiscontinuityScore -ne '' -and
+                                                                [double]::TryParse([string]$Student.DiscontinuityScore, [ref]$discNum)) { $disc = $discNum }
                                                 $priority = 0.0
                                                 if ($null -ne $Student.Priority -and [string]$Student.Priority -ne '') { [void][double]::TryParse([string]$Student.Priority, [ref]$priority) }
 
@@ -2750,6 +2761,7 @@ function IngestData {
                                                                 OnHold                  = $onHold
                                                                 OnHoldInMasterData      = $onHold
                                                                 SimDebt                 = $debt
+                                                                DiscontinuityScore      = $disc
                                                                 Syllabus                = $cleanSyllabus
                                                                 Absences                = @()
                                                                 Reservations            = @()
@@ -2823,12 +2835,19 @@ function IngestData {
                                                 TransSimRatio     = $weightRow.TransSimRatio
                                                 FormSimRatio      = $weightRow.FormSimRatio
                                                 SimStopMult       = $weightRow.SimStopMult
+                                                Disc1String       = $weightRow.Disc1String
+                                                DiscCounter       = $weightRow.DiscCounter
+                                                Disc3PlusString   = $weightRow.Disc3PlusString
                                 }
                                 $SoftWeights.TransSimRatio = [double]$SoftWeights.TransSimRatio * [double]$SoftWeights.SimStopMult
                                 $SoftWeights.FormSimRatio = [double]$SoftWeights.FormSimRatio * [double]$SoftWeights.SimStopMult
                 }
                 catch {
                                 Write-Host "An error occurred while loading Soft Weights: $($_.Exception.Message)" -ForegroundColor Yellow
+                }
+                $counted = @(Initialize-StudentDiscontinuity -Students $Students -Instructors $Instructors -SoftWeights $SoftWeights)
+                if ($counted.Count -gt 0) {
+                                Write-Host "DiscontinuityScore is blank in MasterData for $($counted.Count) student(s): counted from their syllabus (Export writes it)." -ForegroundColor DarkGray
                 }
 
                 # ------------------------------------------------------------------
@@ -4349,10 +4368,13 @@ function Format-TabEtd {
 
 # ==========================================
 # Writes student values into the MasterData Students sheet, matched by SPName (the column
-# headed SPName, else B): SimDebt into the column headed SimDebt (else P), UnsatSim /
-# UnsatFlight into the columns with those headings.
+# headed SPName, else B): SimDebt into the column headed SimDebt (else P), DiscontinuityScore
+# into the column headed DiscontinuityScore (added after the last heading when there is none),
+# UnsatSim / UnsatFlight into the columns with those headings.
 # Only the cells passed in change. Throws when MasterData can't be written.
 #   -SimDebtDeltaByName: name -> amount added to the SimDebt already there (Update Syllabi)
+#   -DiscontinuityDeltaByName: the same for DiscontinuityScore. A blank cell stays blank: FAIS
+#    counts it from the syllabus at the next start
 #   -FlagsByName: name -> @{ UnsatSim = $true/$false; UnsatFlight = $true/$false; OnHold = $true/$false } (any of the keys)
 # ==========================================
 function Update-MasterDataStudents {
@@ -4360,11 +4382,14 @@ function Update-MasterDataStudents {
                                 [Parameter(Mandatory)] [string]$MasterDataPath,
                                 [hashtable]$SimDebtByName = @{},
                                 [hashtable]$SimDebtDeltaByName = @{},
+                                [hashtable]$DiscontinuityByName = @{},
+                                [hashtable]$DiscontinuityDeltaByName = @{},
                                 [hashtable]$FlagsByName = @{}
                 )
 
                 if (-not (Test-Path -LiteralPath $MasterDataPath)) { throw "MasterData.xlsx not found at: $MasterDataPath" }
-                if ($SimDebtByName.Count -eq 0 -and $SimDebtDeltaByName.Count -eq 0 -and $FlagsByName.Count -eq 0) { return }
+                if ($SimDebtByName.Count -eq 0 -and $SimDebtDeltaByName.Count -eq 0 -and $DiscontinuityByName.Count -eq 0 -and
+                                $DiscontinuityDeltaByName.Count -eq 0 -and $FlagsByName.Count -eq 0) { return }
 
                 $package = $null
                 try {
@@ -4376,6 +4401,7 @@ function Update-MasterDataStudents {
                                 # when those headings are missing
                                 $nameCol = 2
                                 $debtCol = 16
+                                $discCol = 0
                                 $flagCol = @{}
                                 $lastCol = if ($null -ne $ws.Dimension) { $ws.Dimension.End.Column } else { 0 }
                                 $seenName = $false; $seenDebt = $false
@@ -4384,6 +4410,11 @@ function Update-MasterDataStudents {
                                                 if ($heading -in @('UnsatSim', 'UnsatFlight', 'OnHold') -and -not $flagCol.ContainsKey($heading)) { $flagCol[$heading] = $c }
                                                 elseif ($heading -ieq 'SPName' -and -not $seenName) { $nameCol = $c; $seenName = $true }
                                                 elseif ($heading -ieq 'SimDebt' -and -not $seenDebt) { $debtCol = $c; $seenDebt = $true }
+                                                elseif ($heading -ieq 'DiscontinuityScore' -and $discCol -eq 0) { $discCol = $c }
+                                }
+                                if ($discCol -eq 0 -and $DiscontinuityByName.Count -gt 0) {
+                                                $discCol = [math]::Max($lastCol, $debtCol) + 1
+                                                $ws.Cells[1, $discCol].Value = 'DiscontinuityScore'
                                 }
                                 foreach ($flags in $FlagsByName.Values) {
                                                 foreach ($key in $flags.Keys) {
@@ -4410,6 +4441,19 @@ function Update-MasterDataStudents {
                                                                 $ws.Cells[$row, $debtCol].Value = [math]::Round($current + [double]$SimDebtDeltaByName[$studentName], 2)
                                                                 $found[$studentName] = $true
                                                 }
+                                                if ($DiscontinuityByName.ContainsKey($studentName)) {
+                                                                $ws.Cells[$row, $discCol].Value = [double]$DiscontinuityByName[$studentName]
+                                                                $found[$studentName] = $true
+                                                }
+                                                elseif ($DiscontinuityDeltaByName.ContainsKey($studentName)) {
+                                                                $old = if ($discCol -gt 0) { $ws.Cells[$row, $discCol].Value } else { $null }
+                                                                if ($null -ne $old -and ([string]$old).Trim() -ne '') {
+                                                                                $current = 0.0
+                                                                                try { $current = [double]$old } catch { [void][double]::TryParse([string]$old, [ref]$current) }
+                                                                                $ws.Cells[$row, $discCol].Value = [math]::Round($current + [double]$DiscontinuityDeltaByName[$studentName], 2)
+                                                                }
+                                                                $found[$studentName] = $true
+                                                }
                                                 if ($FlagsByName.ContainsKey($studentName)) {
                                                                 $flags = $FlagsByName[$studentName]
                                                                 foreach ($key in $flags.Keys) { $ws.Cells[$row, $flagCol[$key]].Value = [bool]$flags[$key] }
@@ -4421,12 +4465,14 @@ function Update-MasterDataStudents {
                                 Close-ExcelPackage -ExcelPackage $package
                                 $package = $null
 
-                                $missing = @(@($SimDebtByName.Keys) + @($SimDebtDeltaByName.Keys) + @($FlagsByName.Keys) | Sort-Object -Unique | Where-Object { -not $found.ContainsKey($_) })
+                                $missing = @(@($SimDebtByName.Keys) + @($SimDebtDeltaByName.Keys) + @($DiscontinuityByName.Keys) + @($DiscontinuityDeltaByName.Keys) + @($FlagsByName.Keys) |
+                                                Sort-Object -Unique | Where-Object { -not $found.ContainsKey($_) })
                                 if ($missing.Count -gt 0) {
                                                 Write-Warning "Not found in the SPName column of the MasterData Students sheet (above the first blank name), so nothing was written for: $($missing -join '; ')"
                                 }
                                 $debtNames = @(@($SimDebtByName.Keys) + @($SimDebtDeltaByName.Keys) | Sort-Object -Unique | Where-Object { $found.ContainsKey($_) })
-                                Write-Host ("MasterData updated: SimDebt for {0} student(s), unsat / HOLD flags for {1}." -f $debtNames.Count, @($FlagsByName.Keys | Where-Object { $found.ContainsKey($_) }).Count) -ForegroundColor Green
+                                $discNames = @(@($DiscontinuityByName.Keys) + @($DiscontinuityDeltaByName.Keys) | Sort-Object -Unique | Where-Object { $found.ContainsKey($_) })
+                                Write-Host ("MasterData updated: SimDebt for {0} student(s), DiscontinuityScore for {1}, unsat / HOLD flags for {2}." -f $debtNames.Count, $discNames.Count, @($FlagsByName.Keys | Where-Object { $found.ContainsKey($_) }).Count) -ForegroundColor Green
                 }
                 catch {
                                 if ($null -ne $package) { Close-ExcelPackage -ExcelPackage $package -NoSave }
@@ -4854,7 +4900,7 @@ function Get-OutputSetting {
 }
 
 # Writes everything a run produces, or nothing: MasterSchedule, each student's syllabus
-# tab, SimDebt, the unsat flags that changed and the String Tracker to MasterData, ATIS, then the optional Teams
+# tab, SimDebt, DiscontinuityScore, the unsat flags that changed and the String Tracker to MasterData, ATIS, then the optional Teams
 # copy. If any write fails, all of them are put back as they were.
 # Only the days that were filled (-Days; default: every day in the fill) are written:
 # MasterSchedule keeps the other days already exported (from today on, plus KeepPastDays),
@@ -4880,8 +4926,12 @@ function Export-FaisOutput {
                 $rows = @($allRows | Where-Object { $Days -contains (Get-ExportRowDay $_) })
 
                 $debts = @{}
+                $discs = @{}
                 foreach ($s in $FillResult.Students) {
-                                if (-not [string]::IsNullOrWhiteSpace([string]$s.Name)) { $debts[([string]$s.Name).Trim()] = [double]$s.SimDebt }
+                                if ([string]::IsNullOrWhiteSpace([string]$s.Name)) { continue }
+                                $debts[([string]$s.Name).Trim()] = [double]$s.SimDebt
+                                $disc = Get-OptionalProperty $s 'DiscontinuityScore' $null
+                                if ($null -ne $disc -and [string]$disc -ne '') { $discs[([string]$s.Name).Trim()] = [double]$disc }
                 }
                 $flags = Get-UnsatFlagUpdates -Students $FillResult.Students
                 $absences = @(Get-PendingStudentAbsences -Students $FillResult.Students)
@@ -4924,7 +4974,7 @@ function Export-FaisOutput {
                                                                 Export-FormattedMasterSchedule -ScheduleData $merged -FilePath $OutputPath -WorksheetName 'MasterSchedule'
                                                                 Export-StudentSyllabusTabs -Students $FillResult.Students -FilePath $OutputPath
                                                                 Set-MasterScheduleFirst -FilePath $OutputPath
-                                                                Update-MasterDataStudents -MasterDataPath $MasterDataPath -SimDebtByName $debts -FlagsByName $flags
+                                                                Update-MasterDataStudents -MasterDataPath $MasterDataPath -SimDebtByName $debts -DiscontinuityByName $discs -FlagsByName $flags
                                                                 Update-StringTracker -MasterDataPath $MasterDataPath -Students $FillResult.Students -Instructors $Instructors
                                                                 if ($absences.Count -gt 0) { Add-MasterDataAbsences -MasterDataPath $MasterDataPath -Absences $absences }
                                                                 if ($writeAtis) { Export-AtisWorkbook -ScheduleData $rows -FilePath $AtisPath }
@@ -5286,16 +5336,16 @@ function Open-FaisWorkbooks {
         <TextBlock DockPanel.Dock="Top" x:Name="SourceInfoText" TextWrapping="Wrap" Foreground="#475569" Margin="0,2,0,8"/>
 
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
-            <Button x:Name="RefreshButton" Content="Read the file again" Padding="10,3" Margin="3,0"/>
+            <Button x:Name="RefreshButton" Content="Read the file again" Padding="10,4" Margin="3,0"/>
             <Button x:Name="LoadButton" Content="Load" Padding="18,4" Margin="3,0" FontWeight="Bold" IsDefault="True"/>
-            <Button x:Name="CancelButton" Content="Cancel" Padding="10,3" Margin="3,0" IsCancel="True"/>
+            <Button x:Name="CancelButton" Content="Cancel" Padding="10,4" Margin="3,0" IsCancel="True"/>
         </StackPanel>
 
         <Border DockPanel.Dock="Bottom" Background="White" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,10,0,0">
             <StackPanel>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                     <TextBlock Text="Put the lines on:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <DatePicker x:Name="TargetDayPicker" Width="140"/>
+                    <DatePicker x:Name="TargetDayPicker" Width="140" Height="26" VerticalContentAlignment="Center"/>
                     <TextBlock x:Name="TargetInfoText" VerticalAlignment="Center" Foreground="#64748B" Margin="10,0,0,0"/>
                 </StackPanel>
                 <RadioButton x:Name="ReplaceRadio" GroupName="Mode" Content="Replace that day's lines on the board" IsChecked="True" Margin="0,0,0,2"/>
@@ -5610,18 +5660,19 @@ function Process-HookedEvents {
 
 
 # ========================================================================================
-# INCOMPLETE: the event goes back to not-complete and only its sim debt is backed out
-# Returns the students that changed
+# INCOMPLETE: the event goes back to not-complete and only its sim debt and discontinuity
+# are backed out (-Instructors says who the non-counters are). Returns the students that changed
 # ========================================================================================
 function Process-IncompleteEvents {
                 param(
                                 [Parameter(Mandatory)] $SelectedItems,
                                 [Parameter(Mandatory)] $Students,
-                                $SoftWeights
+                                $SoftWeights,
+                                [array]$Instructors = @()
                 )
 
                 if ($null -eq $SoftWeights) {
-                                Write-Warning "SoftWeights was not provided. Incomplete events can be processed, but SimDebt will not change."
+                                Write-Warning "SoftWeights was not provided. Incomplete events can be processed, but SimDebt and DiscontinuityScore will not change."
                 }
 
                 $updatedStudents = New-Object System.Collections.Generic.List[object]
@@ -5647,8 +5698,8 @@ function Process-IncompleteEvents {
                                                 if ($null -eq $syllabusMission) {
                                                                 Write-Warning "Mission '$missionName' was not found in $studentName's syllabus. SimDebt was not changed."
                                                 }
-                                                elseif (Undo-StudentMission -Student $matchedStudent -Mission $syllabusMission -SoftWeights $SoftWeights) {
-                                                                Write-Host "$missionName is incomplete for $($matchedStudent.Name); SimDebt is now $($matchedStudent.SimDebt)." -ForegroundColor Cyan
+                                                elseif (Undo-StudentMission -Student $matchedStudent -Mission $syllabusMission -SoftWeights $SoftWeights -Instructors $Instructors) {
+                                                                Write-Host "$missionName is incomplete for $($matchedStudent.Name); SimDebt is now $($matchedStudent.SimDebt), DiscontinuityScore $($matchedStudent.DiscontinuityScore)." -ForegroundColor Cyan
                                                                 if (-not $updatedStudents.Contains($matchedStudent)) { $updatedStudents.Add($matchedStudent) }
                                                 }
                                                 else {
@@ -5690,9 +5741,9 @@ function Update-StudentHoldStatus {
 
 
 # ========================================================================================
-# Saves a pre-run change right away, both files or neither: SimDebt / unsat flags to
-# MasterData and, for incomplete events, those events' cells on the students' tabs in
-# OutputSchedule (so the two files agree even if the board is closed without exporting).
+# Saves a pre-run change right away, both files or neither: SimDebt / DiscontinuityScore /
+# unsat flags to MasterData and, for incomplete events, those events' cells on the students'
+# tabs in OutputSchedule (so the two files agree even if the board is closed without exporting).
 # A file open in Excel is saved and closed for the write, then opened again.
 # A change that can't be saved stays in memory and goes out with the Export.
 # Returns $true when saved.
@@ -5702,6 +5753,7 @@ function Save-PreRunChanges {
                                 [string]$MasterDataPath,
                                 [string]$OutputPath,
                                 [hashtable]$SimDebtByName = @{},
+                                [hashtable]$DiscontinuityByName = @{},
                                 [hashtable]$FlagsByName = @{},
                                 [array]$TabStudents = @(),
                                 [scriptblock]$LockedPrompt
@@ -5725,7 +5777,7 @@ function Save-PreRunChanges {
 
                                 try {
                                                 Invoke-WithFileBackup -Files $toSave -Action {
-                                                                Update-MasterDataStudents -MasterDataPath $MasterDataPath -SimDebtByName $SimDebtByName -FlagsByName $FlagsByName
+                                                                Update-MasterDataStudents -MasterDataPath $MasterDataPath -SimDebtByName $SimDebtByName -DiscontinuityByName $DiscontinuityByName -FlagsByName $FlagsByName
                                                                 if ($writeTabs) { Export-StudentSyllabusTabs -Students $TabStudents -FilePath $OutputPath }
                                                 }
                                                 return $true
@@ -5754,7 +5806,8 @@ function Invoke-PreRunMenu {
                                 [string]$MasterDataPath,
                                 [string]$OutputPath,
                                 [scriptblock]$LockedPrompt,
-                                [scriptblock]$AddAbsence
+                                [scriptblock]$AddAbsence,
+                                [array]$Instructors = @()
                 )
 
                 if ($null -eq $LockedPrompt) {
@@ -5796,19 +5849,24 @@ function Invoke-PreRunMenu {
                                 elseif ($UserChoice -eq "Incomplete") {
                                                 $SelectedItems = Show-EventSelectionMenu -Schedule $Schedule -Title "Select Incomplete Events"
                                                 if ($null -ne $SelectedItems) {
-                                                                $updatedStudents = @(Process-IncompleteEvents -SelectedItems $SelectedItems -Students $Students -SoftWeights $SoftWeights)
+                                                                $updatedStudents = @(Process-IncompleteEvents -SelectedItems $SelectedItems -Students $Students -SoftWeights $SoftWeights -Instructors $Instructors)
 
-                                                                # SimDebt and those events' tab cells, for the students changed by this selection
+                                                                # SimDebt, DiscontinuityScore and those events' tab cells, for the students changed by this selection
                                                                 $simDebtByName = @{}
+                                                                $discByName = @{}
                                                                 foreach ($student in $updatedStudents) {
                                                                                 if (-not [string]::IsNullOrWhiteSpace([string]$student.Name) -and $null -ne $student.SimDebt) {
                                                                                                 $simDebtByName[([string]$student.Name).Trim()] = [double]$student.SimDebt
                                                                                 }
+                                                                                $disc = Get-OptionalProperty $student 'DiscontinuityScore' $null
+                                                                                if (-not [string]::IsNullOrWhiteSpace([string]$student.Name) -and $null -ne $disc -and [string]$disc -ne '') {
+                                                                                                $discByName[([string]$student.Name).Trim()] = [double]$disc
+                                                                                }
                                                                 }
                                                                 $text = "No events changed (they were already incomplete). Check the console for details."
                                                                 if ($updatedStudents.Count -gt 0) {
-                                                                                $saved = Save-PreRunChanges -MasterDataPath $MasterDataPath -OutputPath $OutputPath -SimDebtByName $simDebtByName -TabStudents $updatedStudents -LockedPrompt $LockedPrompt
-                                                                                $text = "Incomplete events processed. SimDebt and the students' tabs are saved."
+                                                                                $saved = Save-PreRunChanges -MasterDataPath $MasterDataPath -OutputPath $OutputPath -SimDebtByName $simDebtByName -DiscontinuityByName $discByName -TabStudents $updatedStudents -LockedPrompt $LockedPrompt
+                                                                                $text = "Incomplete events processed. SimDebt, DiscontinuityScore and the students' tabs are saved."
                                                                                 if (-not $saved) { $text = "Incomplete events processed for this run only (the files could not be saved; Export will write them)." }
                                                                 }
                                                                 [void][System.Windows.Forms.MessageBox]::Show($text, "Incomplete Events",
@@ -5913,6 +5971,10 @@ $script:PBColors = @{
                 HeatClean      = '#BBF7D0'
                 HeatWarn       = '#FDE68A'
                 HeatHard       = '#FECACA'
+                IPPuck         = '#DBEAFE'
+                IPPuckBorder   = '#93C5FD'
+                IPPuckNC       = '#EDE9FE'
+                IPPuckNCBorder = '#C4B5FD'
 }
 
 # Runs queued board commands after the WPF event that asked for them has finished
@@ -5975,7 +6037,7 @@ function Initialize-PuckBoardWindow {
                 $board = Open-BoardState -Dir $set.BoardDir -Days $allDays -Settings $set
 
                 # Events a previous run planned on these days are plans, not flown events
-                $reset = @(Reset-PlannedCompletions -Students $Data.Students -FromDate $firstDate -SoftWeights $Data.SoftWeights -PrevSchedule @($Data.PrevSchedule))
+                $reset = @(Reset-PlannedCompletions -Students $Data.Students -FromDate $firstDate -SoftWeights $Data.SoftWeights -PrevSchedule @($Data.PrevSchedule) -Instructors @($Data.Instructors))
                 Clear-AssessmentCache
 
                 $xamlPath = Join-Path $PSScriptRoot 'PuckBoard.xaml'
@@ -6640,9 +6702,10 @@ function New-PBLineVM {
 
                 $stripe = if ($isReturn) { $K.StripeReturn } elseif ($isOB) { $K.StripeOB } elseif ($isSim) { $K.StripeSim } elseif ($Line.SortieType -like '*Day Local*') { $K.StripeDayLocal } else { $K.StripeOther }
 
-                # IP slot
+                # IP slot (a non-counter keeps its puck color on the line)
                 $ipText = [string]$Line.Instructor
-                $ipFg = '#1E3A8A'; $ipBg = '#DBEAFE'; $ipBorder = '#93C5FD'; $ipStyle = 'Normal'
+                $ipColors = Get-PBIPPuckColors (Find-PBInstructor $ipText)
+                $ipFg = '#1E3A8A'; $ipBg = $ipColors.Background; $ipBorder = $ipColors.Border; $ipStyle = 'Normal'
                 $ipTip = 'Drag an IP puck here. Drag it to another line to move it (Ctrl = copy).'
                 if ([string]::IsNullOrWhiteSpace($ipText)) {
                                 $ipFg = '#94A3B8'; $ipBg = '#F8FAFC'; $ipBorder = '#CBD5E1'; $ipStyle = 'Italic'
@@ -6787,6 +6850,26 @@ function Get-PBRowColors {
                 return @{ Background = $bg; Border = $border }
 }
 
+# An IP puck's fill and outline, in the pool and on a line: non-counters get their own color
+function Get-PBIPPuckColors {
+                param ($Instructor)
+
+                $K = $script:PBColors
+                if ($null -ne $Instructor -and -not (ConvertTo-FaisBool $Instructor.IsCounter -Default $true)) {
+                                return @{ Background = $K.IPPuckNC; Border = $K.IPPuckNCBorder }
+                }
+                return @{ Background = $K.IPPuck; Border = $K.IPPuckBorder }
+}
+
+# The IP with that name (capital letters aside), or $null
+function Find-PBInstructor {
+                param ([string]$Name)
+
+                if ([string]::IsNullOrWhiteSpace($Name)) { return $null }
+                foreach ($ip in @($script:PB.Data.Instructors)) { if ([string]$ip.Name -ieq $Name) { return $ip } }
+                return $null
+}
+
 function Update-PBPools {
                 $day = Get-PBActiveDay
                 $board = $script:PB.Board
@@ -6800,13 +6883,15 @@ function Update-PBPools {
                                 if ($ipFilter -and ([string]$ip.Name -notlike "*$ipFilter*") -and ([string]$ip.Callsign -notlike "*$ipFilter*")) { continue }
                                 $info = Get-InstructorPuckInfo -Instructor $ip -Board $board -Day $day
                                 $isHeld = ($null -ne $held -and $held.Kind -eq 'IP' -and [string]$held.Name -eq [string]$info.Name)
+                                $colors = Get-PBIPPuckColors $ip
                                 [PSCustomObject]@{
                                                 Name            = $info.Name
                                                 SubText         = ("{0}  {1}" -f $info.Callsign, ($info.Badges -join ' ')).Trim()
                                                 CountText       = "x$($info.Lines)"
                                                 CountVisibility = $(if ($info.Lines -gt 0) { 'Visible' } else { 'Collapsed' })
                                                 ToolTipText     = $(if ($info.Lines -gt 0) { "On $($info.Lines) line(s) this day: $($info.Times -join ', ')" } else { 'Not on any line this day' }) + $clickTip
-                                                BorderBrush     = $(if ($isHeld) { '#1E3A8A' } else { '#93C5FD' })
+                                                Background      = $colors.Background
+                                                BorderBrush     = $(if ($isHeld) { '#1E3A8A' } else { $colors.Border })
                                                 PuckBorderThickness = $(if ($isHeld) { '3' } else { '1' })
                                 }
                 }
@@ -6821,7 +6906,7 @@ function Update-PBPools {
                                 if ($info.Blocked) { $bg = '#E5E7EB'; $bd = '#9CA3AF' }
                                 elseif ($info.Badges | Where-Object { $_ -like 'U-*' -or $_ -like 'ABS*' }) { $bg = '#FEF3C7'; $bd = '#FCD34D' }
                                 $turnsBrush = if ($info.Turns -ge 3) { '#DC2626' } elseif ($info.Turns -eq 2) { '#D97706' } else { '#16A34A' }
-                                $tip = @("Next: $($info.Next)", ("Sim debt: {0:0.##}" -f $info.SimDebt), "Priority: $($s.Priority)")
+                                $tip = @("Next: $($info.Next)", ("Sim debt: {0:0.##}" -f $info.SimDebt), ("Discontinuity: {0:0.##}" -f $info.Discontinuity), "Priority: $($s.Priority)")
                                 if ($info.Badges.Count -gt 0) { $tip += "Flags: $($info.Badges -join ', ')" }
                                 foreach ($a in $info.Absences) { $tip += "Absent $a" }
                                 $tip += $clickTip.Trim()
@@ -8387,8 +8472,9 @@ function Get-PBColorKey {
                                                 (& $item 'Badge' '#D97706' '2 turns that day' '' 1 '2 turns')
                                                 (& $item 'Badge' '#DC2626' '3 or more turns that day' '' 1 '3 turns')
                                                 (& $item 'None' '' 'CAP: one flight a day, no O&Bs, needs an experienced IP. INTL: international, needs an experienced IP. U-SIM / U-FLT: unsat sim / flight. ABS: absent at those times.')) }
-                                @{ Title = 'IP pucks (left)'; Items = @(
-                                                (& $item 'Pill' '#DBEAFE' 'IP' '#93C5FD')
+                                @{ Title = 'IP pucks (left, and the IP slot on a line)'; Items = @(
+                                                (& $item 'Pill' $K.IPPuck 'Counter IP' $K.IPPuckBorder)
+                                                (& $item 'Pill' $K.IPPuckNC 'Non-counter IP (NC)' $K.IPPuckNCBorder)
                                                 (& $item 'Badge' '#1D4ED8' 'Lines that IP has that day' '' 1 'x2')
                                                 (& $item 'None' '' 'EXP: experienced IP. CHK: check IP. NC: non-counter.')) }
                                 @{ Title = 'Picking and holding'; Items = @(
@@ -8793,7 +8879,7 @@ function Invoke-PBUpdateSyllabi {
                                 Set-PBStatus "Update Syllabi: every syllabus already matches $fileName - nothing was changed." 'Good'
                                 return
                 }
-                $question = "$summary`n`nUpdate these syllabi? Each student's tab in OutputSchedule and their SimDebt in MasterData are saved right away."
+                $question = "$summary`n`nUpdate these syllabi? Each student's tab in OutputSchedule and their SimDebt and DiscontinuityScore in MasterData are saved right away."
                 if ($script:PB.Mode -eq 'Review') { $question += "`n`nThe fill you are reviewing is thrown away (it was made from the old syllabi). Fill again afterwards." }
                 if ((Show-PBMessage -Text $question -Title 'Update Syllabi' -Buttons 'YesNo' -Icon 'Question') -ne 'Yes') {
                                 Set-PBStatus 'Update Syllabi cancelled - nothing was changed.'
@@ -8802,7 +8888,7 @@ function Invoke-PBUpdateSyllabi {
 
                 # A fill made from the old syllabi would put them back on Export
                 Exit-PBReview
-                $memory = @(Invoke-SyllabusUpdate -Targets $plan.Targets -SoftWeights $data.SoftWeights -Now $now)
+                $memory = @(Invoke-SyllabusUpdate -Targets $plan.Targets -SoftWeights $data.SoftWeights -Instructors @($data.Instructors) -Now $now)
                 $prompt = {
                                 param($file)
                                 $text = "$file is still open and FAIS could not close it (a cell may be in edit mode, or someone else has it open).`n`nClose it, then press OK to try again."
@@ -8810,7 +8896,8 @@ function Invoke-PBUpdateSyllabi {
                 }
                 Show-BusyOverlay 'Saving the syllabi...'
                 try {
-                                $saved = Save-SyllabusUpdate -Targets $plan.Targets -MemoryChanges $memory -OutputPath ([string]$data.OutputPath) -MasterDataPath ([string]$data.MasterDataPath) `
+                                $saved = Save-SyllabusUpdate -Targets $plan.Targets -MemoryChanges $memory -DiscontinuityDeltaByName $plan.Discontinuity `
+                                                -OutputPath ([string]$data.OutputPath) -MasterDataPath ([string]$data.MasterDataPath) `
                                                 -SoftWeights $data.SoftWeights -LockedPrompt $prompt -Now $now
                 }
                 finally { Hide-BusyOverlay }
@@ -9465,7 +9552,7 @@ function Invoke-PBAddDay {
 function Reset-PBPlannedFromBoard {
                 if ($script:PB.Board.Days.Count -eq 0) { return }
                 $first = [datetime]::ParseExact($script:PB.Board.Days[0], 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
-                $changed = @(Reset-PlannedCompletions -Students $script:PB.Data.Students -FromDate $first -SoftWeights $script:PB.Data.SoftWeights -PrevSchedule @($script:PB.Data.PrevSchedule))
+                $changed = @(Reset-PlannedCompletions -Students $script:PB.Data.Students -FromDate $first -SoftWeights $script:PB.Data.SoftWeights -PrevSchedule @($script:PB.Data.PrevSchedule) -Instructors @($script:PB.Data.Instructors))
                 if ($changed.Count -gt 0) {
                                 Clear-AssessmentCache
                                 $script:PB.Assess = @{}
@@ -9671,7 +9758,8 @@ UPDATE SYLLABI
   - the Big Board: an entry in an event's columns marks it complete with its IP and date;
     no entry makes sure it is not complete (an event FAIS has planned for later stays).
   Only events in a student's syllabus change. You see what will change first; Yes saves
-  each student's tab in OutputSchedule and their SimDebt in MasterData right away.
+  each student's tab in OutputSchedule and their SimDebt and DiscontinuityScore in
+  MasterData right away.
 
 ADD STUDENT ABSENCE
   Blocks students off for a stretch of time: the same as a line on MasterData's
@@ -10133,7 +10221,7 @@ function Get-FaisExportSummary {
                 & $add 'Path' $OutputPath
                 $unsatCount = @($UnsatChanges.Keys).Count
                 $absenceRows = @($Absences | Where-Object { $null -ne $_ })
-                $mdText = if ($unsatCount -gt 0) { "MasterData: SimDebt, and the unsat / HOLD flags of $unsatCount student(s)" } else { 'MasterData: SimDebt' }
+                $mdText = if ($unsatCount -gt 0) { "MasterData: SimDebt, DiscontinuityScore, and the unsat / HOLD flags of $unsatCount student(s)" } else { 'MasterData: SimDebt, DiscontinuityScore' }
                 if ($absenceRows.Count -gt 0) { $mdText += "; StudentAbsences: $($absenceRows.Count) line(s) Add Student Absence could not save" }
                 & $add 'Text' $mdText
                 & $add 'Path' $MasterDataPath
@@ -10575,8 +10663,16 @@ function Test-PuckBoardWindow {
         <Style x:Key="BarButton" TargetType="Button">
             <Setter Property="Padding" Value="10,3"/>
             <Setter Property="Margin" Value="3,0"/>
+            <Setter Property="MinHeight" Value="26"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <!-- Text boxes, dropdowns and date boxes in the bars: all one height -->
+        <Style x:Key="BarField" TargetType="Control">
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
 
         <Style x:Key="PuckBorder" TargetType="Border">
@@ -10587,10 +10683,18 @@ function Test-PuckBoardWindow {
             <Setter Property="Cursor" Value="Hand"/>
         </Style>
 
+        <!-- Every cell on a line is the same height (26) -->
         <Style x:Key="CellBox" TargetType="TextBox">
             <Setter Property="Margin" Value="2"/>
+            <Setter Property="Height" Value="26"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
             <Setter Property="BorderBrush" Value="#CBD5E1"/>
+        </Style>
+
+        <Style x:Key="CellCombo" TargetType="ComboBox">
+            <Setter Property="Margin" Value="2"/>
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
 
         <Style x:Key="HeaderText" TargetType="TextBlock">
@@ -10601,9 +10705,9 @@ function Test-PuckBoardWindow {
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
 
-        <!-- IP puck in the left pool -->
+        <!-- IP puck in the left pool (non-counters get their own fill) -->
         <DataTemplate x:Key="IPPuckTemplate">
-            <Border Tag="IPPuck" Style="{StaticResource PuckBorder}" Background="#DBEAFE" BorderBrush="{Binding BorderBrush}"
+            <Border Tag="IPPuck" Style="{StaticResource PuckBorder}" Background="{Binding Background}" BorderBrush="{Binding BorderBrush}"
                     BorderThickness="{Binding PuckBorderThickness}" ToolTip="{Binding ToolTipText}" ToolTipService.ShowDuration="30000">
                 <DockPanel LastChildFill="True">
                     <Border DockPanel.Dock="Right" Background="#1D4ED8" CornerRadius="8" Padding="6,0" Margin="6,0,0,0"
@@ -10639,7 +10743,7 @@ function Test-PuckBoardWindow {
 
         <!-- Column headers above each day's lines -->
         <DataTemplate x:Key="LineHeaderTemplate">
-            <Grid Margin="3,0,3,2">
+            <Grid Margin="4,0,4,2">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="8"/>
                     <ColumnDefinition Width="64"/>
@@ -10698,10 +10802,10 @@ function Test-PuckBoardWindow {
                              FontFamily="Consolas" FontSize="13" FontWeight="SemiBold" MaxLength="6" HorizontalContentAlignment="Center"
                              ToolTip="Type 0730, 730 or 7:30 then Enter. Up/Down = 5 min, Shift+Up/Down = 30 min, Esc = undo typing."/>
 
-                    <ComboBox Grid.Column="2" Tag="TypeBox" Margin="2" VerticalContentAlignment="Center"
+                    <ComboBox Grid.Column="2" Tag="TypeBox" Style="{StaticResource CellCombo}"
                               ItemsSource="{Binding TypeOptions}" SelectedItem="{Binding SortieType, Mode=OneWay}"/>
 
-                    <Border Grid.Column="3" Tag="IPSlot" AllowDrop="True" Focusable="True" Margin="2" MinHeight="26" Padding="9,2"
+                    <Border Grid.Column="3" Tag="IPSlot" AllowDrop="True" Focusable="True" Margin="2" Height="26" Padding="9,2"
                             CornerRadius="13" BorderThickness="1" Background="{Binding IPBackground}" BorderBrush="{Binding IPBorder}"
                             ToolTip="{Binding IPToolTip}">
                         <Border.ContextMenu>
@@ -10711,7 +10815,7 @@ function Test-PuckBoardWindow {
                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                     </Border>
 
-                    <Border Grid.Column="4" Tag="StudentSlot" AllowDrop="{Binding AllowStudentDrop}" Focusable="True" Margin="2" MinHeight="26"
+                    <Border Grid.Column="4" Tag="StudentSlot" AllowDrop="{Binding AllowStudentDrop}" Focusable="True" Margin="2" Height="26"
                             Padding="9,2,15,2" CornerRadius="13" BorderThickness="{Binding StudentBorderThickness}"
                             Background="{Binding StudentBackground}" BorderBrush="{Binding StudentBorder}"
                             ToolTip=" " ToolTipService.ShowDuration="60000" ToolTipService.InitialShowDelay="300">
@@ -10729,7 +10833,7 @@ function Test-PuckBoardWindow {
                         </Grid>
                     </Border>
 
-                    <ComboBox Grid.Column="5" Tag="MissionBox" Margin="2" VerticalContentAlignment="Center" IsTextSearchEnabled="False"
+                    <ComboBox Grid.Column="5" Tag="MissionBox" Style="{StaticResource CellCombo}" IsTextSearchEnabled="False"
                               ItemsSource="{Binding MissionOptions}" SelectedItem="{Binding MissionSelected, Mode=OneWay}"
                               IsEnabled="{Binding MissionEnabled}"
                               ToolTip="(auto) = the best-scoring event that passes the hard rules. Pick one to hardcode it, or Type a mission... for any other."/>
@@ -10745,7 +10849,7 @@ function Test-PuckBoardWindow {
                              IsReadOnly="{Binding ReadOnlyFields}" TextWrapping="NoWrap" ToolTip="{Binding NotesToolTip}"
                              Foreground="{Binding NotesForeground}"/>
 
-                    <Button Grid.Column="8" Tag="DeleteLine" Content="&#x2715;" Margin="2" Padding="0" Width="24" Height="24"
+                    <Button Grid.Column="8" Tag="DeleteLine" Content="&#x2715;" Margin="2" Padding="0" Width="26" Height="26"
                             Background="Transparent" BorderThickness="0" Foreground="#94A3B8" Cursor="Hand" ToolTip="Delete line (Ctrl+Z undoes)"/>
                 </Grid>
             </Border>
@@ -10814,7 +10918,7 @@ function Test-PuckBoardWindow {
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                         <Button x:Name="UndoButton" Content="Undo (Ctrl+Z)" Style="{StaticResource BarButton}"/>
-                        <Button x:Name="ColorKeyButton" Content="Colors" Style="{StaticResource BarButton}" Padding="6,1" FontSize="11"
+                        <Button x:Name="ColorKeyButton" Content="Colors" Style="{StaticResource BarButton}"
                                 ToolTip="What the colors on the board mean"/>
                         <Button x:Name="HelpButton" Content="Help" Style="{StaticResource BarButton}"/>
                     </StackPanel>
@@ -10823,7 +10927,7 @@ function Test-PuckBoardWindow {
                            RenderOptions.BitmapScalingMode="HighQuality" ToolTip="FAIP Mafia"/>
                     <TextBlock Text="FAIS PUCK BOARD" Foreground="White" FontWeight="Bold" FontSize="16" VerticalAlignment="Center" Margin="0,0,18,0"/>
                     <TextBlock Text="Add lines:" Foreground="#CBD5E1" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                    <TextBox x:Name="QuickEntryBox" Width="420" FontFamily="Consolas" FontSize="13" Padding="4,3" VerticalContentAlignment="Center"
+                    <TextBox x:Name="QuickEntryBox" Style="{StaticResource BarField}" Width="420" FontFamily="Consolas" FontSize="13" Padding="4,0"
                              ToolTip="Examples: 0730 DL | 1015 O&amp;B (return at +3 hr) | 1015 OB 1330 | 1300 OFT x2 | 0800 DL Jones sp:Smith | separate several with commas. Ctrl+L jumps here."/>
                     <Button x:Name="AddLineButton" Content="Add" Style="{StaticResource BarButton}" FontWeight="SemiBold"/>
                     <Button x:Name="BulkLinesButton" Content="Add Bulk Lines" Style="{StaticResource BarButton}"
@@ -10836,7 +10940,7 @@ function Test-PuckBoardWindow {
             <Border DockPanel.Dock="Top" Background="#E2E8F0" Padding="12,5">
                 <WrapPanel VerticalAlignment="Center">
                     <TextBlock Text="Template:" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                    <ComboBox x:Name="TemplateCombo" Width="170" DisplayMemberPath="Name" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="TemplateCombo" Style="{StaticResource BarField}" Width="170" DisplayMemberPath="Name"/>
                     <Button x:Name="LoadTemplateButton" Content="Load" Style="{StaticResource BarButton}"/>
                     <Button x:Name="SaveTemplateButton" Content="Save day as template..." Style="{StaticResource BarButton}"/>
                     <Rectangle Width="1" Height="20" Fill="#94A3B8" Margin="8,0"/>
@@ -10849,7 +10953,7 @@ function Test-PuckBoardWindow {
                     <Button x:Name="AddAbsenceButton" Content="Add Student Absence" Style="{StaticResource BarButton}" FontWeight="SemiBold"
                             ToolTip="Block students off for a stretch of time (an appointment, leave...): drag or paste them in, pick the day and type the times. It goes on MasterData's StudentAbsences sheet, and the board and the scheduler keep them off every line inside it."/>
                     <Rectangle Width="1" Height="20" Fill="#94A3B8" Margin="8,0"/>
-                    <DatePicker x:Name="AddDayPicker" Width="125" VerticalAlignment="Center"/>
+                    <DatePicker x:Name="AddDayPicker" Style="{StaticResource BarField}" Width="125"/>
                     <Button x:Name="AddDayButton" Content="Add day" Style="{StaticResource BarButton}"/>
                     <Button x:Name="RemoveDayButton" Content="Remove this day" Style="{StaticResource BarButton}"/>
                 </WrapPanel>
@@ -10859,14 +10963,14 @@ function Test-PuckBoardWindow {
             <Border DockPanel.Dock="Bottom" Background="White" Padding="12,7" BorderBrush="#CBD5E1" BorderThickness="0,1,0,0">
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                        <Button x:Name="CancelButton" Content="Close" Style="{StaticResource BarButton}"/>
-                        <Button x:Name="BackToEditButton" Content="Back to edit" Style="{StaticResource BarButton}" Visibility="Collapsed"/>
-                        <Button x:Name="RefillButton" Content="Re-fill" Style="{StaticResource BarButton}" Visibility="Collapsed"/>
+                        <Button x:Name="CancelButton" Content="Close" Style="{StaticResource BarButton}" Padding="12,6"/>
+                        <Button x:Name="BackToEditButton" Content="Back to edit" Style="{StaticResource BarButton}" Padding="12,6" Visibility="Collapsed"/>
+                        <Button x:Name="RefillButton" Content="Re-fill" Style="{StaticResource BarButton}" Padding="12,6" Visibility="Collapsed"/>
                         <Button x:Name="ExportButton" Content="Export to OutputSchedule" Style="{StaticResource BarButton}" Visibility="Collapsed"
                                 Background="#1D4ED8" Foreground="White" FontWeight="Bold" Padding="16,6"/>
                         <!-- Fill all days only shows when the board has more than one day -->
                         <Button x:Name="FillAllButton" Content="Fill all days" Style="{StaticResource BarButton}"
-                                Background="White" Foreground="#15803D" BorderBrush="#16A34A" FontWeight="Bold" Padding="14,6"
+                                Background="White" Foreground="#15803D" BorderBrush="#16A34A" FontWeight="Bold" Padding="16,6"
                                 ToolTip="Fill the open lines on every day on the board, then review and export them all (Ctrl+Enter)."/>
                         <Button x:Name="FillDayButton" Content="Fill this day" Style="{StaticResource BarButton}"
                                 Background="#16A34A" Foreground="White" FontWeight="Bold" Padding="16,6"
@@ -10880,10 +10984,10 @@ function Test-PuckBoardWindow {
             </Border>
 
             <!-- Left: IP pool -->
-            <Border DockPanel.Dock="Left" Width="235" Margin="8,8,4,8" Background="White" CornerRadius="6" Tag="IPPool" AllowDrop="True" Padding="6">
+            <Border DockPanel.Dock="Left" Width="250" Margin="8,8,4,8" Background="White" CornerRadius="6" Tag="IPPool" AllowDrop="True" Padding="6">
                 <DockPanel>
                     <TextBlock DockPanel.Dock="Top" Text="IP PUCKS" FontWeight="Bold" Foreground="#1E3A8A" Margin="2,0,0,4"/>
-                    <TextBox DockPanel.Dock="Top" x:Name="IPSearchBox" Margin="0,0,0,4" Padding="3" ToolTip="Filter IPs by name or callsign"/>
+                    <TextBox DockPanel.Dock="Top" x:Name="IPSearchBox" Style="{StaticResource BarField}" Margin="0,0,0,4" Padding="3,0" ToolTip="Filter IPs by name or callsign"/>
                     <TextBlock DockPanel.Dock="Top" Text="Drag onto a line's IP slot, or click to pick up and click the slot. Double-click puts the IP on the selected line. Drop a line's IP here to take it off." FontSize="10"
                                Foreground="#64748B" TextWrapping="Wrap" Margin="2,0,0,6"/>
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -10893,10 +10997,10 @@ function Test-PuckBoardWindow {
             </Border>
 
             <!-- Right: student pool -->
-            <Border DockPanel.Dock="Right" Width="265" Margin="4,8,8,8" Background="White" CornerRadius="6" Tag="StudentPool" AllowDrop="True" Padding="6">
+            <Border DockPanel.Dock="Right" Width="250" Margin="4,8,8,8" Background="White" CornerRadius="6" Tag="StudentPool" AllowDrop="True" Padding="6">
                 <DockPanel>
                     <TextBlock DockPanel.Dock="Top" Text="STUDENT PUCKS" FontWeight="Bold" Foreground="#14532D" Margin="2,0,0,4"/>
-                    <TextBox DockPanel.Dock="Top" x:Name="StudentSearchBox" Margin="0,0,0,4" Padding="3" ToolTip="Filter students by name"/>
+                    <TextBox DockPanel.Dock="Top" x:Name="StudentSearchBox" Style="{StaticResource BarField}" Margin="0,0,0,4" Padding="3,0" ToolTip="Filter students by name"/>
                     <TextBlock DockPanel.Dock="Top" Text="Drag onto a line to hardcode the student, or click to pick up and click the slot. Double-click puts them on the selected line. Drop a line's student here to take it off." FontSize="10"
                                Foreground="#64748B" TextWrapping="Wrap" Margin="2,0,0,6"/>
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -10950,7 +11054,7 @@ function Test-PuckBoardWindow {
                         <DockPanel>
                             <Border DockPanel.Dock="Top" Background="#E2E8F0" Padding="8,3" CornerRadius="4,4,0,0">
                                 <DockPanel>
-                                    <Button x:Name="DetailsHideButton" DockPanel.Dock="Right" Content="Hide" Padding="8,0" Margin="4,0,0,0" Cursor="Hand"
+                                    <Button x:Name="DetailsHideButton" DockPanel.Dock="Right" Content="Hide" Padding="8,1" Margin="4,0,0,0" Cursor="Hand"
                                             ToolTip="Hide the Line details panel (View menu brings it back)"/>
                                     <TextBlock Text="LINE DETAILS" FontWeight="Bold" Foreground="#334155" VerticalAlignment="Center" Margin="0,0,10,0"/>
                                     <TextBlock x:Name="DetailsTitle" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="#0F172A"/>
@@ -11816,6 +11920,15 @@ function SoftRules {
                                                                                 $Score += $pts
                                                                                 $Breakdown['Continue String'] = $pts
                                                                                 $Reasons['Continue String'] = $StringText
+                                                                                # A student with a lot of 1-strings and counters gets more for keeping this IP
+                                                                                $disc = 0.0
+                                                                                $discRaw = Get-OptionalProperty $Student 'DiscontinuityScore' $null
+                                                                                if ($null -ne $discRaw -and [string]$discRaw -ne '') { $disc = [double]$discRaw }
+                                                                                if ($disc -ne 0) {
+                                                                                                $Score += $disc
+                                                                                                $Breakdown['Discontinuity (string)'] = $disc
+                                                                                                $Reasons['Discontinuity (string)'] = "Discontinuity $(Format-Number $disc), $StringText"
+                                                                                }
                                                                                 if ($isCap) {
                                                                                                 $pts2 = Get-Weight $Config 'CAPBonus'
                                                                                                 $Score += $pts2
@@ -12021,7 +12134,7 @@ function Process-HardcodedSortie {
                 $Sortie.FilledBy = 'Pin'
 
                 if ($null -ne $Mission) {
-                                [void](Complete-StudentMission -Student $Student -Mission $Mission -InstructorName (Get-NameText $ip) -ETD $Sortie.ETD -SoftWeights $SoftWeights -Sortie $Sortie)
+                                [void](Complete-StudentMission -Student $Student -Mission $Mission -InstructorName (Get-NameText $ip) -ETD $Sortie.ETD -SoftWeights $SoftWeights -Sortie $Sortie -Instructors $Instructors)
                                 Write-Host " [PINNED] '$($Student.Name)' on '$($Mission.Mission)' (ETD: $($Sortie.ETD))" -ForegroundColor Cyan
                 }
                 else {
@@ -12152,7 +12265,7 @@ function Pair-FormationWingman {
                                                                                 $w.Callsign = $WingEntry.Callsign
                                                                                 $w.Num = $WingEntry.Num
                                                                 }
-                                                                [void](Complete-StudentMission -Student $best.Student -Mission $best.Event -InstructorName (Get-NameText $w.Instructor) -ETD $w.ETD -SoftWeights $SoftWeights -Sortie $w)
+                                                                [void](Complete-StudentMission -Student $best.Student -Mission $best.Event -InstructorName (Get-NameText $w.Instructor) -ETD $w.ETD -SoftWeights $SoftWeights -Sortie $w -Instructors $Instructors)
                                                                 Add-SortieNote -Sortie $w -Note "Wingman to $leadName"
                                                                 foreach ($n in (Get-ChosenEventNotes -Hard $best.Hard -Evt $best.Event -Soft $best.Soft)) { Add-SortieNote -Sortie $w -Note $n }
                                                                 Add-SortieNote -Sortie $PrimarySortie -Note "Wingman: $($best.Student.Name)"
@@ -12245,7 +12358,7 @@ function Schedule-ReturnLeg {
                 $ValidEvents = @(Get-ValidOptedEvents -Student $Student -Sortie $OBReturn -NoLookahead)
                 if ($ValidEvents.Count -gt 0) {
                                 $OBReturn.Mission = $ValidEvents[0]
-                                [void](Complete-StudentMission -Student $Student -Mission $ValidEvents[0] -InstructorName (Get-NameText $OBReturn.Instructor) -ETD $OBReturn.ETD -SoftWeights $SoftWeights -Sortie $OBReturn)
+                                [void](Complete-StudentMission -Student $Student -Mission $ValidEvents[0] -InstructorName (Get-NameText $OBReturn.Instructor) -ETD $OBReturn.ETD -SoftWeights $SoftWeights -Sortie $OBReturn -Instructors $Instructors)
                 }
                 else {
                                 $OBReturn.Mission = $null
@@ -12541,7 +12654,7 @@ function Invoke-OpenLine {
                 $Sortie.Student = $best.Student
                 $Sortie.Mission = $best.Event
                 $Sortie.FilledBy = 'Engine'
-                [void](Complete-StudentMission -Student $best.Student -Mission $best.Event -InstructorName (Get-NameText $Sortie.Instructor) -ETD $Sortie.ETD -SoftWeights $SoftWeights -Sortie $Sortie)
+                [void](Complete-StudentMission -Student $best.Student -Mission $best.Event -InstructorName (Get-NameText $Sortie.Instructor) -ETD $Sortie.ETD -SoftWeights $SoftWeights -Sortie $Sortie -Instructors $Instructors)
                 foreach ($note in (Get-ChosenEventNotes -Hard $best.Hard -Evt $best.Event -Soft $best.Soft)) { Add-SortieNote -Sortie $Sortie -Note $note }
 
                 if ([string]$best.Event.Type -like '*Form*') {
@@ -12579,11 +12692,12 @@ function Trace-SchedulingDecision {
 # Test-MissionComplete / Get-SyllabusSortKey / Find-SyllabusMission / Get-MissionKind
 # Get-OptedEvents / Get-AllowedEventTypes / Get-ValidOptedEvents
 # Get-SimDebtDelta / Get-MissionSimDebtDelta / Update-StudentSimDebtFromSyllabus
-# Complete-StudentMission / Undo-StudentMission / Reset-PlannedCompletions
+# Complete-StudentMission / Undo-StudentMission / Reset-PlannedCompletions / Test-ChangesStrings
 # Get-UnsatSimKind / Get-LastSimType / Clear-CleanedUnsat / Restore-PlannedUnsat
 # Add-StudentReservation / Remove-StudentReservation / Get-ReservedMissionNames
 # Get-StudentTimeline
-# Measure-String / Get-StringLength / Get-StringLengths / Get-StringCounts (String Tracker)
+# Measure-String / Get-StringLength / Get-StringLengths / Test-StringRide / Get-StringCounts (String Tracker)
+# Get-DiscontinuityWeight / Get-DiscontinuityScore / Add-StudentDiscontinuity / Initialize-StudentDiscontinuity
 
 
 # =================================================================================
@@ -12806,6 +12920,8 @@ function Update-StudentSimDebtFromSyllabus {
 
 # The one place a scheduled event is written onto a student's syllabus.
 # Marks it complete with the IP name and ETD, and applies its sim debt once.
+# A ride that counts toward strings moves the discontinuity score when it is flown or its IP
+# changes (-Instructors says who the non-counters are; -NoDiscontinuity leaves it alone).
 # -SortieType (or -Sortie) is the line it is flown on: an unsat that line cleans up is
 # cleared, and -Sortie gets a note saying so.
 function Complete-StudentMission {
@@ -12817,13 +12933,19 @@ function Complete-StudentMission {
                                 $SoftWeights,
                                 [string]$SortieType = '',
                                 $Sortie,
-                                [switch]$NoSimDebt
+                                [array]$Instructors = @(),
+                                [switch]$NoSimDebt,
+                                [switch]$NoDiscontinuity
                 )
 
                 $entry = Find-SyllabusMission -Student $Student -Mission $Mission
                 if ($null -eq $entry) { return $null }
 
                 $wasComplete = Test-MissionComplete $entry
+                $discBefore = $null
+                if (-not $NoDiscontinuity -and $null -ne $SoftWeights -and (Test-ChangesStrings $entry $InstructorName)) {
+                                $discBefore = Get-DiscontinuityScore -Syllabus $Student.Syllabus -Instructors $Instructors -SoftWeights $SoftWeights
+                }
                 $entry.IsComplete = $true
                 $entry.Instructor = $InstructorName
                 $dt = Parse-ETD $ETD
@@ -12833,6 +12955,9 @@ function Complete-StudentMission {
                                 $current = 0.0
                                 if ($null -ne $Student.SimDebt -and [string]$Student.SimDebt -ne '') { $current = [double]$Student.SimDebt }
                                 $Student.SimDebt = [math]::Round($current + (Get-MissionSimDebtDelta -MissionName ([string]$entry.Mission) -SoftWeights $SoftWeights), 2)
+                }
+                if ($null -ne $discBefore) {
+                                Add-StudentDiscontinuity -Student $Student -Delta ((Get-DiscontinuityScore -Syllabus $Student.Syllabus -Instructors $Instructors -SoftWeights $SoftWeights) - $discBefore)
                 }
 
                 if ($SortieType -eq '' -and $null -ne $Sortie) { $SortieType = [string]$Sortie.SortieType }
@@ -12847,13 +12972,16 @@ function Complete-StudentMission {
 }
 
 # Takes a completed event back off a student's syllabus (logged incomplete, or a planned
-# event being re-planned) and backs out only that event's sim debt, so the SimDebt read
-# from MasterData keeps any hand adjustment. Returns $true when the event was complete.
+# event being re-planned) and backs out only that event's sim debt and discontinuity, so the
+# SimDebt and DiscontinuityScore read from MasterData keep any hand adjustment
+# (-NoDiscontinuity leaves the discontinuity alone). Returns $true when the event was complete.
 function Undo-StudentMission {
                 param (
                                 [Parameter(Mandatory)] $Student,
                                 [Parameter(Mandatory)] $Mission,
-                                $SoftWeights
+                                $SoftWeights,
+                                [array]$Instructors = @(),
+                                [switch]$NoDiscontinuity
                 )
 
                 # The exact syllabus entry when one is passed, else the first with that name
@@ -12862,6 +12990,10 @@ function Undo-StudentMission {
                 if ($null -eq $entry) { $entry = Find-SyllabusMission -Student $Student -Mission $Mission }
                 if ($null -eq $entry -or -not (Test-MissionComplete $entry)) { return $false }
 
+                $discBefore = $null
+                if (-not $NoDiscontinuity -and $null -ne $SoftWeights -and (Test-ChangesStrings $entry -Undo)) {
+                                $discBefore = Get-DiscontinuityScore -Syllabus $Student.Syllabus -Instructors $Instructors -SoftWeights $SoftWeights
+                }
                 $entry.IsComplete = $false
                 $entry.Instructor = ''
                 $entry.ETD = ''
@@ -12869,6 +13001,9 @@ function Undo-StudentMission {
                                 $current = 0.0
                                 if ($null -ne $Student.SimDebt -and [string]$Student.SimDebt -ne '') { $current = [double]$Student.SimDebt }
                                 $Student.SimDebt = [math]::Round($current - (Get-MissionSimDebtDelta -MissionName ([string]$entry.Mission) -SoftWeights $SoftWeights), 2)
+                }
+                if ($null -ne $discBefore) {
+                                Add-StudentDiscontinuity -Student $Student -Delta ((Get-DiscontinuityScore -Syllabus $Student.Syllabus -Instructors $Instructors -SoftWeights $SoftWeights) - $discBefore)
                 }
 
                 $rev = [int](Get-OptionalProperty $Student 'SyllabusRevision' 0)
@@ -12878,26 +13013,35 @@ function Undo-StudentMission {
 
 # Clears completions dated on/after a day. A previous run that scheduled these days
 # wrote them as complete; they are plans, not flown events, when the days are re-built.
-# Their sim debt is backed out, and an unsat that one of those planned lines cleaned up
-# (its "Clears Unsat" note in -PrevSchedule) goes back on the student.
+# Their sim debt and discontinuity are backed out (each student's discontinuity once, for all
+# of their events), and an unsat that one of those planned lines cleaned up (its
+# "Clears Unsat" note in -PrevSchedule) goes back on the student.
 # Returns the students that changed.
 function Reset-PlannedCompletions {
                 param (
                                 [array]$Students,
                                 [datetime]$FromDate,
                                 $SoftWeights,
-                                [array]$PrevSchedule = @()
+                                [array]$PrevSchedule = @(),
+                                [array]$Instructors = @()
                 )
 
                 $changed = New-Object System.Collections.Generic.List[object]
                 foreach ($s in @($Students)) {
                                 $hit = $false
+                                $discBefore = $null
                                 foreach ($m in @($s.Syllabus)) {
                                                 if (-not (Test-MissionComplete $m)) { continue }
                                                 $dt = Parse-ETD $m.ETD
                                                 if ($null -ne $dt -and $dt.Date -ge $FromDate.Date) {
-                                                                if (Undo-StudentMission -Student $s -Mission $m -SoftWeights $SoftWeights) { $hit = $true }
+                                                                if ($null -eq $discBefore -and $null -ne $SoftWeights -and (Test-ChangesStrings $m -Undo)) {
+                                                                                $discBefore = Get-DiscontinuityScore -Syllabus $s.Syllabus -Instructors $Instructors -SoftWeights $SoftWeights
+                                                                }
+                                                                if (Undo-StudentMission -Student $s -Mission $m -SoftWeights $SoftWeights -NoDiscontinuity) { $hit = $true }
                                                 }
+                                }
+                                if ($null -ne $discBefore) {
+                                                Add-StudentDiscontinuity -Student $s -Delta ((Get-DiscontinuityScore -Syllabus $s.Syllabus -Instructors $Instructors -SoftWeights $SoftWeights) - $discBefore)
                                 }
                                 if ($hit) { $changed.Add($s) }
                 }
@@ -12912,6 +13056,19 @@ function Reset-PlannedCompletions {
                                 if ($null -ne $s -and (Restore-PlannedUnsat -Student $s -Notes ([string]$row.Notes)) -and -not $changed.Contains($s)) { $changed.Add($s) }
                 }
                 return $changed.ToArray()
+}
+
+# True when marking the event complete with -InstructorName (or, with -Undo, taking it back)
+# can change the student's strings and counters, and so their discontinuity score
+function Test-ChangesStrings {
+                param ($Mission, [string]$InstructorName, [switch]$Undo)
+
+                $wasComplete = Test-MissionComplete $Mission
+                $oldIP = Get-NameText $Mission.Instructor
+                $wasRide = $wasComplete -and (Test-StringRide $Mission $oldIP)
+                if ($Undo) { return $wasRide }
+                if ($wasComplete -and $oldIP -eq $InstructorName) { return $false }
+                return ($wasRide -or (Test-StringRide $Mission $InstructorName))
 }
 
 
@@ -13162,6 +13319,17 @@ function Get-StringLengths {
                 }
 }
 
+# True when the event, flown with -InstructorName, is a ride that counts toward strings and
+# counters: a flight with an IP in the cockpit, not a solo or a check ride
+function Test-StringRide {
+                param ($Mission, [string]$InstructorName)
+
+                return (-not (ConvertTo-FaisBool $Mission.IsCheck) -and
+                                [string]$Mission.Type -notlike '*Solo*' -and
+                                (Get-MissionKind -Mission $Mission -InstructorName $InstructorName) -eq 'Flight' -and
+                                -not [string]::IsNullOrWhiteSpace($InstructorName))
+}
+
 # A student's strings and counters from their syllabus and the Instructors list.
 # Returns @(5-strings, 4-strings, 3-strings, 2-strings, 1-strings, counters). Strings longer than 5 count as 5-strings.
 # Counters are the unique IPs who are not non-counters.
@@ -13171,11 +13339,7 @@ function Get-StringCounts {
                 # Completed rides with an IP in the cockpit, by category (FT5001 -> FT, 5001) and in mission order inside each
                 $Flights = @(
                                 $Syllabus | Where-Object {
-                                                (Test-MissionComplete $_) -and
-                                                -not (ConvertTo-FaisBool $_.IsCheck) -and
-                                                [string]$_.Type -notlike '*Solo*' -and
-                                                (Get-MissionKind -Mission $_ -InstructorName (Get-NameText $_.Instructor)) -eq 'Flight' -and
-                                                -not [string]::IsNullOrWhiteSpace((Get-NameText $_.Instructor))
+                                                (Test-MissionComplete $_) -and (Test-StringRide $_ (Get-NameText $_.Instructor))
                                 } | ForEach-Object {
                                                 $null = ([string]$_.Mission).Trim() -match '^(\D*)(\d*)'
                                                 [PSCustomObject]@{
@@ -13214,11 +13378,73 @@ function Get-StringCounts {
                 return @($Strings[5], $Strings[4], $Strings[3], $Strings[2], $Strings[1], $Counters)
 }
 
+
+# =================================================================================
+#  DISCONTINUITY SCORE
+#    How broken up a student's rides have been, from the String Tracker counts:
+#    Disc1String per 1-string + DiscCounter per counter + Disc3PlusString per 3+ string
+#    (SoftWeights; +1, +1 and -1 when blank). The Continue String rule adds it, so a
+#    student with a lot of 1-strings and counters is the one kept with an IP.
+#    Kept like SimDebt: read from MasterData's Students sheet (counted from the syllabus
+#    when the cell is blank), moved by each ride that is flown or taken back, written back.
+# =================================================================================
+
+# One discontinuity weight from SoftWeights, or its default when the cell is blank
+function Get-DiscontinuityWeight {
+                param ($SoftWeights, [string]$Name, [double]$Default)
+
+                $v = ([string](Get-OptionalProperty $SoftWeights $Name '')).Trim()
+                $num = 0.0
+                if ($v -ne '' -and [double]::TryParse($v, [System.Globalization.NumberStyles]::Any, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$num)) { return $num }
+                return $Default
+}
+
+# A student's discontinuity score, counted from their syllabus (Get-StringCounts)
+function Get-DiscontinuityScore {
+                param ([array]$Syllabus, [array]$Instructors = @(), $SoftWeights)
+
+                # @(5+, 4, 3, 2, 1-strings, counters)
+                $c = @(Get-StringCounts -Syllabus $Syllabus -Instructors $Instructors)
+                $score = (Get-DiscontinuityWeight $SoftWeights 'Disc1String' 1) * $c[4] +
+                                (Get-DiscontinuityWeight $SoftWeights 'DiscCounter' 1) * $c[5] +
+                                (Get-DiscontinuityWeight $SoftWeights 'Disc3PlusString' -1) * ($c[0] + $c[1] + $c[2])
+                return [math]::Round($score, 2)
+}
+
+# Moves the student's DiscontinuityScore by -Delta (a blank score counts as 0)
+function Add-StudentDiscontinuity {
+                param ($Student, [double]$Delta)
+
+                $current = 0.0
+                $v = Get-OptionalProperty $Student 'DiscontinuityScore' $null
+                if ($null -ne $v -and [string]$v -ne '') { $current = [double]$v }
+                $Student | Add-Member -MemberType NoteProperty -Name 'DiscontinuityScore' -Value ([math]::Round($current + $Delta, 2)) -Force
+}
+
+# Counts the score from the syllabus for each student whose DiscontinuityScore is blank (no
+# DiscontinuityScore column in MasterData yet, or a cell cleared so FAIS counts it again).
+# Returns the names of the students it counted.
+function Initialize-StudentDiscontinuity {
+                param ([array]$Students, [array]$Instructors = @(), $SoftWeights)
+
+                $counted = New-Object System.Collections.Generic.List[string]
+                foreach ($s in @($Students)) {
+                                if ($null -eq $s) { continue }
+                                $v = Get-OptionalProperty $s 'DiscontinuityScore' $null
+                                if ($null -ne $v -and [string]$v -ne '') { continue }
+                                $score = Get-DiscontinuityScore -Syllabus @($s.Syllabus) -Instructors $Instructors -SoftWeights $SoftWeights
+                                $s | Add-Member -MemberType NoteProperty -Name 'DiscontinuityScore' -Value $score -Force
+                                $counted.Add([string]$s.Name)
+                }
+                return $counted.ToArray()
+}
+
 ######## ./Modules/SyllabusImport.psm1.txt ########
 # SYLLABUSIMPORT.PSM1 DIRECTORY:
 #             "Update Syllabi": reads a training file (the day's flying schedule or the Big
 #             Board), works out which one it is, and brings each FAIS student's syllabus in
 #             line with it: on the board, on their OutputSchedule tab and in their SimDebt
+#             and DiscontinuityScore
 # Read-TrainingFile / Get-SheetBlock / ConvertTo-TrainingEtd
 # Find-DailyScheduleHeadings / Read-DailyScheduleSheet / Find-BigBoardHeadings / Read-BigBoardSheet / Get-BigBoardInstructor
 # ConvertTo-NameWords / ConvertTo-PersonName / Get-GivenNameMatch / Get-PersonNameMatch
@@ -13860,6 +14086,19 @@ function Get-SyllabusUpdatePlan {
                                 Close-FaisWorkbookForRead $book
                 }
 
+                # What the update does to each changed student's DiscontinuityScore, worked out on a copy of them
+                $discOf = @{}
+                $changedNames = @($changes.ToArray() | Where-Object { $_.Kind -ne 'Planned' } | ForEach-Object { [string]$_.Student } | Sort-Object -Unique)
+                foreach ($name in $changedNames) {
+                                if (-not $byStudent.Contains($name)) { continue }
+                                $student = $byStudent[$name][0].Student
+                                $copy = Copy-StudentForEval $student
+                                $copyTargets = @(foreach ($t in $byStudent[$name]) { $ct = $t.PSObject.Copy(); $ct.Student = $copy; $ct })
+                                [void](Invoke-SyllabusUpdate -Targets $copyTargets -SoftWeights $SoftWeights -Instructors $Instructors -Now $Now)
+                                $delta = [double](Get-OptionalProperty $copy 'DiscontinuityScore' 0) - [double](Get-OptionalProperty $student 'DiscontinuityScore' 0)
+                                if ([math]::Abs($delta) -ge 0.005) { $discOf[$name] = [math]::Round($delta, 2) }
+                }
+
                 $matched = @($match.Map.Values | ForEach-Object { [string]$_.Name } | Sort-Object -Unique)
                 $notOnFile = @()
                 if ($isBoard) { $notOnFile = @($Students | Where-Object { $null -ne $_ -and $matched -notcontains [string]$_.Name } | ForEach-Object { [string]$_.Name }) }
@@ -13873,6 +14112,8 @@ function Get-SyllabusUpdatePlan {
                                 Ambiguous     = @($match.Ambiguous)
                                 NotInSyllabus = @($notInSyllabus.ToArray() | Sort-Object -Unique)
                                 NotOnFile     = $notOnFile
+                                # Student name -> what the update does to their DiscontinuityScore (only the ones it moves)
+                                Discontinuity = $discOf
                 }
 }
 
@@ -13990,21 +14231,32 @@ function Update-SyllabusTabTargets {
 
 # Applies -Targets to the students' syllabi in memory, through Complete-StudentMission and
 # Undo-StudentMission (so SimDebt moves with each event, and unsat flags are left alone).
+# Each student's DiscontinuityScore moves once, by what all of their changes did to their
+# strings (-Instructors says who the non-counters are).
 # -Preview only works the changes out. Returns the changes, as Update-SyllabusTabTargets does.
 function Invoke-SyllabusUpdate {
-                param ([array]$Targets = @(), $SoftWeights, [datetime]$Now = (Get-Date), [switch]$Preview)
+                param ([array]$Targets = @(), $SoftWeights, [array]$Instructors = @(), [datetime]$Now = (Get-Date), [switch]$Preview)
 
                 $out = New-Object System.Collections.Generic.List[object]
+                $discBefore = [ordered]@{}
                 foreach ($t in $Targets) {
                                 $entry = Find-SyllabusMission -Student $t.Student -Mission $t.Mission
                                 if ($null -eq $entry) { continue }
                                 $res = Get-SyllabusTargetResult -Current $entry -Target $t -Now $Now
                                 if ($null -eq $res) { continue }
-                                if (-not $Preview) {
-                                                if ($res.Kind -eq 'NotComplete') { [void](Undo-StudentMission -Student $t.Student -Mission $entry -SoftWeights $SoftWeights) }
-                                                elseif ($res.Kind -ne 'Planned') { [void](Complete-StudentMission -Student $t.Student -Mission $entry -InstructorName $res.Instructor -ETD $res.ETD -SoftWeights $SoftWeights) }
+                                if (-not $Preview -and $res.Kind -ne 'Planned') {
+                                                $name = [string]$t.Student.Name
+                                                $touches = if ($res.Kind -eq 'NotComplete') { Test-ChangesStrings $entry -Undo } else { Test-ChangesStrings $entry $res.Instructor }
+                                                if ($null -ne $SoftWeights -and $touches -and -not $discBefore.Contains($name)) {
+                                                                $discBefore[$name] = [PSCustomObject]@{ Student = $t.Student; Score = (Get-DiscontinuityScore -Syllabus $t.Student.Syllabus -Instructors $Instructors -SoftWeights $SoftWeights) }
+                                                }
+                                                if ($res.Kind -eq 'NotComplete') { [void](Undo-StudentMission -Student $t.Student -Mission $entry -SoftWeights $SoftWeights -NoDiscontinuity) }
+                                                else { [void](Complete-StudentMission -Student $t.Student -Mission $entry -InstructorName $res.Instructor -ETD $res.ETD -SoftWeights $SoftWeights -NoDiscontinuity) }
                                 }
                                 $out.Add((New-SyllabusChange -Target $t -Result $res -SoftWeights $SoftWeights))
+                }
+                foreach ($b in $discBefore.Values) {
+                                Add-StudentDiscontinuity -Student $b.Student -Delta ((Get-DiscontinuityScore -Syllabus $b.Student.Syllabus -Instructors $Instructors -SoftWeights $SoftWeights) - $b.Score)
                 }
                 return $out.ToArray()
 }
@@ -14013,12 +14265,14 @@ function Invoke-SyllabusUpdate {
 # the cells of the events that change; a student with no tab gets a whole one, from their
 # syllabus in memory, so run Invoke-SyllabusUpdate first) and their SimDebt in MasterData,
 # moved by what the tab changes did (-MemoryChanges: what Invoke-SyllabusUpdate returned, used
-# for the new tabs). A file open in Excel is saved and closed for the write, then opened again.
+# for the new tabs), and their DiscontinuityScore, moved by -DiscontinuityDeltaByName (the
+# plan's Discontinuity). A file open in Excel is saved and closed for the write, then opened again.
 # Returns {Saved; Changes; Message}.
 function Save-SyllabusUpdate {
                 param (
                                 [array]$Targets = @(),
                                 [array]$MemoryChanges = @(),
+                                [hashtable]$DiscontinuityDeltaByName = @{},
                                 [string]$OutputPath,
                                 [string]$MasterDataPath,
                                 $SoftWeights,
@@ -14027,6 +14281,7 @@ function Save-SyllabusUpdate {
                 )
 
                 $result = [PSCustomObject]@{ Saved = $false; Changes = @(); Message = '' }
+                if ($null -eq $DiscontinuityDeltaByName) { $DiscontinuityDeltaByName = @{} }
                 if ([string]::IsNullOrWhiteSpace($OutputPath) -or [string]::IsNullOrWhiteSpace($MasterDataPath) -or -not (Test-Path -LiteralPath $MasterDataPath)) {
                                 $result.Message = 'MasterData.xlsx or OutputSchedule.xlsx was not found'
                                 return $result
@@ -14075,7 +14330,9 @@ function Save-SyllabusUpdate {
                                                                 }
                                                                 foreach ($c in $written) { if ($c.SimDebt -ne 0) { $debt[$c.Student] = [double]$debt[$c.Student] + $c.SimDebt } }
                                                                 foreach ($name in @($debt.Keys)) { if ([math]::Abs($debt[$name]) -lt 0.000001) { $debt.Remove($name) } }
-                                                                if ($debt.Count -gt 0) { Update-MasterDataStudents -MasterDataPath $MasterDataPath -SimDebtDeltaByName $debt }
+                                                                if ($debt.Count -gt 0 -or $DiscontinuityDeltaByName.Count -gt 0) {
+                                                                                Update-MasterDataStudents -MasterDataPath $MasterDataPath -SimDebtDeltaByName $debt -DiscontinuityDeltaByName $DiscontinuityDeltaByName
+                                                                }
                                                 }
                                 }
                                 catch {
@@ -14150,6 +14407,8 @@ function Format-SyllabusUpdateSummary {
                                                 $debt = 0.0
                                                 foreach ($c in $mine) { $debt += [double]$c.SimDebt }
                                                 if ([math]::Abs($debt) -ge 0.005) { $parts += ("SimDebt {0:+0.##;-0.##}" -f $debt) }
+                                                $disc = Get-OptionalProperty $Plan 'Discontinuity' $null
+                                                if ($null -ne $disc -and $disc.Contains($name)) { $parts += ("Discontinuity {0:+0.##;-0.##}" -f [double]$disc[$name]) }
                                                 $lines.Add("  ${name}: $($parts -join '; ')")
                                                 $shown++
                                 }
@@ -21851,7 +22110,7 @@ Add `-Trace` to print every scheduling decision to the console. FAIS restarts it
 4. **Export.** All or nothing: if any part fails, none of the files change. It writes the days you filled:
    - OutputSchedule: the **MasterSchedule** sheet (first tab). Only the filled days are replaced; other days already exported (today onward) are kept, so you can update **one day at a time**,
    - OutputSchedule: **each student's syllabus tab** (tomorrow's run starts from it),
-   - MasterData: **SimDebt**, and **UnsatSim / UnsatFlight** reset to FALSE for students whose schedule cleans up the unsat,
+   - MasterData: **SimDebt**, **DiscontinuityScore** (see *Discontinuity score*), and **UnsatSim / UnsatFlight** reset to FALSE for students whose schedule cleans up the unsat,
    - MasterData: the **String Tracker** sheet, one row per student: 5+, 4, 3, 2 and 1-strings and unique counters, counted from each student's syllabus (the exported rides included). Each category (FT, FF, AA) is counted in mission order; sims, solos and check rides are left out; a non-counter counts only for a student they flew two rides in a row.
 
    It also writes **ATIS.xlsx**: one tab per day (named like `Wednesday. October 21, 2026`). Each tab lists that day's flights in ETD order, then a thick border, then that day's sims (OFT / IFT) in ETD order, in the same columns as MasterSchedule. Each export rebuilds the tabs for the days it covers and keeps every other day's tab, so ATIS builds up a day-by-day history. The file opens on the first day you just exported. Set `WriteAtis = $false` in `$OutputSettings` to turn it off.
@@ -21866,15 +22125,15 @@ Closing the board without exporting writes nothing (only the pre-run pop-ups hav
 |---|---|---|
 | Start | MasterData: Schedule (see *MasterData's Schedule sheet*), Instructors, Students (first 100), SoftWeights, FormCallsigns, StudentAbsences. OutputSchedule: each student's tab (a student with no tab starts from the MasterData Syllabus sheet). Workbooks open in Excel are saved first. | Nothing |
 | **Log Hooked Event** | | MasterData: UnsatSim or UnsatFlight = TRUE |
-| **Log Incomplete Event** | | MasterData: SimDebt (only that event's debt comes off). OutputSchedule: that event's cells on the student's tab |
+| **Log Incomplete Event** | | MasterData: SimDebt and DiscontinuityScore (only that event's part comes off). OutputSchedule: that event's cells on the student's tab |
 | **Change Student HOLD status** | | MasterData: OnHold = TRUE or FALSE for the students you changed |
 | Puck board and fill | MasterData's Schedule sheet again whenever MasterData is saved; **Load a day...** reads it (or the last exported MasterSchedule) fresh | Nothing (the board's own autosave in `Boards\` aside) |
-| **Update Syllabi** | The training file you pick (flying schedule or Big Board) | OutputSchedule: the changed events' cells on the students' tabs (a student with no tab gets one). MasterData: SimDebt |
+| **Update Syllabi** | The training file you pick (flying schedule or Big Board) | OutputSchedule: the changed events' cells on the students' tabs (a student with no tab gets one). MasterData: SimDebt, DiscontinuityScore |
 | **Add Student Absence** | | MasterData: a line on StudentAbsences for each student (Student, StartTime, EndTime, Reason, IsActive = TRUE) |
-| **Export** | | OutputSchedule: MasterSchedule (the filled days), student tabs. MasterData: SimDebt, unsat resets, String Tracker, and any absence **Add Student Absence** could not save. ATIS: the exported days' tabs |
+| **Export** | | OutputSchedule: MasterSchedule (the filled days), student tabs. MasterData: SimDebt, DiscontinuityScore, unsat resets, String Tracker, and any absence **Add Student Absence** could not save. ATIS: the exported days' tabs |
 
 - **MasterSchedule is the only sheet of OutputSchedule that is rewritten**, and only the filled days in it change (ATIS rebuilds the tabs of the days it exports). A student's tab is updated in place: only the Instructor, ETD and IsComplete cells of events that changed are written, so your own columns, notes and formatting stay. A student with no tab gets a new one.
-- **MasterData Students sheet:** students are matched by the column headed SPName and SimDebt goes to the column headed SimDebt (columns B and P when those headings are missing). UnsatSim and UnsatFlight are written to the columns with those headings.
+- **MasterData Students sheet:** students are matched by the column headed SPName and SimDebt goes to the column headed SimDebt (columns B and P when those headings are missing). DiscontinuityScore goes to the column headed DiscontinuityScore; the first time, FAIS adds that heading after the last one (column Q on the usual sheet). UnsatSim and UnsatFlight are written to the columns with those headings.
 - **Absences** are attached only when the name matches a student's name exactly (capital letters aside). A name that matches no one is reported in the console. **Add Student Absence** always writes the name exactly as the Students sheet has it.
 - **Unsat clean-up:** after a hooked OFT, the student can't fly until an OFT. After a hooked IFT, an OFT or IFT will do. After a hooked flight, the student can't sim until they fly. The scheduler and the board treat the unsat as cleaned up for every line after that sim or flight, and the line's Notes say `Clears Unsat Sim (OFT)` (or IFT, or `Clears Unsat Flight`). MasterData only says TRUE or FALSE, so for an unsat typed into MasterData the hooked sim is taken to be the student's last sim flown (an OFT if unknown). If you re-plan a day whose schedule cleaned up an unsat, the unsat comes back until the new schedule cleans it up again.
 
@@ -21923,11 +22182,35 @@ The board reads the **Schedule** sheet and keeps watching it:
 - A name that could be more than one student is left alone and listed.
 - The IP is written the way MasterData's Instructors sheet spells them when they are on it, otherwise as the file has them, without the rank.
 
-**Before anything is saved** you see what will change, student by student: events marked complete, events marked NOT complete (with the status, e.g. `(CX)`), IP / ETD updates, and each student's SimDebt change. Then come the people, events and planned events left alone. The console lists everything. **Yes** saves right away:
+**Before anything is saved** you see what will change, student by student: events marked complete, events marked NOT complete (with the status, e.g. `(CX)`), IP / ETD updates, and each student's SimDebt and Discontinuity change. Then come the people, events and planned events left alone. The console lists everything. **Yes** saves right away:
 - the changed events' Instructor, ETD and IsComplete cells on each student's tab in OutputSchedule (nothing else on the tab is touched; a student with no tab gets one);
-- SimDebt in MasterData, moved by each changed event, the same way a scheduled event or a logged incomplete moves it.
+- SimDebt in MasterData, moved by each changed event, the same way a scheduled event or a logged incomplete moves it;
+- DiscontinuityScore in MasterData, moved by what the changes did to the student's strings (a blank cell stays blank and is counted at the next start).
 
 Both files are saved or neither. If they can't be saved (still open), the change is kept for this run and Export writes it. If you are reviewing a fill, it is thrown away (it was made from the old syllabi), so fill again.
+
+## Discontinuity score
+
+Each student has a **DiscontinuityScore**: how broken up their rides have been. It is counted from the same strings and counters as the String Tracker:
+
+| Each | Points (SoftWeights heading, default) |
+|---|---|
+| 1-string | `Disc1String`, **+1** |
+| unique counter | `DiscCounter`, **+1** |
+| 3+ string (3, 4, 5+) | `Disc3PlusString`, **-1** |
+
+A student who keeps getting a new IP (lots of 1-strings and counters) has a high score; a student who has had long strings has a low one.
+
+**What it does:** when a line would **continue the student's string** (the *Continue String* rule: the IP flew their last ride, and it would make a 2- or 3-string), the score is added on top, as its own line in the + / − list: `Discontinuity 4, 2 String +4`. So of two students who could stay with an IP, the one with the more broken-up history gets to. A negative score takes points off. String 4 / String 5, Zipper, Break String and Non-Counter lines don't get it.
+
+**It is kept like SimDebt:**
+- read from the **DiscontinuityScore** column of MasterData's Students sheet at start;
+- moved by every ride that is scheduled (hardcoded lines, the scheduler's picks, wingmen and return legs), logged incomplete, re-planned, or changed by Update Syllabi: by what that ride does to the student's strings. Sims, solos and check rides don't count, as on the String Tracker;
+- written back on **Export**, **Log Incomplete Event** and **Update Syllabi**. A number you type in yourself is kept and moved from there.
+
+**A blank cell** (or no DiscontinuityScore column yet, the first time) is counted from the student's syllabus at start, and Export writes it. To have FAIS count a student's score again, clear their cell. The student's puck shows the score when you hover over it.
+
+Add `Disc1String`, `DiscCounter` and `Disc3PlusString` columns to the SoftWeights sheet to change the points; a blank or missing one uses the default. A new weight applies to the rides from then on; clear the DiscontinuityScore cells to count everyone again with it.
 
 ## Add Student Absence
 
@@ -21972,8 +22255,8 @@ An absence a student already has (same start and end) is not added twice.
 | **Line details** (under the days) | The selected line's student against every rule, and every student ranked for that line. See *Line details* below. |
 | **Colors** (top right) | A small window that says what every color on the board means (also Help > What the colors mean). |
 | **Day tabs** | One tab per day. **Add day** builds several days at once; crew rest is checked across them. |
-| **IP pucks** (left) | Drag onto a line's IP slot. The badge shows how many lines that IP has that day. |
-| **Student pucks** (right) | Drag onto a line's student slot to hardcode them. Badges: CAP, INTL, HOLD, U-SIM, U-FLT, ABS times, turns that day. |
+| **IP pucks** (left) | Drag onto a line's IP slot. The badge shows how many lines that IP has that day. Non-counter IPs (NC) are purple instead of blue, in the pool and on the lines. |
+| **Student pucks** (right) | Drag onto a line's student slot to hardcode them. Badges: CAP, INTL, HOLD, U-SIM, U-FLT, ABS times, turns that day. Hover for the next events, sim debt, discontinuity score and priority. |
 
 - **Two ways to put a puck on a line:** drag it onto the slot, or **click it to pick it up** (it gets a thick outline and a dark banner says what you are holding) and then **click the slot**. Hold **Ctrl** as you click the slot to keep holding the puck for another line; **Esc** or **Let go** puts it down. **Double-click** a puck to put it straight on the selected line.
 - **Moving pucks:** drag between lines to move a puck (hold **Ctrl** to copy). Drop it back on its pool to take it off the line.
@@ -21981,7 +22264,7 @@ An absence a student already has (same start and end) is not added twice.
 - **When you drop a student,** a pop-up lists:
   - hard-rule flags (red ✖), for example `Turn time 2.8 hr < 3.25 hr minimum (vs 0730 FT5103)` or `Not opted for FE3102: FT5001 isn't complete yet` (a sim whose prerequisite is the dollar ride);
   - warnings, for example `Less than 3.5 hr TT, Flt/CC Approval Required`;
-  - the **+ / −** score reasons, spelled out, for example `3 String +10`, `Breaks 4 String w/ Lee −5` or `2 Flights and 2 Sims in last 5 Days −6`.
+  - the **+ / −** score reasons, spelled out, for example `3 String +10`, `Discontinuity 4, 3 String +4`, `Breaks 4 String w/ Lee −5` or `2 Flights and 2 Sims in last 5 Days −6`.
 - **Rule breaks are allowed.** The line is hardcoded anyway and marked `OVERRIDE: ...` on the output.
 - **Corner marker** on every hardcoded student: green, amber, red, or grey while checking. Hover for the reasons; right-click for more (explain, take off, *Fly wing to...*, duplicate, delete line).
 - **Mission dropdown:** `(auto)` picks the best-scoring event that passes the rules. Choose an event to hardcode it. After the events the student can fly on the line come the next ones they are **not opted for** yet (marked `(not opted)`), then **Type a mission...** for anything else.
@@ -22061,6 +22344,7 @@ These are deliberate fixes, so expect some different picks:
 - **Formation callsigns** restart at the first FormCallsigns pair each day.
 - **Teams day sheets** are replaced when a day is exported again (they used to keep the old lines too).
 - **SimDebt** is written to the MasterData column headed `SimDebt` (column P only when there is no such heading).
+- **Discontinuity score** (new): a Continue String also gets the student's DiscontinuityScore, so students with a lot of 1-strings and counters are kept with an IP first (see *Discontinuity score*).
 
 ######## ./Tests/Assessment.Tests.ps1.txt ########
 # Pester 5 tests for Modules/Assessment.psm1: Get-PlacementAssessment (what if this
@@ -22779,6 +23063,20 @@ Describe 'Get-PlacementAssessment: inputs are never changed' {
                                 @($able.Syllabus | Where-Object { $_.IsComplete }).Count | Should -Be 2
                 }
 
+                It 'an earlier pin that day moves the DiscontinuityScore the later line scores with (the original is left alone)' {
+                                $able = New-TestStudent -Name 'Able, Amy' -Done 'FI3101|2026-02-20 08:00', 'FT5001|2026-02-23 08:00|Jones, Bob' -DiscontinuityScore 1
+                                $data = New-AsData @($able)
+                                $b = New-AsBoard -Lines @(
+                                                @{ Id = 'M1'; ETD = '2026-03-03 07:30'; Type = 'Day Local'; IP = 'Lee, Ann'; Student = 'Able, Amy'; Mission = 'FT5102' },
+                                                @{ Id = 'M2'; ETD = '2026-03-03 13:00'; Type = 'Day Local'; IP = 'Lee, Ann' }
+                                )
+                                # M1 flies FT5102 with Lee first: Jones, Lee is two 1-strings and two counters (+2)
+                                $d = Get-Detail (Get-Assess $b 'M2' 'Able, Amy' $data) 'FT5103'
+                                Get-Points $d 'Continue String' | Should -Be 10
+                                Get-Points $d 'Discontinuity (string)' | Should -Be 3
+                                $able.DiscontinuityScore | Should -Be 1
+                }
+
                 It 'leaves the board lines and Version untouched' {
                                 $able = New-TestStudent -Name 'Able, Amy' -Done $script:AbleDone
                                 $data = New-AsData @($able)
@@ -23320,6 +23618,15 @@ Describe 'Get-StudentPuckInfo' {
                                 $s = New-TestStudent -Name 'Blank, Bea'
                                 $s.SimDebt = ''
                                 (Get-StudentPuckInfo -Student $s -Board $board -Day '2026-03-03').SimDebt | Should -Be 0
+                }
+
+                It 'reports DiscontinuityScore as a number (0 when blank or missing)' {
+                                $s = New-TestStudent -Name 'Disc, Dee' -DiscontinuityScore 6
+                                (Get-StudentPuckInfo -Student $s -Board $board -Day '2026-03-03').Discontinuity | Should -Be 6
+                                $s.DiscontinuityScore = ''
+                                (Get-StudentPuckInfo -Student $s -Board $board -Day '2026-03-03').Discontinuity | Should -Be 0
+                                $s.PSObject.Properties.Remove('DiscontinuityScore')
+                                (Get-StudentPuckInfo -Student $s -Board $board -Day '2026-03-03').Discontinuity | Should -Be 0
                 }
 }
 
@@ -26077,6 +26384,29 @@ Describe 'Update-MasterDataStudents' -Skip:(-not $script:HasExcel) {
                                 $rows[1].SimDebt | Should -Be 2
                 }
 
+                It 'writes DiscontinuityScore under its own heading, added after the last heading when there is none' {
+                                Update-MasterDataStudents -MasterDataPath $script:MD -DiscontinuityByName @{ 'Adams, Al' = 4; 'Cole, Cy' = -1 } 6>$null
+                                (Get-TCell -Path $script:MD -Sheet 'Students' -Row 1 -Col 17) | Should -Be 'DiscontinuityScore'
+                                $rows = @(Import-Excel -Path $script:MD -WorksheetName 'Students')
+                                $rows[0].DiscontinuityScore | Should -Be 4
+                                $rows[1].DiscontinuityScore | Should -BeNullOrEmpty
+                                $rows[2].DiscontinuityScore | Should -Be -1
+                                $rows[0].SimDebt | Should -Be 1
+                                
+                                # Written again: the same column, no second heading
+                                Update-MasterDataStudents -MasterDataPath $script:MD -DiscontinuityByName @{ 'Adams, Al' = 5 } 6>$null
+                                (Get-TCell -Path $script:MD -Sheet 'Students' -Row 1 -Col 18) | Should -BeNullOrEmpty
+                                @(Import-Excel -Path $script:MD -WorksheetName 'Students')[0].DiscontinuityScore | Should -Be 5
+                }
+
+                It 'moves DiscontinuityScore by -DiscontinuityDeltaByName, and leaves a blank cell blank' {
+                                Update-MasterDataStudents -MasterDataPath $script:MD -DiscontinuityByName @{ 'Adams, Al' = 4 } 6>$null
+                                Update-MasterDataStudents -MasterDataPath $script:MD -DiscontinuityDeltaByName @{ 'Adams, Al' = -1.5; 'Brown, Bea' = 3 } 6>$null
+                                $rows = @(Import-Excel -Path $script:MD -WorksheetName 'Students')
+                                $rows[0].DiscontinuityScore | Should -Be 2.5
+                                $rows[1].DiscontinuityScore | Should -BeNullOrEmpty
+                }
+
                 It 'warns about names it can''t find and still writes the rest' {
                                 $w = Update-MasterDataStudents -MasterDataPath $script:MD -SimDebtByName @{ 'Adams, Al' = 9; 'Nobody, No' = 1 } 6>$null 3>&1
                                 ($w | Out-String) | Should -Match 'Nobody, No'
@@ -26322,6 +26652,23 @@ Describe 'IngestData' -Skip:(-not $script:HasExcel) {
                                 $lee.UnsatSimType | Should -Be ''
                                 $lee.UnsatFlightInMasterData | Should -BeTrue
                                 $adams.SimDebt | Should -Be 1.5
+                }
+
+                It 'counts DiscontinuityScore from the syllabus when MasterData has no DiscontinuityScore column' {
+                                (Get-IStudent 'Adams, Al').DiscontinuityScore | Should -Be 2     # FT5001 with Jones: a 1-string and a counter
+                                (Get-IStudent 'Lee, Ann').DiscontinuityScore | Should -Be 0
+                }
+
+                It 'reads DiscontinuityScore from MasterData, counting only the blank cells' {
+                                $md = Join-Path $TestDrive 'Ingest-Disc.xlsx'
+                                $a = New-TStudentRow -Name 'Adams, Al' -Key 1
+                                $a | Add-Member -NotePropertyName DiscontinuityScore -NotePropertyValue $null
+                                $l = New-TStudentRow -Name 'Lee, Ann' -Key 2
+                                $l | Add-Member -NotePropertyName DiscontinuityScore -NotePropertyValue 9
+                                New-TMasterData -Path $md -Students @($a, $l)
+                                $ing = IngestData -excelInputPath $md -excelOutputPath $script:IOut 3>$null 6>$null
+                                ($ing.Students | Where-Object { $_.Name -eq 'Adams, Al' }).DiscontinuityScore | Should -Be 2
+                                ($ing.Students | Where-Object { $_.Name -eq 'Lee, Ann' }).DiscontinuityScore | Should -Be 9
                 }
 }
 
@@ -26986,8 +27333,8 @@ BeforeAll {
 
     function New-Fill {
         param ([array]$Rows, [string[]]$Days)
-        $a = New-TestStudent -Name 'Adams, Al' -SimDebt 2.5
-        $b = New-TestStudent -Name 'Brown, Bea' -SimDebt 1
+        $a = New-TestStudent -Name 'Adams, Al' -SimDebt 2.5 -DiscontinuityScore 3
+        $b = New-TestStudent -Name 'Brown, Bea' -SimDebt 1 -DiscontinuityScore -1
         return [PSCustomObject]@{ Schedule = $Rows; Students = @($a, $b); Days = $Days }
     }
 
@@ -27032,11 +27379,13 @@ Describe 'Export-FaisOutput one day at a time' {
         } finally { Close-ExcelPackage $pkg -NoSave }
     }
 
-    It 'writes SimDebt into the column headed SimDebt' {
+    It 'writes SimDebt into the column headed SimDebt, and DiscontinuityScore into a column of its own (added when missing)' {
         $s = @(Import-Excel -Path $script:MD -WorksheetName 'Students')
         ($s | Where-Object { $_.SPName -eq 'Adams, Al' }).SimDebt | Should -Be 2.5
         ($s | Where-Object { $_.SPName -eq 'Brown, Bea' }).SimDebt | Should -Be 1
-        @($s[0].PSObject.Properties.Name) -join ',' | Should -BeExactly 'SPKey,SPName,SimDebt'
+        ($s | Where-Object { $_.SPName -eq 'Adams, Al' }).DiscontinuityScore | Should -Be 3
+        ($s | Where-Object { $_.SPName -eq 'Brown, Bea' }).DiscontinuityScore | Should -Be -1
+        @($s[0].PSObject.Properties.Name) -join ',' | Should -BeExactly 'SPKey,SPName,SimDebt,DiscontinuityScore'
     }
 
     It 'exporting the same day again replaces it (no duplicates)' {
@@ -28093,6 +28442,51 @@ Describe 'Invoke-FillSchedule' {
                                 }
                 }
 
+                Context 'DiscontinuityScore' {
+
+                                It 'moves for pins, engine picks, wingmen and return legs, keeping a hand-set score' {
+                                                $students = @(
+                                                                New-TestStudent -Name 'Able, Amy' -Done @('FI3101|2026-10-15 08:00') -DiscontinuityScore 1
+                                                                New-TestStudent -Name 'Dunn, Di' -Done @('FI3101|2026-10-14 08:00')
+                                                                New-TestStudent -Name 'Adams, Al' -Done $script:FormDone -DiscontinuityScore 5
+                                                                New-TestStudent -Name 'Brown, Bea' -Done $script:FormDone
+                                                )
+                                                $rows = @(
+                                                                New-TestRow -ETD '2026-10-20 06:00' -SortieType 'OFT' -Id 'P1' -Student 'Able, Amy' -Mission 'FE3102'
+                                                                New-TestRow -ETD '2026-10-20 05:00' -SortieType 'O&B' -Instructor 'Ortiz, Sam' -Id 'OB1' -LinkedLineId 'RT1'
+                                                                New-TestRow -ETD '2026-10-20 08:00' -SortieType 'O&B Return' -Instructor 'Ortiz, Sam' -Id 'RT1'
+                                                                New-TestRow -ETD '2026-10-20 08:00' -Instructor 'Jones, Bob' -Id 'F1'
+                                                                New-TestRow -ETD '2026-10-20 08:10' -Instructor 'Lee, Ann' -Id 'F2'
+                                                )
+                                                $r = Invoke-TFill -Schedule $rows -Students $students
+
+                                                Get-NameText (Get-TRow $r 'OB1').Student | Should -Be 'Dunn, Di'
+                                                Get-NameText (Get-TRow $r 'F1').Student | Should -Be 'Adams, Al'
+                                                Get-NameText (Get-TRow $r 'F2').Student | Should -Be 'Brown, Bea'
+
+                                                (Get-TStudent $r 'Able, Amy').DiscontinuityScore | Should -Be 1     # pinned sim: no strings
+                                                (Get-TStudent $r 'Dunn, Di').DiscontinuityScore | Should -Be 1      # O&B + return with Ortiz: one 2-string, one counter
+                                                (Get-TStudent $r 'Adams, Al').DiscontinuityScore | Should -Be 7     # lead FF5201 with Jones: a 1-string and a counter
+                                                (Get-TStudent $r 'Brown, Bea').DiscontinuityScore | Should -Be 2    # wing FF5201 with Lee: the same
+                                }
+
+                                It 'puts the student with the higher score on the line that continues their string' {
+                                                $done = @('FI3101|2026-10-15 08:00', 'FT5001|2026-10-16 08:00|Jones, Bob')
+                                                $students = @(
+                                                                New-TestStudent -Name 'Able, Amy' -Done $done
+                                                                New-TestStudent -Name 'Zane, Zoe' -Done $done -DiscontinuityScore 4
+                                                )
+                                                $rows = @(New-TestRow -ETD '2026-10-20 08:00' -Instructor 'Jones, Bob' -Id 'F1')
+                                                $r = Invoke-TFill -Schedule $rows -Students $students
+                                                Get-NameText (Get-TRow $r 'F1').Student | Should -Be 'Zane, Zoe'
+
+                                                # Level, the tie goes to the name
+                                                $students = @(New-TestStudent -Name 'Able, Amy' -Done $done; New-TestStudent -Name 'Zane, Zoe' -Done $done)
+                                                $r = Invoke-TFill -Schedule @(New-TestRow -ETD '2026-10-20 08:00' -Instructor 'Jones, Bob' -Id 'F1') -Students $students
+                                                Get-NameText (Get-TRow $r 'F1').Student | Should -Be 'Able, Amy'
+                                }
+                }
+
                 Context 'unsat clean-up' {
 
                                 It 'an OFT re-sim earlier in the day lets an UnsatSim student fly a later line' {
@@ -28648,6 +29042,7 @@ function New-TestStudent {
                                 [switch]$UnsatFlight,
                                 [double]$Priority = 0,
                                 [double]$SimDebt = 0,
+                                [double]$DiscontinuityScore = 0,
                                 [array]$Absences = @()
                 )
 
@@ -28662,19 +29057,20 @@ function New-TestStudent {
                 }
 
                 return [PSCustomObject]@{
-                                ID              = $Name
-                                Name            = $Name
-                                IsCap           = [bool]$IsCap
-                                IsInternational = [bool]$IsInternational
-                                Priority        = $Priority
-                                UnsatSim        = [bool]$UnsatSim
-                                UnsatSimType    = $UnsatSimType
-                                UnsatFlight     = [bool]$UnsatFlight
-                                OnHold          = [bool]$OnHold
-                                SimDebt         = $SimDebt
-                                Syllabus        = $syl
-                                Absences        = $Absences
-                                Reservations    = @()
+                                ID                 = $Name
+                                Name               = $Name
+                                IsCap              = [bool]$IsCap
+                                IsInternational    = [bool]$IsInternational
+                                Priority           = $Priority
+                                UnsatSim           = [bool]$UnsatSim
+                                UnsatSimType       = $UnsatSimType
+                                UnsatFlight        = [bool]$UnsatFlight
+                                OnHold             = [bool]$OnHold
+                                SimDebt            = $SimDebt
+                                DiscontinuityScore = $DiscontinuityScore
+                                Syllabus           = $syl
+                                Absences           = $Absences
+                                Reservations       = @()
                 }
 }
 
@@ -29114,6 +29510,119 @@ Describe 'Undo-StudentMission and Reset-PlannedCompletions' {
                                 $f.UnsatSim | Should -BeFalse
                                 # Cleaned up on a day that is not being re-planned: stays cleaned up
                                 $old.UnsatSim | Should -BeFalse
+                }
+}
+
+Describe 'Discontinuity score' {
+                # Test syllabus flights: FT5001 FT5102 FT5104 (FT), FF5201 FF5202 (FF); FT5103 is a solo, FT5190 a check ride
+                It 'Get-DiscontinuityScore: +1 per 1-string, +1 per counter, -1 per 3+ string by default' {
+                                $syl = (New-TestStudent -Name 'A' -Done 'FT5001|2026-02-23 08:00|Jones, Bob', 'FT5102|2026-02-24 08:00|Jones, Bob', 'FT5104|2026-02-25 08:00|Jones, Bob', 'FF5201|2026-02-26 08:00|Lee, Ann').Syllabus
+                                # One 3-string (Jones), one 1-string (Lee), two counters
+                                Get-DiscontinuityScore -Syllabus $syl -Instructors $script:IPs -SoftWeights $script:W | Should -Be 2
+                                Get-DiscontinuityScore -Syllabus (New-TestStudent -Name 'B').Syllabus -Instructors $script:IPs -SoftWeights $script:W | Should -Be 0
+                }
+
+                It 'Get-DiscontinuityScore reads Disc1String / DiscCounter / Disc3PlusString from SoftWeights (blank = default)' {
+                                $syl = (New-TestStudent -Name 'A' -Done 'FT5001|2026-02-23 08:00|Jones, Bob', 'FT5102|2026-02-24 08:00|Jones, Bob', 'FT5104|2026-02-25 08:00|Jones, Bob', 'FF5201|2026-02-26 08:00|Lee, Ann').Syllabus
+                                $w = New-TestSoftWeights
+                                $w | Add-Member -NotePropertyName Disc1String -NotePropertyValue 2
+                                $w | Add-Member -NotePropertyName DiscCounter -NotePropertyValue 0.5
+                                $w | Add-Member -NotePropertyName Disc3PlusString -NotePropertyValue -3
+                                Get-DiscontinuityScore -Syllabus $syl -Instructors $script:IPs -SoftWeights $w | Should -Be 0
+                                $w.Disc1String = ''
+                                Get-DiscontinuityScore -Syllabus $syl -Instructors $script:IPs -SoftWeights $w | Should -Be -1
+                }
+
+                It 'Complete-StudentMission moves it by what the ride does to the strings, keeping a hand-set score' {
+                                $s = New-TestStudent -Name 'A' -Done 'FI3101|2026-02-20 08:00', 'FT5001|2026-02-23 08:00|Jones, Bob' -DiscontinuityScore 10
+                                # Jones, Lee: two 1-strings and two counters (4, was 2)
+                                $null = Complete-StudentMission -Student $s -Mission 'FT5102' -InstructorName 'Lee, Ann' -ETD '2026-03-03 07:30' -SoftWeights $script:W -Instructors $script:IPs
+                                $s.DiscontinuityScore | Should -Be 12
+                                # Jones, Lee, Lee: Lee's 1-string becomes a 2-string (3)
+                                $null = Complete-StudentMission -Student $s -Mission 'FT5104' -InstructorName 'Lee, Ann' -ETD '2026-03-04 07:30' -SoftWeights $script:W -Instructors $script:IPs
+                                $s.DiscontinuityScore | Should -Be 11
+                }
+
+                It 'sims, solos and check rides leave it alone, as do -NoDiscontinuity and no SoftWeights' {
+                                $s = New-TestStudent -Name 'A' -Done 'FI3101|2026-02-20 08:00', 'FT5001|2026-02-23 08:00|Jones, Bob', 'FT5102|2026-02-24 08:00|Jones, Bob' -DiscontinuityScore 5
+                                $null = Complete-StudentMission -Student $s -Mission 'FE3102' -InstructorName 'SIM IP' -ETD '2026-03-03 07:30' -SoftWeights $script:W -Instructors $script:IPs
+                                $null = Complete-StudentMission -Student $s -Mission 'FT5103' -InstructorName 'Lee, Ann' -ETD '2026-03-03 09:30' -SoftWeights $script:W -Instructors $script:IPs
+                                $null = Complete-StudentMission -Student $s -Mission 'FT5190' -InstructorName 'Ortiz, Sam' -ETD '2026-03-03 12:30' -SoftWeights $script:W -Instructors $script:IPs
+                                $s.DiscontinuityScore | Should -Be 5
+                                $null = Complete-StudentMission -Student $s -Mission 'FT5104' -InstructorName 'Lee, Ann' -ETD '2026-03-04 07:30' -SoftWeights $script:W -Instructors $script:IPs -NoDiscontinuity
+                                $null = Complete-StudentMission -Student $s -Mission 'FF5201' -InstructorName 'Lee, Ann' -ETD '2026-03-05 07:30' -Instructors $script:IPs
+                                $s.DiscontinuityScore | Should -Be 5
+                }
+
+                It 'a new IP on a ride already flown moves it; the same IP again does not' {
+                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-23 08:00|Jones, Bob', 'FT5102|2026-02-24 08:00|Jones, Bob' -DiscontinuityScore 1
+                                $null = Complete-StudentMission -Student $s -Mission 'FT5102' -InstructorName 'Lee, Ann' -ETD '2026-02-24 08:00' -SoftWeights $script:W -Instructors $script:IPs
+                                $s.DiscontinuityScore | Should -Be 4
+                                $null = Complete-StudentMission -Student $s -Mission 'FT5102' -InstructorName 'Lee, Ann' -ETD '2026-02-24 09:00' -SoftWeights $script:W -Instructors $script:IPs
+                                $s.DiscontinuityScore | Should -Be 4
+                }
+
+                It 'non-counters come from -Instructors' {
+                                $a = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-23 08:00|Jones, Bob' -DiscontinuityScore 2
+                                $b = New-TestStudent -Name 'B' -Done 'FT5001|2026-02-23 08:00|Jones, Bob' -DiscontinuityScore 2
+                                # Leech is a non-counter: his ride is no string and he is no counter
+                                $null = Complete-StudentMission -Student $a -Mission 'FT5102' -InstructorName 'Leech, Tom' -ETD '2026-03-03 07:30' -SoftWeights $script:W -Instructors $script:IPs
+                                $a.DiscontinuityScore | Should -Be 2
+                                # Without the Instructors list every IP counts
+                                $null = Complete-StudentMission -Student $b -Mission 'FT5102' -InstructorName 'Leech, Tom' -ETD '2026-03-03 07:30' -SoftWeights $script:W
+                                $b.DiscontinuityScore | Should -Be 4
+                }
+
+                It 'Undo-StudentMission backs out only that ride''s part' {
+                                $s = New-TestStudent -Name 'A' -Done 'FI3101|2026-02-20 08:00', 'FT5001|2026-02-23 08:00|Jones, Bob', 'FT5102|2026-02-24 08:00|Lee, Ann' -DiscontinuityScore 20
+                                Undo-StudentMission -Student $s -Mission 'FT5102' -SoftWeights $script:W -Instructors $script:IPs | Should -BeTrue
+                                $s.DiscontinuityScore | Should -Be 18
+                                Undo-StudentMission -Student $s -Mission 'FI3101' -SoftWeights $script:W -Instructors $script:IPs | Should -BeTrue
+                                $s.DiscontinuityScore | Should -Be 18
+                                Undo-StudentMission -Student $s -Mission 'FT5001' -SoftWeights $script:W -Instructors $script:IPs -NoDiscontinuity | Should -BeTrue
+                                $s.DiscontinuityScore | Should -Be 18
+                }
+
+                It 'Reset-PlannedCompletions moves each student once, to what taking the events back one by one gives' {
+                                $done = @('FI3101|2026-02-20 08:00', 'FT5001|2026-02-23 08:00|Jones, Bob', 'FT5102|2026-03-03 07:30|Lee, Ann', 'FT5104|2026-03-04 07:30|Ortiz, Sam')
+                                $s = New-TestStudent -Name 'A' -Done $done -DiscontinuityScore 30
+                                $one = New-TestStudent -Name 'A' -Done $done -DiscontinuityScore 30
+                                $other = New-TestStudent -Name 'B' -Done 'FI3101|2026-02-20 08:00', 'FT5001|2026-02-23 08:00|Jones, Bob' -DiscontinuityScore 3
+                                $changed = @(Reset-PlannedCompletions -Students @($s, $other) -FromDate ([datetime]'2026-03-03') -SoftWeights $script:W -Instructors $script:IPs)
+                                @($changed | ForEach-Object { $_.Name }) | Should -Be @('A')
+                                # Jones, Lee, Ortiz (6) back to Jones (2)
+                                $s.DiscontinuityScore | Should -Be 26
+                                $other.DiscontinuityScore | Should -Be 3
+                                foreach ($m in @('FT5104', 'FT5102')) { $null = Undo-StudentMission -Student $one -Mission $m -SoftWeights $script:W -Instructors $script:IPs }
+                                $one.DiscontinuityScore | Should -Be $s.DiscontinuityScore
+                }
+
+                It 'Initialize-StudentDiscontinuity counts only the blank scores, from the syllabus' {
+                                $a = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-23 08:00|Jones, Bob', 'FT5102|2026-02-24 08:00|Lee, Ann'
+                                $a.DiscontinuityScore = $null
+                                $b = New-TestStudent -Name 'B' -Done 'FT5001|2026-02-23 08:00|Jones, Bob'
+                                $b.DiscontinuityScore = ''
+                                $c = New-TestStudent -Name 'C' -Done 'FT5001|2026-02-23 08:00|Jones, Bob' -DiscontinuityScore 7
+                                $d = New-TestStudent -Name 'D' -Done 'FT5001|2026-02-23 08:00|Jones, Bob'
+                                $d.PSObject.Properties.Remove('DiscontinuityScore')
+                                @(Initialize-StudentDiscontinuity -Students @($a, $b, $c, $d) -Instructors $script:IPs -SoftWeights $script:W) | Should -Be @('A', 'B', 'D')
+                                $a.DiscontinuityScore | Should -Be 4
+                                $b.DiscontinuityScore | Should -Be 2
+                                $c.DiscontinuityScore | Should -Be 7
+                                $d.DiscontinuityScore | Should -Be 2
+                }
+
+                It 'Test-ChangesStrings: <What>' -TestCases @(
+                                @{ What = 'flying a ride'; Done = @(); Mission = 'FT5001'; IP = 'Jones, Bob'; Undo = $false; Want = $true }
+                                @{ What = 'flying a sim'; Done = @(); Mission = 'FI3101'; IP = 'SIM IP'; Undo = $false; Want = $false }
+                                @{ What = 'flying a solo'; Done = @(); Mission = 'FT5103'; IP = 'Jones, Bob'; Undo = $false; Want = $false }
+                                @{ What = 'a new IP on a flown ride'; Done = @('FT5001|2026-02-23 08:00|Jones, Bob'); Mission = 'FT5001'; IP = 'Lee, Ann'; Undo = $false; Want = $true }
+                                @{ What = 'the same IP on a flown ride'; Done = @('FT5001|2026-02-23 08:00|Jones, Bob'); Mission = 'FT5001'; IP = 'Jones, Bob'; Undo = $false; Want = $false }
+                                @{ What = 'taking a ride back'; Done = @('FT5001|2026-02-23 08:00|Jones, Bob'); Mission = 'FT5001'; IP = ''; Undo = $true; Want = $true }
+                                @{ What = 'taking a sim back'; Done = @('FI3101|2026-02-20 08:00'); Mission = 'FI3101'; IP = ''; Undo = $true; Want = $false }
+                ) {
+                                $s = New-TestStudent -Name 'A' -Done $Done
+                                Test-ChangesStrings (Find-SyllabusMission -Student $s -Mission $Mission) $IP -Undo:$Undo | Should -Be $Want
                 }
 }
 
@@ -30236,6 +30745,37 @@ Describe 'SoftRules -Detailed' {
                                                 $r.Breakdown['Continue String'] | Should -Be 10
                                                 $r.Breakdown['CAP Bonus (string)'] | Should -Be 8
                                                 $r.Reasons['CAP Bonus (string)'] | Should -Be 'CAP student, 2 String'
+                                }
+
+                                It 'Discontinuity (string) adds the student''s DiscontinuityScore to a Continue String' {
+                                                $done = @('FT5001|2026-02-24 08:00|Lee, Ann', 'FT5102|2026-02-26 08:00|Jones, Bob')
+                                                $s = New-TestStudent -Name 'A' -Done $done -DiscontinuityScore 6
+                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5103'
+                                                $r.Breakdown['Continue String'] | Should -Be 10
+                                                $r.Breakdown['Discontinuity (string)'] | Should -Be 6
+                                                $r.Reasons['Discontinuity (string)'] | Should -Be 'Discontinuity 6, 2 String'
+                                                $plain = Get-Soft -Student (New-TestStudent -Name 'B' -Done $done) -Instructor 'Jones, Bob' -Mission 'FT5103'
+                                                $plain.Breakdown.Contains('Discontinuity (string)') | Should -BeFalse
+                                                ($r.Score - $plain.Score) | Should -Be 6
+                                }
+
+                                It 'a negative DiscontinuityScore takes points off a Continue String' {
+                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Lee, Ann', 'FT5102|2026-02-26 08:00|Jones, Bob' -DiscontinuityScore -2
+                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5103'
+                                                $r.Breakdown['Discontinuity (string)'] | Should -Be -2
+                                                $r.Reasons['Discontinuity (string)'] | Should -Be 'Discontinuity -2, 2 String'
+                                }
+
+                                It 'only a Continue String gets the DiscontinuityScore (<What>)' -TestCases @(
+                                                @{ What = 'String 4'; Done = @('FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-25 08:00|Jones, Bob', 'FT5103|2026-02-26 08:00|Jones, Bob'); IP = 'Jones, Bob'; Key = 'String 4' }
+                                                @{ What = 'Zipper'; Done = @('FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-26 08:00|Lee, Ann'); IP = 'Jones, Bob'; Key = 'Zipper' }
+                                                @{ What = 'Break String'; Done = @('FT5001|2026-02-24 08:00|Lee, Ann', 'FT5102|2026-02-26 08:00|Ortiz, Sam'); IP = 'Jones, Bob'; Key = 'Break String' }
+                                                @{ What = 'Non-Counter'; Done = @('FT5001|2026-02-24 08:00|Lee, Ann', 'FT5102|2026-02-26 08:00|Ortiz, Sam'); IP = 'Leech, Tom'; Key = 'Non-Counter' }
+                                ) {
+                                                $s = New-TestStudent -Name 'A' -Done $Done -DiscontinuityScore 6
+                                                $r = Get-Soft -Student $s -Instructor $IP -Mission 'FT5104'
+                                                $r.Breakdown.Contains($Key) | Should -BeTrue
+                                                $r.Breakdown.Contains('Discontinuity (string)') | Should -BeFalse
                                 }
 
                                 It 'String 4 after three in a row with the same IP' {
@@ -32149,6 +32689,35 @@ Describe 'Puck board: click and place, Line details, fill buttons, export result
             }
         }
     }
+
+    It 'a non-counter IP puck has its own fill, in the pool and on a line' {
+        $r = & (Get-Module PuckBoard) {
+            @{
+                K          = $script:PBColors
+                Counter    = Get-PBIPPuckColors (Find-PBInstructor 'jones, bob')
+                NonCounter = Get-PBIPPuckColors (Find-PBInstructor 'Leech, Tom')
+                TextFalse  = Get-PBIPPuckColors ([PSCustomObject]@{ Name = 'Text, Ty'; IsCounter = 'FALSE' })
+                Blank      = Get-PBIPPuckColors ([PSCustomObject]@{ Name = 'Blank, Bo'; IsCounter = '' })
+                Unknown    = Get-PBIPPuckColors (Find-PBInstructor 'Nobody, Ned')
+            }
+        }
+        $r.K.IPPuckNC | Should -Not -Be $r.K.IPPuck
+        $r.Counter.Background | Should -Be $r.K.IPPuck
+        $r.Counter.Border | Should -Be $r.K.IPPuckBorder
+        $r.NonCounter.Background | Should -Be $r.K.IPPuckNC
+        $r.NonCounter.Border | Should -Be $r.K.IPPuckNCBorder
+        $r.TextFalse.Background | Should -Be $r.K.IPPuckNC
+        $r.Blank.Background | Should -Be $r.K.IPPuck -Because 'a blank IsCounter counts as a counter'
+        $r.Unknown.Background | Should -Be $r.K.IPPuck
+
+        Invoke-PB @{ Cmd = 'SetIP'; LineId = 'L1'; Name = 'Leech, Tom' }
+        $vm = & (Get-Module PuckBoard) { param($l) New-PBLineVM $l } (Get-Line 'L1')
+        $vm.IPBackground | Should -Be $r.K.IPPuckNC
+        $vm.IPBorder | Should -Be $r.K.IPPuckNCBorder
+        Invoke-PB @{ Cmd = 'SetIP'; LineId = 'L1'; Name = 'Lee, Ann' }
+        $vm = & (Get-Module PuckBoard) { param($l) New-PBLineVM $l } (Get-Line 'L1')
+        $vm.IPBackground | Should -Be $r.K.IPPuck
+    }
 }
 
 Describe 'Puck board: Add Student Absence (no window)' {
@@ -32253,7 +32822,7 @@ Describe 'Puck board: Add Student Absence (no window)' {
         $abs = @([PSCustomObject]@{ Student = 'Adams, Al'; StartTime = [datetime]'2026-10-20 13:00'; EndTime = [datetime]'2026-10-20 15:30'; Reason = 'Dentist'; InMasterData = $false })
         $s = Get-FaisExportSummary -Ok $true -FillResult $fill -Days @($script:D1) -OutputPath 'C:\o.xlsx' -MasterDataPath 'C:\m.xlsx' -Absences $abs
         $texts = @($s.Lines | ForEach-Object { "$($_.Kind)|$($_.Text)" })
-        $texts | Should -Contain 'Text|MasterData: SimDebt; StudentAbsences: 1 line(s) Add Student Absence could not save'
+        $texts | Should -Contain 'Text|MasterData: SimDebt, DiscontinuityScore; StudentAbsences: 1 line(s) Add Student Absence could not save'
         $texts | Should -Contain 'Head|Student absences'
         $texts | Should -Contain 'Text|Adams, Al: Tue 20 Oct 1300-1530 (Dentist)'
         @((Get-FaisExportSummary -Ok $true -FillResult $fill -Days @($script:D1)).Lines | Where-Object { $_.Text -like '*absence*' }).Count | Should -Be 0
@@ -33446,6 +34015,22 @@ Describe 'The plan and the update in memory (flying schedule)' {
         [int]$script:Brown.SyllabusRevision | Should -BeGreaterThan $rev
     }
 
+    It 'works out what the update does to each student''s DiscontinuityScore, without changing anyone' {
+        # Adams: his only ride (Lee) is taken back, a 1-string and a counter gone. Brown: a first ride with Jones
+        $script:Plan.Discontinuity['Adams, Al'] | Should -Be -2
+        $script:Plan.Discontinuity['Brown, Bea'] | Should -Be 2
+        $script:Adams.DiscontinuityScore | Should -Be 0
+        $script:Brown.DiscontinuityScore | Should -Be 0
+        (Get-Entry $script:Brown 'FT5001').IsComplete | Should -BeFalse
+    }
+
+    It 'Invoke-SyllabusUpdate moves each student''s DiscontinuityScore once, by the plan''s amount' {
+        $script:Adams.DiscontinuityScore = 5
+        [void](Invoke-SyllabusUpdate -Targets $script:Plan.Targets -SoftWeights $script:SW -Instructors (New-TestInstructors) -Now $script:Now)
+        $script:Adams.DiscontinuityScore | Should -Be 3
+        $script:Brown.DiscontinuityScore | Should -Be 2
+    }
+
     It 'running it again changes nothing' {
         [void](Invoke-SyllabusUpdate -Targets $script:Plan.Targets -SoftWeights $script:SW -Now $script:Now)
         $again = Get-SyllabusUpdatePlan -File $script:File -Students $script:Students -Instructors (New-TestInstructors) -SoftWeights $script:SW -Now $script:Now
@@ -33458,8 +34043,8 @@ Describe 'The plan and the update in memory (flying schedule)' {
         $text | Should -Match 'Flying schedule for Mon 21 Sep 2026'
         $text | Should -Match 'FAIS students on it: 2'
         $text | Should -Match ([regex]::Escape('Changes for 2 student(s): 2 event(s) marked complete, 1 marked NOT complete, 0 IP / ETD updated.'))
-        $text | Should -Match ([regex]::Escape('Adams, Al: NOT complete FT5001 (CX); SimDebt -1'))
-        $text | Should -Match ([regex]::Escape('Brown, Bea: complete FE3102 FT5001; SimDebt +0.5'))
+        $text | Should -Match ([regex]::Escape('Adams, Al: NOT complete FT5001 (CX); SimDebt -1; Discontinuity -2'))
+        $text | Should -Match ([regex]::Escape('Brown, Bea: complete FE3102 FT5001; SimDebt +0.5; Discontinuity +2'))
         $text | Should -Match ([regex]::Escape("Not in the student's syllabus: Brown, Bea T6 OFT"))
         $text | Should -Match ([regex]::Escape('1 other people on the schedule are not FAIS students.'))
     }
@@ -33643,7 +34228,7 @@ Describe 'Saving an update' -Skip:$script:NoExcel {
         $script:Brown = New-TestStudent -Name 'Brown, Bea' -Done @('FI3101|2026-09-18 08:00') -SimDebt 1
         $rows = @(foreach ($m in $script:Adams.Syllabus) { $r = ConvertTo-SyllabusTabRow $m; $r | Add-Member -NotePropertyName Notes -NotePropertyValue "note $($m.Mission)"; $r })
         $rows | Export-Excel -Path $script:Out -WorksheetName 'Adams, Al' 3>$null
-        @([PSCustomObject]@{ SPKey = 1; SPName = 'Adams, Al'; SimDebt = 2 }, [PSCustomObject]@{ SPKey = 2; SPName = 'Brown, Bea'; SimDebt = 1 }) |
+        @([PSCustomObject]@{ SPKey = 1; SPName = 'Adams, Al'; SimDebt = 2; DiscontinuityScore = 5 }, [PSCustomObject]@{ SPKey = 2; SPName = 'Brown, Bea'; SimDebt = 1; DiscontinuityScore = $null }) |
             Export-Excel -Path $script:MD -WorksheetName 'Students' 3>$null
 
         $file = New-TFile -Facts @(
@@ -33685,6 +34270,17 @@ Describe 'Saving an update' -Skip:$script:NoExcel {
         ($md | Where-Object { $_.SPName -eq 'Brown, Bea' }).SimDebt | Should -Be 2
         $script:Adams.SimDebt | Should -Be 0.5
         $script:Brown.SimDebt | Should -Be 2
+    }
+
+    It 'moves DiscontinuityScore in MasterData by the plan''s amounts (a blank cell stays blank)' {
+        $memory = @(Invoke-SyllabusUpdate -Targets $script:Plan.Targets -SoftWeights $script:SW -Instructors (New-TestInstructors) -Now $script:Now)
+        $saved = Save-SyllabusUpdate -Targets $script:Plan.Targets -MemoryChanges $memory -DiscontinuityDeltaByName $script:Plan.Discontinuity `
+            -OutputPath $script:Out -MasterDataPath $script:MD -SoftWeights $script:SW -Now $script:Now 6>$null
+        $saved.Saved | Should -BeTrue
+        # Adams: his ride with Lee taken back (-2); Brown: a first ride with Jones, but no score in MasterData yet
+        $md = @(Import-Excel -Path $script:MD -WorksheetName 'Students')
+        ($md | Where-Object { $_.SPName -eq 'Adams, Al' }).DiscontinuityScore | Should -Be 3
+        ($md | Where-Object { $_.SPName -eq 'Brown, Bea' }).DiscontinuityScore | Should -BeNullOrEmpty
     }
 
     It 'saves nothing when a file stays open, and says which' {

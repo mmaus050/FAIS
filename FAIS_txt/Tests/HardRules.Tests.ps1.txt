@@ -363,6 +363,119 @@ Describe 'Undo-StudentMission and Reset-PlannedCompletions' {
                 }
 }
 
+Describe 'Discontinuity score' {
+                # Test syllabus flights: FT5001 FT5102 FT5104 (FT), FF5201 FF5202 (FF); FT5103 is a solo, FT5190 a check ride
+                It 'Get-DiscontinuityScore: +1 per 1-string, +1 per counter, -1 per 3+ string by default' {
+                                $syl = (New-TestStudent -Name 'A' -Done 'FT5001|2026-02-23 08:00|Jones, Bob', 'FT5102|2026-02-24 08:00|Jones, Bob', 'FT5104|2026-02-25 08:00|Jones, Bob', 'FF5201|2026-02-26 08:00|Lee, Ann').Syllabus
+                                # One 3-string (Jones), one 1-string (Lee), two counters
+                                Get-DiscontinuityScore -Syllabus $syl -Instructors $script:IPs -SoftWeights $script:W | Should -Be 2
+                                Get-DiscontinuityScore -Syllabus (New-TestStudent -Name 'B').Syllabus -Instructors $script:IPs -SoftWeights $script:W | Should -Be 0
+                }
+
+                It 'Get-DiscontinuityScore reads Disc1String / DiscCounter / Disc3PlusString from SoftWeights (blank = default)' {
+                                $syl = (New-TestStudent -Name 'A' -Done 'FT5001|2026-02-23 08:00|Jones, Bob', 'FT5102|2026-02-24 08:00|Jones, Bob', 'FT5104|2026-02-25 08:00|Jones, Bob', 'FF5201|2026-02-26 08:00|Lee, Ann').Syllabus
+                                $w = New-TestSoftWeights
+                                $w | Add-Member -NotePropertyName Disc1String -NotePropertyValue 2
+                                $w | Add-Member -NotePropertyName DiscCounter -NotePropertyValue 0.5
+                                $w | Add-Member -NotePropertyName Disc3PlusString -NotePropertyValue -3
+                                Get-DiscontinuityScore -Syllabus $syl -Instructors $script:IPs -SoftWeights $w | Should -Be 0
+                                $w.Disc1String = ''
+                                Get-DiscontinuityScore -Syllabus $syl -Instructors $script:IPs -SoftWeights $w | Should -Be -1
+                }
+
+                It 'Complete-StudentMission moves it by what the ride does to the strings, keeping a hand-set score' {
+                                $s = New-TestStudent -Name 'A' -Done 'FI3101|2026-02-20 08:00', 'FT5001|2026-02-23 08:00|Jones, Bob' -DiscontinuityScore 10
+                                # Jones, Lee: two 1-strings and two counters (4, was 2)
+                                $null = Complete-StudentMission -Student $s -Mission 'FT5102' -InstructorName 'Lee, Ann' -ETD '2026-03-03 07:30' -SoftWeights $script:W -Instructors $script:IPs
+                                $s.DiscontinuityScore | Should -Be 12
+                                # Jones, Lee, Lee: Lee's 1-string becomes a 2-string (3)
+                                $null = Complete-StudentMission -Student $s -Mission 'FT5104' -InstructorName 'Lee, Ann' -ETD '2026-03-04 07:30' -SoftWeights $script:W -Instructors $script:IPs
+                                $s.DiscontinuityScore | Should -Be 11
+                }
+
+                It 'sims, solos and check rides leave it alone, as do -NoDiscontinuity and no SoftWeights' {
+                                $s = New-TestStudent -Name 'A' -Done 'FI3101|2026-02-20 08:00', 'FT5001|2026-02-23 08:00|Jones, Bob', 'FT5102|2026-02-24 08:00|Jones, Bob' -DiscontinuityScore 5
+                                $null = Complete-StudentMission -Student $s -Mission 'FE3102' -InstructorName 'SIM IP' -ETD '2026-03-03 07:30' -SoftWeights $script:W -Instructors $script:IPs
+                                $null = Complete-StudentMission -Student $s -Mission 'FT5103' -InstructorName 'Lee, Ann' -ETD '2026-03-03 09:30' -SoftWeights $script:W -Instructors $script:IPs
+                                $null = Complete-StudentMission -Student $s -Mission 'FT5190' -InstructorName 'Ortiz, Sam' -ETD '2026-03-03 12:30' -SoftWeights $script:W -Instructors $script:IPs
+                                $s.DiscontinuityScore | Should -Be 5
+                                $null = Complete-StudentMission -Student $s -Mission 'FT5104' -InstructorName 'Lee, Ann' -ETD '2026-03-04 07:30' -SoftWeights $script:W -Instructors $script:IPs -NoDiscontinuity
+                                $null = Complete-StudentMission -Student $s -Mission 'FF5201' -InstructorName 'Lee, Ann' -ETD '2026-03-05 07:30' -Instructors $script:IPs
+                                $s.DiscontinuityScore | Should -Be 5
+                }
+
+                It 'a new IP on a ride already flown moves it; the same IP again does not' {
+                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-23 08:00|Jones, Bob', 'FT5102|2026-02-24 08:00|Jones, Bob' -DiscontinuityScore 1
+                                $null = Complete-StudentMission -Student $s -Mission 'FT5102' -InstructorName 'Lee, Ann' -ETD '2026-02-24 08:00' -SoftWeights $script:W -Instructors $script:IPs
+                                $s.DiscontinuityScore | Should -Be 4
+                                $null = Complete-StudentMission -Student $s -Mission 'FT5102' -InstructorName 'Lee, Ann' -ETD '2026-02-24 09:00' -SoftWeights $script:W -Instructors $script:IPs
+                                $s.DiscontinuityScore | Should -Be 4
+                }
+
+                It 'non-counters come from -Instructors' {
+                                $a = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-23 08:00|Jones, Bob' -DiscontinuityScore 2
+                                $b = New-TestStudent -Name 'B' -Done 'FT5001|2026-02-23 08:00|Jones, Bob' -DiscontinuityScore 2
+                                # Leech is a non-counter: his ride is no string and he is no counter
+                                $null = Complete-StudentMission -Student $a -Mission 'FT5102' -InstructorName 'Leech, Tom' -ETD '2026-03-03 07:30' -SoftWeights $script:W -Instructors $script:IPs
+                                $a.DiscontinuityScore | Should -Be 2
+                                # Without the Instructors list every IP counts
+                                $null = Complete-StudentMission -Student $b -Mission 'FT5102' -InstructorName 'Leech, Tom' -ETD '2026-03-03 07:30' -SoftWeights $script:W
+                                $b.DiscontinuityScore | Should -Be 4
+                }
+
+                It 'Undo-StudentMission backs out only that ride''s part' {
+                                $s = New-TestStudent -Name 'A' -Done 'FI3101|2026-02-20 08:00', 'FT5001|2026-02-23 08:00|Jones, Bob', 'FT5102|2026-02-24 08:00|Lee, Ann' -DiscontinuityScore 20
+                                Undo-StudentMission -Student $s -Mission 'FT5102' -SoftWeights $script:W -Instructors $script:IPs | Should -BeTrue
+                                $s.DiscontinuityScore | Should -Be 18
+                                Undo-StudentMission -Student $s -Mission 'FI3101' -SoftWeights $script:W -Instructors $script:IPs | Should -BeTrue
+                                $s.DiscontinuityScore | Should -Be 18
+                                Undo-StudentMission -Student $s -Mission 'FT5001' -SoftWeights $script:W -Instructors $script:IPs -NoDiscontinuity | Should -BeTrue
+                                $s.DiscontinuityScore | Should -Be 18
+                }
+
+                It 'Reset-PlannedCompletions moves each student once, to what taking the events back one by one gives' {
+                                $done = @('FI3101|2026-02-20 08:00', 'FT5001|2026-02-23 08:00|Jones, Bob', 'FT5102|2026-03-03 07:30|Lee, Ann', 'FT5104|2026-03-04 07:30|Ortiz, Sam')
+                                $s = New-TestStudent -Name 'A' -Done $done -DiscontinuityScore 30
+                                $one = New-TestStudent -Name 'A' -Done $done -DiscontinuityScore 30
+                                $other = New-TestStudent -Name 'B' -Done 'FI3101|2026-02-20 08:00', 'FT5001|2026-02-23 08:00|Jones, Bob' -DiscontinuityScore 3
+                                $changed = @(Reset-PlannedCompletions -Students @($s, $other) -FromDate ([datetime]'2026-03-03') -SoftWeights $script:W -Instructors $script:IPs)
+                                @($changed | ForEach-Object { $_.Name }) | Should -Be @('A')
+                                # Jones, Lee, Ortiz (6) back to Jones (2)
+                                $s.DiscontinuityScore | Should -Be 26
+                                $other.DiscontinuityScore | Should -Be 3
+                                foreach ($m in @('FT5104', 'FT5102')) { $null = Undo-StudentMission -Student $one -Mission $m -SoftWeights $script:W -Instructors $script:IPs }
+                                $one.DiscontinuityScore | Should -Be $s.DiscontinuityScore
+                }
+
+                It 'Initialize-StudentDiscontinuity counts only the blank scores, from the syllabus' {
+                                $a = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-23 08:00|Jones, Bob', 'FT5102|2026-02-24 08:00|Lee, Ann'
+                                $a.DiscontinuityScore = $null
+                                $b = New-TestStudent -Name 'B' -Done 'FT5001|2026-02-23 08:00|Jones, Bob'
+                                $b.DiscontinuityScore = ''
+                                $c = New-TestStudent -Name 'C' -Done 'FT5001|2026-02-23 08:00|Jones, Bob' -DiscontinuityScore 7
+                                $d = New-TestStudent -Name 'D' -Done 'FT5001|2026-02-23 08:00|Jones, Bob'
+                                $d.PSObject.Properties.Remove('DiscontinuityScore')
+                                @(Initialize-StudentDiscontinuity -Students @($a, $b, $c, $d) -Instructors $script:IPs -SoftWeights $script:W) | Should -Be @('A', 'B', 'D')
+                                $a.DiscontinuityScore | Should -Be 4
+                                $b.DiscontinuityScore | Should -Be 2
+                                $c.DiscontinuityScore | Should -Be 7
+                                $d.DiscontinuityScore | Should -Be 2
+                }
+
+                It 'Test-ChangesStrings: <What>' -TestCases @(
+                                @{ What = 'flying a ride'; Done = @(); Mission = 'FT5001'; IP = 'Jones, Bob'; Undo = $false; Want = $true }
+                                @{ What = 'flying a sim'; Done = @(); Mission = 'FI3101'; IP = 'SIM IP'; Undo = $false; Want = $false }
+                                @{ What = 'flying a solo'; Done = @(); Mission = 'FT5103'; IP = 'Jones, Bob'; Undo = $false; Want = $false }
+                                @{ What = 'a new IP on a flown ride'; Done = @('FT5001|2026-02-23 08:00|Jones, Bob'); Mission = 'FT5001'; IP = 'Lee, Ann'; Undo = $false; Want = $true }
+                                @{ What = 'the same IP on a flown ride'; Done = @('FT5001|2026-02-23 08:00|Jones, Bob'); Mission = 'FT5001'; IP = 'Jones, Bob'; Undo = $false; Want = $false }
+                                @{ What = 'taking a ride back'; Done = @('FT5001|2026-02-23 08:00|Jones, Bob'); Mission = 'FT5001'; IP = ''; Undo = $true; Want = $true }
+                                @{ What = 'taking a sim back'; Done = @('FI3101|2026-02-20 08:00'); Mission = 'FI3101'; IP = ''; Undo = $true; Want = $false }
+                ) {
+                                $s = New-TestStudent -Name 'A' -Done $Done
+                                Test-ChangesStrings (Find-SyllabusMission -Student $s -Mission $Mission) $IP -Undo:$Undo | Should -Be $Want
+                }
+}
+
 Describe 'Unsat clean-up' {
                 It 'an OFT hook is cleaned up by an OFT but not an IFT' {
                                 $s = New-TestStudent -Name 'A' -UnsatSim -UnsatSimType 'OFT'
@@ -1482,6 +1595,37 @@ Describe 'SoftRules -Detailed' {
                                                 $r.Breakdown['Continue String'] | Should -Be 10
                                                 $r.Breakdown['CAP Bonus (string)'] | Should -Be 8
                                                 $r.Reasons['CAP Bonus (string)'] | Should -Be 'CAP student, 2 String'
+                                }
+
+                                It 'Discontinuity (string) adds the student''s DiscontinuityScore to a Continue String' {
+                                                $done = @('FT5001|2026-02-24 08:00|Lee, Ann', 'FT5102|2026-02-26 08:00|Jones, Bob')
+                                                $s = New-TestStudent -Name 'A' -Done $done -DiscontinuityScore 6
+                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5103'
+                                                $r.Breakdown['Continue String'] | Should -Be 10
+                                                $r.Breakdown['Discontinuity (string)'] | Should -Be 6
+                                                $r.Reasons['Discontinuity (string)'] | Should -Be 'Discontinuity 6, 2 String'
+                                                $plain = Get-Soft -Student (New-TestStudent -Name 'B' -Done $done) -Instructor 'Jones, Bob' -Mission 'FT5103'
+                                                $plain.Breakdown.Contains('Discontinuity (string)') | Should -BeFalse
+                                                ($r.Score - $plain.Score) | Should -Be 6
+                                }
+
+                                It 'a negative DiscontinuityScore takes points off a Continue String' {
+                                                $s = New-TestStudent -Name 'A' -Done 'FT5001|2026-02-24 08:00|Lee, Ann', 'FT5102|2026-02-26 08:00|Jones, Bob' -DiscontinuityScore -2
+                                                $r = Get-Soft -Student $s -Instructor 'Jones, Bob' -Mission 'FT5103'
+                                                $r.Breakdown['Discontinuity (string)'] | Should -Be -2
+                                                $r.Reasons['Discontinuity (string)'] | Should -Be 'Discontinuity -2, 2 String'
+                                }
+
+                                It 'only a Continue String gets the DiscontinuityScore (<What>)' -TestCases @(
+                                                @{ What = 'String 4'; Done = @('FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-25 08:00|Jones, Bob', 'FT5103|2026-02-26 08:00|Jones, Bob'); IP = 'Jones, Bob'; Key = 'String 4' }
+                                                @{ What = 'Zipper'; Done = @('FT5001|2026-02-24 08:00|Jones, Bob', 'FT5102|2026-02-26 08:00|Lee, Ann'); IP = 'Jones, Bob'; Key = 'Zipper' }
+                                                @{ What = 'Break String'; Done = @('FT5001|2026-02-24 08:00|Lee, Ann', 'FT5102|2026-02-26 08:00|Ortiz, Sam'); IP = 'Jones, Bob'; Key = 'Break String' }
+                                                @{ What = 'Non-Counter'; Done = @('FT5001|2026-02-24 08:00|Lee, Ann', 'FT5102|2026-02-26 08:00|Ortiz, Sam'); IP = 'Leech, Tom'; Key = 'Non-Counter' }
+                                ) {
+                                                $s = New-TestStudent -Name 'A' -Done $Done -DiscontinuityScore 6
+                                                $r = Get-Soft -Student $s -Instructor $IP -Mission 'FT5104'
+                                                $r.Breakdown.Contains($Key) | Should -BeTrue
+                                                $r.Breakdown.Contains('Discontinuity (string)') | Should -BeFalse
                                 }
 
                                 It 'String 4 after three in a row with the same IP' {

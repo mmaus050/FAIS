@@ -51,13 +51,15 @@ function Get-BoardEvalRows {
 
 # A copy of the student as they would be on -TargetRow's day: their other pins earlier
 # than the target are flown (marked complete), later ones hold the time as reservations.
+# -NoDiscontinuity leaves the copy's DiscontinuityScore as it is (nothing will be scored).
 function Get-BoardStudentContext {
                 param (
                                 [array]$Rows,
                                 $Student,
                                 $TargetRow,
                                 [string[]]$ExcludeLineIds = @(),
-                                $Data
+                                $Data,
+                                [switch]$NoDiscontinuity
                 )
 
                 $clone = Copy-StudentForEval $Student
@@ -80,7 +82,7 @@ function Get-BoardStudentContext {
                                                                 -FormLookAhead (Get-Weight $Data.SoftWeights 'FormLookAhead' 22)
                                                 $m = $pick.Mission
                                                 if ($null -ne $m -and -not (Test-MissionComplete $m)) {
-                                                                [void](Complete-StudentMission -Student $clone -Mission $m -InstructorName $ipName -ETD $pin.ETD -SoftWeights $Data.SoftWeights -SortieType ([string]$pin.SortieType))
+                                                                [void](Complete-StudentMission -Student $clone -Mission $m -InstructorName $ipName -ETD $pin.ETD -SoftWeights $Data.SoftWeights -SortieType ([string]$pin.SortieType) -Instructors @($Data.Instructors) -NoDiscontinuity:$NoDiscontinuity)
                                                 }
                                                 else {
                                                                 # No event could be flown: the student still occupies that time
@@ -88,7 +90,7 @@ function Get-BoardStudentContext {
                                                 }
                                                 if ($null -ne $ret) {
                                                                 $rm = @(Get-ValidOptedEvents -Student $clone -Sortie $ret -NoLookahead) | Select-Object -First 1
-                                                                if ($null -ne $m -and $null -ne $rm) { [void](Complete-StudentMission -Student $clone -Mission $rm -InstructorName $ipName -ETD $ret.ETD -SoftWeights $Data.SoftWeights -SortieType ([string]$ret.SortieType)) }
+                                                                if ($null -ne $m -and $null -ne $rm) { [void](Complete-StudentMission -Student $clone -Mission $rm -InstructorName $ipName -ETD $ret.ETD -SoftWeights $Data.SoftWeights -SortieType ([string]$ret.SortieType) -Instructors @($Data.Instructors) -NoDiscontinuity:$NoDiscontinuity) }
                                                                 else { Add-StudentReservation -Student $clone -LineId ([string]$ret.BoardLineId) -ETD $ret.ETD -SortieType ([string]$ret.SortieType) -Instructor $ipName }
                                                 }
                                 }
@@ -172,7 +174,7 @@ function Get-PlacementAssessment {
                 $probe.Student = $null
                 $probe.Mission = $null
 
-                $clone = Get-BoardStudentContext -Rows $rows -Student $student -TargetRow $probe -ExcludeLineIds $ExcludeLineIds -Data $Data
+                $clone = Get-BoardStudentContext -Rows $rows -Student $student -TargetRow $probe -ExcludeLineIds $ExcludeLineIds -Data $Data -NoDiscontinuity:$Quick
                 $formLookAhead = Get-Weight $Data.SoftWeights 'FormLookAhead' 22
                 if (-not $script:AssessCache.Lines.ContainsKey($LineId)) { $script:AssessCache.Lines[$LineId] = @{} }
                 $lineCtx = $script:AssessCache.Lines[$LineId]
@@ -463,15 +465,19 @@ function Get-StudentPuckInfo {
                 $next = if ($opted.Count -gt 0) { ((@($opted | Select-Object -First 2 | ForEach-Object { $_.Mission })) -join ' / ') } else { 'complete' }
                 $debt = 0.0
                 if ($null -ne $Student.SimDebt -and [string]$Student.SimDebt -ne '') { [void][double]::TryParse([string]$Student.SimDebt, [ref]$debt) }
+                $disc = 0.0
+                $discRaw = Get-OptionalProperty $Student 'DiscontinuityScore' $null
+                if ($null -ne $discRaw -and [string]$discRaw -ne '') { [void][double]::TryParse([string]$discRaw, [ref]$disc) }
 
                 return [PSCustomObject]@{
-                                Name     = [string]$Student.Name
-                                Badges   = $badges.ToArray()
-                                Absences = $absText.ToArray()
-                                Turns    = $turns
-                                Next     = $next
-                                SimDebt  = $debt
-                                Blocked  = ((ConvertTo-FaisBool $Student.OnHold))
+                                Name          = [string]$Student.Name
+                                Badges        = $badges.ToArray()
+                                Absences      = $absText.ToArray()
+                                Turns         = $turns
+                                Next          = $next
+                                SimDebt       = $debt
+                                Discontinuity = $disc
+                                Blocked       = ((ConvertTo-FaisBool $Student.OnHold))
                 }
 }
 

@@ -8,8 +8,16 @@
         <Style x:Key="BarButton" TargetType="Button">
             <Setter Property="Padding" Value="10,3"/>
             <Setter Property="Margin" Value="3,0"/>
+            <Setter Property="MinHeight" Value="26"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <!-- Text boxes, dropdowns and date boxes in the bars: all one height -->
+        <Style x:Key="BarField" TargetType="Control">
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
 
         <Style x:Key="PuckBorder" TargetType="Border">
@@ -20,10 +28,18 @@
             <Setter Property="Cursor" Value="Hand"/>
         </Style>
 
+        <!-- Every cell on a line is the same height (26) -->
         <Style x:Key="CellBox" TargetType="TextBox">
             <Setter Property="Margin" Value="2"/>
+            <Setter Property="Height" Value="26"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
             <Setter Property="BorderBrush" Value="#CBD5E1"/>
+        </Style>
+
+        <Style x:Key="CellCombo" TargetType="ComboBox">
+            <Setter Property="Margin" Value="2"/>
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
 
         <Style x:Key="HeaderText" TargetType="TextBlock">
@@ -34,9 +50,9 @@
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
 
-        <!-- IP puck in the left pool -->
+        <!-- IP puck in the left pool (non-counters get their own fill) -->
         <DataTemplate x:Key="IPPuckTemplate">
-            <Border Tag="IPPuck" Style="{StaticResource PuckBorder}" Background="#DBEAFE" BorderBrush="{Binding BorderBrush}"
+            <Border Tag="IPPuck" Style="{StaticResource PuckBorder}" Background="{Binding Background}" BorderBrush="{Binding BorderBrush}"
                     BorderThickness="{Binding PuckBorderThickness}" ToolTip="{Binding ToolTipText}" ToolTipService.ShowDuration="30000">
                 <DockPanel LastChildFill="True">
                     <Border DockPanel.Dock="Right" Background="#1D4ED8" CornerRadius="8" Padding="6,0" Margin="6,0,0,0"
@@ -72,7 +88,7 @@
 
         <!-- Column headers above each day's lines -->
         <DataTemplate x:Key="LineHeaderTemplate">
-            <Grid Margin="3,0,3,2">
+            <Grid Margin="4,0,4,2">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="8"/>
                     <ColumnDefinition Width="64"/>
@@ -131,10 +147,10 @@
                              FontFamily="Consolas" FontSize="13" FontWeight="SemiBold" MaxLength="6" HorizontalContentAlignment="Center"
                              ToolTip="Type 0730, 730 or 7:30 then Enter. Up/Down = 5 min, Shift+Up/Down = 30 min, Esc = undo typing."/>
 
-                    <ComboBox Grid.Column="2" Tag="TypeBox" Margin="2" VerticalContentAlignment="Center"
+                    <ComboBox Grid.Column="2" Tag="TypeBox" Style="{StaticResource CellCombo}"
                               ItemsSource="{Binding TypeOptions}" SelectedItem="{Binding SortieType, Mode=OneWay}"/>
 
-                    <Border Grid.Column="3" Tag="IPSlot" AllowDrop="True" Focusable="True" Margin="2" MinHeight="26" Padding="9,2"
+                    <Border Grid.Column="3" Tag="IPSlot" AllowDrop="True" Focusable="True" Margin="2" Height="26" Padding="9,2"
                             CornerRadius="13" BorderThickness="1" Background="{Binding IPBackground}" BorderBrush="{Binding IPBorder}"
                             ToolTip="{Binding IPToolTip}">
                         <Border.ContextMenu>
@@ -144,7 +160,7 @@
                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                     </Border>
 
-                    <Border Grid.Column="4" Tag="StudentSlot" AllowDrop="{Binding AllowStudentDrop}" Focusable="True" Margin="2" MinHeight="26"
+                    <Border Grid.Column="4" Tag="StudentSlot" AllowDrop="{Binding AllowStudentDrop}" Focusable="True" Margin="2" Height="26"
                             Padding="9,2,15,2" CornerRadius="13" BorderThickness="{Binding StudentBorderThickness}"
                             Background="{Binding StudentBackground}" BorderBrush="{Binding StudentBorder}"
                             ToolTip=" " ToolTipService.ShowDuration="60000" ToolTipService.InitialShowDelay="300">
@@ -162,7 +178,7 @@
                         </Grid>
                     </Border>
 
-                    <ComboBox Grid.Column="5" Tag="MissionBox" Margin="2" VerticalContentAlignment="Center" IsTextSearchEnabled="False"
+                    <ComboBox Grid.Column="5" Tag="MissionBox" Style="{StaticResource CellCombo}" IsTextSearchEnabled="False"
                               ItemsSource="{Binding MissionOptions}" SelectedItem="{Binding MissionSelected, Mode=OneWay}"
                               IsEnabled="{Binding MissionEnabled}"
                               ToolTip="(auto) = the best-scoring event that passes the hard rules. Pick one to hardcode it, or Type a mission... for any other."/>
@@ -178,7 +194,7 @@
                              IsReadOnly="{Binding ReadOnlyFields}" TextWrapping="NoWrap" ToolTip="{Binding NotesToolTip}"
                              Foreground="{Binding NotesForeground}"/>
 
-                    <Button Grid.Column="8" Tag="DeleteLine" Content="&#x2715;" Margin="2" Padding="0" Width="24" Height="24"
+                    <Button Grid.Column="8" Tag="DeleteLine" Content="&#x2715;" Margin="2" Padding="0" Width="26" Height="26"
                             Background="Transparent" BorderThickness="0" Foreground="#94A3B8" Cursor="Hand" ToolTip="Delete line (Ctrl+Z undoes)"/>
                 </Grid>
             </Border>
@@ -247,7 +263,7 @@
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                         <Button x:Name="UndoButton" Content="Undo (Ctrl+Z)" Style="{StaticResource BarButton}"/>
-                        <Button x:Name="ColorKeyButton" Content="Colors" Style="{StaticResource BarButton}" Padding="6,1" FontSize="11"
+                        <Button x:Name="ColorKeyButton" Content="Colors" Style="{StaticResource BarButton}"
                                 ToolTip="What the colors on the board mean"/>
                         <Button x:Name="HelpButton" Content="Help" Style="{StaticResource BarButton}"/>
                     </StackPanel>
@@ -256,7 +272,7 @@
                            RenderOptions.BitmapScalingMode="HighQuality" ToolTip="FAIP Mafia"/>
                     <TextBlock Text="FAIS PUCK BOARD" Foreground="White" FontWeight="Bold" FontSize="16" VerticalAlignment="Center" Margin="0,0,18,0"/>
                     <TextBlock Text="Add lines:" Foreground="#CBD5E1" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                    <TextBox x:Name="QuickEntryBox" Width="420" FontFamily="Consolas" FontSize="13" Padding="4,3" VerticalContentAlignment="Center"
+                    <TextBox x:Name="QuickEntryBox" Style="{StaticResource BarField}" Width="420" FontFamily="Consolas" FontSize="13" Padding="4,0"
                              ToolTip="Examples: 0730 DL | 1015 O&amp;B (return at +3 hr) | 1015 OB 1330 | 1300 OFT x2 | 0800 DL Jones sp:Smith | separate several with commas. Ctrl+L jumps here."/>
                     <Button x:Name="AddLineButton" Content="Add" Style="{StaticResource BarButton}" FontWeight="SemiBold"/>
                     <Button x:Name="BulkLinesButton" Content="Add Bulk Lines" Style="{StaticResource BarButton}"
@@ -269,7 +285,7 @@
             <Border DockPanel.Dock="Top" Background="#E2E8F0" Padding="12,5">
                 <WrapPanel VerticalAlignment="Center">
                     <TextBlock Text="Template:" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                    <ComboBox x:Name="TemplateCombo" Width="170" DisplayMemberPath="Name" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="TemplateCombo" Style="{StaticResource BarField}" Width="170" DisplayMemberPath="Name"/>
                     <Button x:Name="LoadTemplateButton" Content="Load" Style="{StaticResource BarButton}"/>
                     <Button x:Name="SaveTemplateButton" Content="Save day as template..." Style="{StaticResource BarButton}"/>
                     <Rectangle Width="1" Height="20" Fill="#94A3B8" Margin="8,0"/>
@@ -282,7 +298,7 @@
                     <Button x:Name="AddAbsenceButton" Content="Add Student Absence" Style="{StaticResource BarButton}" FontWeight="SemiBold"
                             ToolTip="Block students off for a stretch of time (an appointment, leave...): drag or paste them in, pick the day and type the times. It goes on MasterData's StudentAbsences sheet, and the board and the scheduler keep them off every line inside it."/>
                     <Rectangle Width="1" Height="20" Fill="#94A3B8" Margin="8,0"/>
-                    <DatePicker x:Name="AddDayPicker" Width="125" VerticalAlignment="Center"/>
+                    <DatePicker x:Name="AddDayPicker" Style="{StaticResource BarField}" Width="125"/>
                     <Button x:Name="AddDayButton" Content="Add day" Style="{StaticResource BarButton}"/>
                     <Button x:Name="RemoveDayButton" Content="Remove this day" Style="{StaticResource BarButton}"/>
                 </WrapPanel>
@@ -292,14 +308,14 @@
             <Border DockPanel.Dock="Bottom" Background="White" Padding="12,7" BorderBrush="#CBD5E1" BorderThickness="0,1,0,0">
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                        <Button x:Name="CancelButton" Content="Close" Style="{StaticResource BarButton}"/>
-                        <Button x:Name="BackToEditButton" Content="Back to edit" Style="{StaticResource BarButton}" Visibility="Collapsed"/>
-                        <Button x:Name="RefillButton" Content="Re-fill" Style="{StaticResource BarButton}" Visibility="Collapsed"/>
+                        <Button x:Name="CancelButton" Content="Close" Style="{StaticResource BarButton}" Padding="12,6"/>
+                        <Button x:Name="BackToEditButton" Content="Back to edit" Style="{StaticResource BarButton}" Padding="12,6" Visibility="Collapsed"/>
+                        <Button x:Name="RefillButton" Content="Re-fill" Style="{StaticResource BarButton}" Padding="12,6" Visibility="Collapsed"/>
                         <Button x:Name="ExportButton" Content="Export to OutputSchedule" Style="{StaticResource BarButton}" Visibility="Collapsed"
                                 Background="#1D4ED8" Foreground="White" FontWeight="Bold" Padding="16,6"/>
                         <!-- Fill all days only shows when the board has more than one day -->
                         <Button x:Name="FillAllButton" Content="Fill all days" Style="{StaticResource BarButton}"
-                                Background="White" Foreground="#15803D" BorderBrush="#16A34A" FontWeight="Bold" Padding="14,6"
+                                Background="White" Foreground="#15803D" BorderBrush="#16A34A" FontWeight="Bold" Padding="16,6"
                                 ToolTip="Fill the open lines on every day on the board, then review and export them all (Ctrl+Enter)."/>
                         <Button x:Name="FillDayButton" Content="Fill this day" Style="{StaticResource BarButton}"
                                 Background="#16A34A" Foreground="White" FontWeight="Bold" Padding="16,6"
@@ -313,10 +329,10 @@
             </Border>
 
             <!-- Left: IP pool -->
-            <Border DockPanel.Dock="Left" Width="235" Margin="8,8,4,8" Background="White" CornerRadius="6" Tag="IPPool" AllowDrop="True" Padding="6">
+            <Border DockPanel.Dock="Left" Width="250" Margin="8,8,4,8" Background="White" CornerRadius="6" Tag="IPPool" AllowDrop="True" Padding="6">
                 <DockPanel>
                     <TextBlock DockPanel.Dock="Top" Text="IP PUCKS" FontWeight="Bold" Foreground="#1E3A8A" Margin="2,0,0,4"/>
-                    <TextBox DockPanel.Dock="Top" x:Name="IPSearchBox" Margin="0,0,0,4" Padding="3" ToolTip="Filter IPs by name or callsign"/>
+                    <TextBox DockPanel.Dock="Top" x:Name="IPSearchBox" Style="{StaticResource BarField}" Margin="0,0,0,4" Padding="3,0" ToolTip="Filter IPs by name or callsign"/>
                     <TextBlock DockPanel.Dock="Top" Text="Drag onto a line's IP slot, or click to pick up and click the slot. Double-click puts the IP on the selected line. Drop a line's IP here to take it off." FontSize="10"
                                Foreground="#64748B" TextWrapping="Wrap" Margin="2,0,0,6"/>
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -326,10 +342,10 @@
             </Border>
 
             <!-- Right: student pool -->
-            <Border DockPanel.Dock="Right" Width="265" Margin="4,8,8,8" Background="White" CornerRadius="6" Tag="StudentPool" AllowDrop="True" Padding="6">
+            <Border DockPanel.Dock="Right" Width="250" Margin="4,8,8,8" Background="White" CornerRadius="6" Tag="StudentPool" AllowDrop="True" Padding="6">
                 <DockPanel>
                     <TextBlock DockPanel.Dock="Top" Text="STUDENT PUCKS" FontWeight="Bold" Foreground="#14532D" Margin="2,0,0,4"/>
-                    <TextBox DockPanel.Dock="Top" x:Name="StudentSearchBox" Margin="0,0,0,4" Padding="3" ToolTip="Filter students by name"/>
+                    <TextBox DockPanel.Dock="Top" x:Name="StudentSearchBox" Style="{StaticResource BarField}" Margin="0,0,0,4" Padding="3,0" ToolTip="Filter students by name"/>
                     <TextBlock DockPanel.Dock="Top" Text="Drag onto a line to hardcode the student, or click to pick up and click the slot. Double-click puts them on the selected line. Drop a line's student here to take it off." FontSize="10"
                                Foreground="#64748B" TextWrapping="Wrap" Margin="2,0,0,6"/>
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -383,7 +399,7 @@
                         <DockPanel>
                             <Border DockPanel.Dock="Top" Background="#E2E8F0" Padding="8,3" CornerRadius="4,4,0,0">
                                 <DockPanel>
-                                    <Button x:Name="DetailsHideButton" DockPanel.Dock="Right" Content="Hide" Padding="8,0" Margin="4,0,0,0" Cursor="Hand"
+                                    <Button x:Name="DetailsHideButton" DockPanel.Dock="Right" Content="Hide" Padding="8,1" Margin="4,0,0,0" Cursor="Hand"
                                             ToolTip="Hide the Line details panel (View menu brings it back)"/>
                                     <TextBlock Text="LINE DETAILS" FontWeight="Bold" Foreground="#334155" VerticalAlignment="Center" Margin="0,0,10,0"/>
                                     <TextBlock x:Name="DetailsTitle" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="#0F172A"/>
