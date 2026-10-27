@@ -95,12 +95,12 @@ Assert-That 'the rules do not change the student' {
     [void](Test-HardRules -Student $s -Sortie (New-TestRow -ETD '2026-10-20 09:00' -SortieType 'O&B' -Instructor 'Jones, Bob') -Students @($s) -Instructors $ips -Explain)
     (ConvertTo-Json -InputObject $s -Depth 6) -eq $before
 }
-Assert-That 'a non-counter IP scores Non-Counter' {
+Assert-That 'a non-counter IP shows Non-Counter, at 0 points' {
     $s = New-TestStudent -Name 'Adams, Al' -Done 'FI3101|2026-10-15 08:00', 'FT5001|2026-10-16 08:00|Jones, Bob'
     $row = New-TestRow -ETD '2026-10-20 09:00' -Instructor 'Leech, Tom'
     $row.Instructor = Resolve-SortieInstructor -Instructors $ips -Instructor $row.Instructor
     $row.Mission = Find-SyllabusMission -Student $s -Mission 'FT5102'
-    (SoftRules -Student $s -Config $sw -Sortie $row -Instructors $ips -Detailed).Breakdown['Non-Counter'] -eq -15
+    (SoftRules -Student $s -Config $sw -Sortie $row -Instructors $ips -Detailed).Breakdown['Non-Counter'] -eq 0
 }
 
 

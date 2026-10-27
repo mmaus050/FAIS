@@ -207,6 +207,8 @@ function IngestData {
                                                 FormLookAhead     = $weightRow.FormLookAhead
                                                 LevelDifference   = $weightRow.LevelDifference
                                                 CounterContinuity = $weightRow.CounterContinuity
+                                                # Optional column: a blank or missing one uses the default in SoftRules
+                                                NewCounter        = $weightRow.NewCounter
                                                 OFTIFTPen         = $weightRow.OFTIFTPen
                                                 DollarRideBonus   = $weightRow.DollarRideBonus
                                                 TransSimRatio     = $weightRow.TransSimRatio

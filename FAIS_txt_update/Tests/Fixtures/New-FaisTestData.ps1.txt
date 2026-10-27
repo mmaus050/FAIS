@@ -124,6 +124,7 @@ function New-TestSoftWeights {
                                 FormLookAhead     = 22
                                 LevelDifference   = 2
                                 CounterContinuity = 5
+                                NewCounter        = 0
                                 OFTIFTPen         = -7
                                 DollarRideBonus   = 20
                                 TransSimRatio     = 0.5
