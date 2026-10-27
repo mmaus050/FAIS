@@ -45,13 +45,12 @@ BeforeAll {
                     SheetBannerLoadButton = (& $o @{ Content = '' }); SheetBannerIgnoreButton = (& $o @{ Content = '' })
                     FillDayButton = (& $o @{ Content = ''; Visibility = 'Visible' }); FillAllButton = (& $o @{ Content = ''; Visibility = 'Visible' })
                     BackToEditButton = (& $o @{ Visibility = 'Collapsed' })
-                    RefillButton = (& $o @{ Visibility = 'Collapsed' }); ExportButton = (& $o @{ Visibility = 'Collapsed' })
-                    ModeBanner = (& $o @{ Visibility = 'Collapsed' }); ModeBannerText = (& $o @{ Text = '' })
+                    RefillButton = (& $o @{ Visibility = 'Collapsed' }); ExportButton = (& $o @{ Content = ''; ToolTip = $null; Visibility = 'Visible' })
                     StatusText = (& $o @{ Text = '' }); CountsText = (& $o @{ Text = '' })
                 }
                 DayColls = @{}; Assess = @{}; RowAssess = @{}; Queue = (New-Object System.Collections.Generic.List[string])
-                Commands = (New-Object System.Collections.Generic.List[object]); Drag = $null; Heat = $null; Mode = 'Edit'; Overlay = $null
-                FillResult = $null; Result = $null; Busy = $false; Draining = $false; Filling = $false; LastFocusDay = $Active
+                Commands = (New-Object System.Collections.Generic.List[object]); Drag = $null
+                Result = $null; Busy = $false; Draining = $false; Filling = $false; LastFocusDay = $Active
                 FillDays = @(); SheetIgnore = (New-Object System.Collections.Generic.List[string]); SheetBannerInfo = $null
                 SheetStamp = ''; SheetPending = ''; SheetAutoPending = $false; ActiveDay = $Active; StatusLog = (New-Object System.Collections.Generic.List[string])
                 SaveTimer = (& $o @{ }); SheetTimer = (& $o @{ })
@@ -121,7 +120,7 @@ Describe 'Puck board, one day at a time (no window)' {
         (@(Get-BoardDayLines -Board $pb.Board -Day $script:D1))[0].Instructor | Should -BeExactly 'Lee, Ann' -Because 'Ctrl+Z takes the replacement back'
     }
 
-    It 'the sheet tick reads, then auto-updates only in edit mode and when nobody is typing in a row' {
+    It 'the sheet tick reads, then auto-updates only when nobody is typing in a row' {
         Initialize-TestBoard -Days @($script:D1) -Sheet (New-Sheet @(New-SR $script:D1 '07:30'))
         [void](InModuleScope PuckBoard { Invoke-PBSheetStartup })
         $pb = Get-PB
@@ -132,10 +131,6 @@ Describe 'Puck board, one day at a time (no window)' {
         $pb.SheetStamp = InModuleScope PuckBoard -Parameters @{ P = $md } { param($P) Get-PBFileStamp $P }
         $pb.Data.ScheduleSheet = New-Sheet @(New-SR $script:D1 '07:40')
         $pb.SheetAutoPending = $true
-        $pb.Mode = 'Review'
-        InModuleScope PuckBoard { Invoke-PBSheetTick }
-        (@(Get-BoardDayLines -Board $pb.Board -Day $script:D1))[0].ETD.ToString('HHmm') | Should -BeExactly '0730' -Because 'review mode waits'
-        $pb.Mode = 'Edit'
         Mock -ModuleName PuckBoard Get-PBFocusState { @{ LineId = 'x'; Tag = 'EtdBox' } }
         InModuleScope PuckBoard { Invoke-PBSheetTick }
         (@(Get-BoardDayLines -Board $pb.Board -Day $script:D1))[0].ETD.ToString('HHmm') | Should -BeExactly '0730' -Because 'typing in a row waits'
@@ -259,7 +254,7 @@ Describe 'Puck board, one day at a time (no window)' {
         $pb.StatusLog[-1] | Should -BeLike 'Warn|*1 sheet row(s) could not be read*'
     }
 
-    It '"Fill this day" fills and reviews just the day on screen, with exported days as context' {
+    It '"Fill this day" puts the picks for the day on screen on the board, with exported days as context' {
         $pub = @([PSCustomObject]@{ ETD = "$($script:D2) 07:30:00"; Instructor = 'Jones, Bob'; SortieType = 'Day Local'; Student = 'Adams, Al'; Mission = 'FT5001'; Callsign = 'TALON'; Num = 31; Notes = '' })
         Initialize-TestBoard -Days @($script:D1, $script:D2) -Sheet $null -PrevSchedule $pub -Active $script:D1
         $pb = Get-PB
@@ -273,25 +268,76 @@ Describe 'Puck board, one day at a time (no window)' {
         $pb.C.FillAllButton.Visibility | Should -BeExactly 'Visible'
 
         InModuleScope PuckBoard { Invoke-PBFill -Scope Day } 6>$null
-        $pb.Mode | Should -BeExactly 'Review'
         ($pb.FillDays -join ',') | Should -BeExactly $script:D1
-        @($pb.FillResult.Schedule).Count | Should -Be 1
-        @($pb.FillResult.Context).Count | Should -Be 1 -Because 'the exported Wednesday rode along'
-        $row = $pb.FillResult.Schedule[0]
-        "$(Get-NameText $row.Student)|$(Get-NameText $row.Mission)" | Should -Not -BeExactly 'Adams, Al|FT5001'
-        $pb.C.ModeBannerText.Text | Should -BeLike 'REVIEW (Tue 20 Oct)*Export writes Tue 20 Oct*'
-        $pb.C.FillDayButton.Visibility | Should -BeExactly 'Collapsed' -Because 'both fill buttons hide while reviewing'
-        $pb.C.FillAllButton.Visibility | Should -BeExactly 'Collapsed'
+        $tue = @(Get-BoardDayLines -Board $pb.Board -Day $script:D1)[0]
+        @('Engine', 'ForSale') | Should -Contain $tue.Filled -Because 'the fill marks the line it filled (or could not)'
+        "$($tue.Student)|$($tue.Mission)" | Should -Not -BeExactly 'Adams, Al|FT5001' -Because 'the exported Wednesday rode along as context'
+        (@(Get-BoardDayLines -Board $pb.Board -Day $script:D2))[0].Filled | Should -BeExactly '' -Because 'only the day on screen was filled'
+        $pb.C.FillDayButton.Visibility | Should -BeExactly 'Visible' -Because 'another day can be filled after one is'
+        $pb.C.FillAllButton.Visibility | Should -BeExactly 'Visible'
+        $pb.C.ExportButton.Visibility | Should -BeExactly 'Visible'
+        $pb.C.BackToEditButton.Visibility | Should -BeExactly 'Visible' -Because 'Clear fill shows on a day with the scheduler''s picks'
 
-        # Re-fill repeats the same day even after switching tabs
+        # Filling the other day too: Export writes both
         $pb.ActiveDay = $script:D2
-        InModuleScope PuckBoard { Invoke-PBFill -Refill } 6>$null
-        ($pb.FillDays -join ',') | Should -BeExactly $script:D1
-
-        InModuleScope PuckBoard { Exit-PBReview }
-        InModuleScope PuckBoard { Invoke-PBFill -Scope All } 6>$null
+        InModuleScope PuckBoard { Invoke-PBFill -Scope Day } 6>$null
         ($pb.FillDays -join ',') | Should -BeExactly "$($script:D1),$($script:D2)"
-        @($pb.FillResult.Context).Count | Should -Be 0 -Because 'Wednesday is filled now, not context'
+        (InModuleScope PuckBoard { Get-PBExportDays }) -join ',' | Should -BeExactly "$($script:D1),$($script:D2)"
+        $pb.C.ExportButton.Content | Should -BeExactly 'Export 2 days'
+
+        # Clear fill takes the scheduler's picks off the day on screen only; Ctrl+Z puts them back
+        $wed = @(Get-BoardDayLines -Board $pb.Board -Day $script:D2)[0]
+        $before = "$($wed.Student)|$($wed.Filled)"
+        InModuleScope PuckBoard { Invoke-PBClearFill }
+        "$($wed.Student)|$($wed.Filled)" | Should -BeExactly '|'
+        (@(Get-BoardDayLines -Board $pb.Board -Day $script:D1))[0].Filled | Should -Not -BeNullOrEmpty
+        [void](Undo-Board $pb.Board)
+        $wed = @(Get-BoardDayLines -Board $pb.Board -Day $script:D2)[0]
+        "$($wed.Student)|$($wed.Filled)" | Should -BeExactly $before
+    }
+
+    It 'a student the fill put on can be moved like any other, and becomes hardcoded' {
+        Initialize-TestBoard -Days @($script:D1) -Sheet $null
+        $pb = Get-PB
+        Add-BoardLine -Board $pb.Board -Line @(
+            New-BoardLine -ETD ([datetime]"$($script:D1) 09:00") -SortieType 'Day Local' -Instructor 'Jones, Bob' -Id 'A1'
+            New-BoardLine -ETD ([datetime]"$($script:D1) 13:00") -SortieType 'Day Local' -Instructor 'Lee, Ann' -Id 'A2'
+        ) -NoUndo
+        InModuleScope PuckBoard { Invoke-PBFill -Scope Day } 6>$null
+        $a1 = Get-BoardLine $pb.Board 'A1'
+        $a1.Filled | Should -BeExactly 'Engine'
+        $name = $a1.Student
+        $name | Should -Not -BeNullOrEmpty
+        [void](Move-BoardPin -Board $pb.Board -FromId 'A1' -ToId 'A2')
+        (Get-BoardLine $pb.Board 'A2').Student | Should -BeExactly $name
+        (Get-BoardLine $pb.Board 'A2').Filled | Should -BeExactly '' -Because 'a moved pick is the user''s now'
+    }
+
+    It 'Export writes the board as it stands: nobody is picked, open lines go out as NEED SP' {
+        Initialize-TestBoard -Days @($script:D1) -Sheet $null
+        $pb = Get-PB
+        $pb.Window = [PSCustomObject]@{ DialogResult = $null }
+        Add-BoardLine -Board $pb.Board -Line @(
+            New-BoardLine -ETD ([datetime]"$($script:D1) 07:30") -SortieType 'Day Local' -Instructor 'Jones, Bob' -Student 'Adams, Al' -Id 'E1'
+            New-BoardLine -ETD ([datetime]"$($script:D1) 12:00") -SortieType 'Day Local' -Instructor 'Lee, Ann' -Id 'E2'
+        ) -NoUndo
+        Mock -ModuleName PuckBoard Save-PBBoard { }
+        Mock -ModuleName PuckBoard Show-PBMessage { 'No' }
+        InModuleScope PuckBoard { Invoke-PBExport } 6>$null
+        $pb.Result | Should -BeNullOrEmpty -Because 'No on the question exports nothing'
+        Should -Invoke -ModuleName PuckBoard Show-PBMessage -Times 1 -Exactly -ParameterFilter { $Text -like '*1 line(s) have no student and go out as NEED SP*' }
+
+        Mock -ModuleName PuckBoard Show-PBMessage { 'Yes' }
+        InModuleScope PuckBoard { Invoke-PBExport } 6>$null
+        $pb.Result.Action | Should -BeExactly 'Export'
+        ($pb.Result.Days -join ',') | Should -BeExactly $script:D1 -Because 'with nothing filled, Export writes the day on screen'
+        $rows = @($pb.Result.FillResult.Schedule)
+        $e1 = $rows | Where-Object { $_.BoardLineId -eq 'E1' }
+        $e2 = $rows | Where-Object { $_.BoardLineId -eq 'E2' }
+        Get-NameText $e1.Student | Should -BeExactly 'Adams, Al'
+        $e2.Student | Should -BeExactly 'NEED SP'
+        $e2.FilledBy | Should -BeExactly 'NeedSP'
+        $pb.Result.FillResult.Stats.NeedSP | Should -Be 1
     }
 
     It 'Format-PBDays names one day or a range' {
@@ -312,7 +358,7 @@ Describe 'Puck board: missions picked by hand, Add Bulk Lines, Update Syllabi (n
         Mock -ModuleName PuckBoard Request-PBAutosave { }
         Mock -ModuleName PuckBoard Start-PBAssessQueue { }
         Mock -ModuleName PuckBoard Close-PBPopup { }
-        Mock -ModuleName PuckBoard Show-PBPlacementPopup { }
+        Mock -ModuleName PuckBoard Show-PBPlacementSummary { }
         Mock -ModuleName PuckBoard Get-PBActiveDay { & (Get-Module PuckBoard) { $script:PB.ActiveDay } }
         Mock -ModuleName PuckBoard Set-PBStatus { & (Get-Module PuckBoard) { param($t, $k) $script:PB.C.StatusText.Text = $t; $script:PB.StatusLog.Add("$k|$t") } $Text $Kind }
         Clear-AssessmentCache
@@ -430,7 +476,7 @@ Describe 'Puck board: missions picked by hand, Add Bulk Lines, Update Syllabi (n
 
     It 'a kept rule break says so on the status bar, after the pop-up' {
         Mock -ModuleName PuckBoard Show-PBMessage { 'No' }
-        Mock -ModuleName PuckBoard Show-PBPlacementPopup { & (Get-Module PuckBoard) { Set-PBStatus 'Adams, Al -> 0730 Day Local: FT5102, 1 rule flag' 'Hard' } }
+        Mock -ModuleName PuckBoard Show-PBPlacementSummary { & (Get-Module PuckBoard) { Set-PBStatus 'Adams, Al -> 0730 Day Local: FT5102, 1 rule flag' 'Hard' } }
         Invoke-Choose 'FT5102 (not opted)'
         Get-LastStatus | Should -BeExactly 'Warn|FT5102 kept - it is flagged OVERRIDE on the output.'
     }
@@ -445,10 +491,10 @@ Describe 'Puck board: missions picked by hand, Add Bulk Lines, Update Syllabi (n
     It 'a typed line with a student and a mission shows the rule check' {
         $typed = New-BoardLine -ETD ([datetime]"$($script:D1) 09:00") -SortieType 'Day Local' -Instructor 'Jones, Bob' -Student 'Adams, Al' -Mission 'FT5102' -Id 'Q1'
         & (Get-Module PuckBoard) { param($l) Invoke-PBCommand @{ Cmd = 'AddLines'; Lines = @($l); Status = 'Added 1 line(s).' } } $typed
-        Should -Invoke -ModuleName PuckBoard Show-PBPlacementPopup -Times 1 -Exactly -ParameterFilter { $LineId -eq 'Q1' }
+        Should -Invoke -ModuleName PuckBoard Show-PBPlacementSummary -Times 1 -Exactly -ParameterFilter { $LineId -eq 'Q1' }
         $plain = New-BoardLine -ETD ([datetime]"$($script:D1) 10:00") -SortieType 'Day Local' -Instructor 'Jones, Bob' -Id 'Q2'
         & (Get-Module PuckBoard) { param($l) Invoke-PBCommand @{ Cmd = 'AddLines'; Lines = @($l); Status = 'Added 1 line(s).' } } $plain
-        Should -Invoke -ModuleName PuckBoard Show-PBPlacementPopup -Times 1 -Exactly -Because 'a line with no student needs no check'
+        Should -Invoke -ModuleName PuckBoard Show-PBPlacementSummary -Times 1 -Exactly -Because 'a line with no student needs no check'
     }
 
     It 'Add Bulk Lines puts the lines on the day as one undo step' {
@@ -495,6 +541,9 @@ Describe 'Puck board: missions picked by hand, Add Bulk Lines, Update Syllabi (n
         & (Get-Module PuckBoard) { Format-PBBulkTimes -Times @('0730', '0733', '0736') -Every '3' -SortieType 'Day Local' } | Should -BeExactly '3 Day Local lines: 0730 to 0736, every 3 min'
         & (Get-Module PuckBoard) { Format-PBBulkTimes -Times @('0900') -Every '3' -SortieType 'OFT' -DayText 'Tue 20 Oct' } | Should -BeExactly '1 OFT line on Tue 20 Oct at 0900'
         & (Get-Module PuckBoard) { Format-PBBulkTimes -Times @('1000', '1005') -Every '5' -SortieType 'O&B' } | Should -BeExactly '2 O&B lines: 1000 to 1005, every 5 min (each with its return leg)'
+        & (Get-Module PuckBoard) { Format-PBBulkTimes -Times @('1000') -Every '5' -SortieType 'O&B' } | Should -BeExactly '1 O&B line at 1000 (with its return leg)'
+        & (Get-Module PuckBoard) { Format-PBBulkTimes -Times @('0800', '0800', '0800') -Every '0' -SortieType 'OFT' -DayText 'Wed 21 Oct' } | Should -BeExactly '3 OFT lines on Wed 21 Oct, all at 0800'
+        & (Get-Module PuckBoard) { Format-PBBulkTimes -Times @('0730', '0735') -Every ' 05 ' -SortieType 'Day Local' } | Should -BeExactly '2 Day Local lines: 0730 to 0735, every 5 min'
     }
 
     Context 'Update Syllabi' {
@@ -551,8 +600,7 @@ Describe 'Puck board: missions picked by hand, Add Bulk Lines, Update Syllabi (n
             & (Get-Module PuckBoard) { Invoke-PBUpdateSyllabi }
             Should -Invoke -ModuleName PuckBoard Show-PBMessage -Times 1 -Exactly -ParameterFilter {
                 $Title -eq 'Update Syllabi' -and $Buttons -eq 'YesNo' -and
-                $Text -like 'Flying schedule for Fri 16 Oct 2026*Adams, Al: complete FT5001; SimDebt +1*Brown, Bea: NOT complete FI3101 (CX); SimDebt +0.5*Update these syllabi?*' -and
-                $Text -notlike '*fill you are reviewing*'
+                $Text -like 'Flying schedule for Fri 16 Oct 2026*Adams, Al: complete FT5001; SimDebt +1*Brown, Bea: NOT complete FI3101 (CX); SimDebt +0.5*Update these syllabi?*'
             }
             (Get-Event 'Adams, Al' 'FT5001').IsComplete | Should -BeFalse
             (Get-Event 'Brown, Bea' 'FI3101').IsComplete | Should -BeTrue
@@ -583,15 +631,6 @@ Describe 'Puck board: missions picked by hand, Add Bulk Lines, Update Syllabi (n
             Get-LastStatus | Should -BeLike 'Warn|Updated 2 event(s) for 2 student(s) from Sched.xlsx for this run only*'
         }
 
-        It 'while reviewing a fill: warns that the fill goes, and Yes throws it away' {
-            & (Get-Module PuckBoard) { $script:PB.Mode = 'Review'; $script:PB.FillResult = 'old fill' }
-            Mock -ModuleName PuckBoard Show-PBMessage { 'Yes' }
-            & (Get-Module PuckBoard) { Invoke-PBUpdateSyllabi }
-            Should -Invoke -ModuleName PuckBoard Show-PBMessage -Times 1 -Exactly -ParameterFilter { $Text -like '*The fill you are reviewing is thrown away*' }
-            (Get-PB).Mode | Should -BeExactly 'Edit'
-            (Get-PB).FillResult | Should -BeNullOrEmpty
-        }
-
         It 'when every syllabus already matches it says so and asks nothing' {
             $script:Sched = New-SchedFile @(New-SchedFact 'Adams, Al [2d Lt]' 'FI3101' 'CM' 'SIM IP' '2026-10-15 08:00')
             Mock -ModuleName PuckBoard Show-PBMessage { 'OK' }
@@ -614,11 +653,8 @@ Describe 'Puck board: click and place, Line details, fill buttons, export result
         Mock -ModuleName PuckBoard Request-PBAutosave { }
         Mock -ModuleName PuckBoard Start-PBAssessQueue { }
         Mock -ModuleName PuckBoard Close-PBPopup { }
-        Mock -ModuleName PuckBoard Show-PBPlacementPopup { }
-        Mock -ModuleName PuckBoard Stop-PBHeat { }
-        Mock -ModuleName PuckBoard Start-PBHeat { }
+        Mock -ModuleName PuckBoard Show-PBPlacementSummary { }
         Mock -ModuleName PuckBoard Update-PBHoldBanner { }
-        Mock -ModuleName PuckBoard Update-PBHeldHeat { }
         Mock -ModuleName PuckBoard Set-PBRowHighlight { }
         Mock -ModuleName PuckBoard Get-PBActiveDay { & (Get-Module PuckBoard) { $script:PB.ActiveDay } }
         Mock -ModuleName PuckBoard Set-PBStatus { & (Get-Module PuckBoard) { param($t, $k) $script:PB.C.StatusText.Text = $t; $script:PB.StatusLog.Add("$k|$t") } $Text $Kind }
@@ -644,6 +680,7 @@ Describe 'Puck board: click and place, Line details, fill buttons, export result
             $script:PB.C.DetailsHideHardCheck = & $o @{ IsChecked = $false }
             $script:PB.C.DetailsList = & $o @{ SelectedItem = $null; ItemsSource = $null }
             $script:PB.C.DetailsPlaceButton = & $o @{ IsEnabled = $false }
+            $script:PB.C.DetailsOptionsButton = & $o @{ IsEnabled = $false }
             $timer = & $o @{ Running = $false }
             $timer | Add-Member -MemberType ScriptMethod -Name Start -Value { $this.Running = $true }
             $timer | Add-Member -MemberType ScriptMethod -Name Stop -Value { $this.Running = $false }
@@ -661,6 +698,12 @@ Describe 'Puck board: click and place, Line details, fill buttons, export result
         function Invoke-DetailsDrain {
             $n = 0
             while ((Get-PB).DetailsTimer.Running -and $n -lt 200) { & (Get-Module PuckBoard) { Invoke-PBDetailsTick }; $n++ }
+        }
+        # See options, then wait for every student to be ranked
+        function Invoke-SeeOptions {
+            Invoke-DetailsDrain
+            & (Get-Module PuckBoard) { Start-PBDetailsOptions }
+            Invoke-DetailsDrain
         }
     }
 
@@ -737,11 +780,15 @@ Describe 'Puck board: click and place, Line details, fill buttons, export result
         (Get-PB).SelectedLineId | Should -BeExactly ''
     }
 
-    It 'Line details ranks every student on the selected line: fits first, rule breaks last' {
+    It 'Line details checks only the line until See options, then ranks every student: fits first, rule breaks last' {
         & (Get-Module PuckBoard) { Select-PBLine 'L1' }
         (Get-PB).C.DetailsTitle.Text | Should -BeExactly '0730 Day Local   |   IP Jones, Bob   |   no student yet'
         (Get-PB).DetailsTimer.Running | Should -BeTrue
         Invoke-DetailsDrain
+        @((Get-PB).Details.Items).Count | Should -Be 0 -Because 'nobody is ranked until See options'
+        (Get-PB).C.DetailsOptionsButton.IsEnabled | Should -BeTrue
+        (Get-PB).C.DetailsListInfo.Text | Should -BeLike 'Press See options*'
+        Invoke-SeeOptions
         $items = @((Get-PB).Details.Items)
         $items.Count | Should -Be 3
         $items[-1].StudentName | Should -BeExactly 'Cruz, Cy'
@@ -756,7 +803,7 @@ Describe 'Puck board: click and place, Line details, fill buttons, export result
 
     It "picking a student in the list shows their hard rules, warnings and soft rules, and Put on this line hardcodes them" {
         & (Get-Module PuckBoard) { Select-PBLine 'L1' }
-        Invoke-DetailsDrain
+        Invoke-SeeOptions
         $brown = @((Get-PB).Details.Items | Where-Object { $_.StudentName -eq 'Brown, Bea' })[0]
         (Get-PB).C.DetailsList.SelectedItem = $brown
         & (Get-Module PuckBoard) { Invoke-PBDetailsPick }
@@ -772,12 +819,14 @@ Describe 'Puck board: click and place, Line details, fill buttons, export result
         (Get-Line 'L1').Student | Should -BeExactly 'Brown, Bea'
         Invoke-DetailsDrain
         @((Get-PB).TestChecks)[0] | Should -BeExactly 'Head|Brown, Bea, hardcoded on this line'
+        @((Get-PB).Details.Items).Count | Should -Be 0 -Because 'the board changed, so the options wait for See options again'
+        Invoke-SeeOptions
         @((Get-PB).Details.Items | Where-Object { $_.NameText -eq 'Brown, Bea  (on this line)' }).Count | Should -Be 1
     }
 
     It 'Hide rule breaks leaves out the students who break a hard rule' {
         & (Get-Module PuckBoard) { Select-PBLine 'L1' }
-        Invoke-DetailsDrain
+        Invoke-SeeOptions
         (Get-PB).C.DetailsHideHardCheck.IsChecked = $true
         & (Get-Module PuckBoard) { Update-PBDetailsFilter }
         @((Get-PB).Details.Items).Count | Should -Be 2
@@ -801,7 +850,7 @@ Describe 'Puck board: click and place, Line details, fill buttons, export result
         & $before (& $c 'Amy' 1 5) (& $c 'Zed' 1 5) | Should -BeTrue
     }
 
-    It 'Fill all days only shows when the board has more than one day' {
+    It 'Fill all days only shows when the board has more than one day; Fill and Export are always there' {
         & (Get-Module PuckBoard) { Update-PBFillScope }
         (Get-PB).C.FillAllButton.Visibility | Should -BeExactly 'Visible'
         (& (Get-Module PuckBoard) { Get-PBFillScope -Scope Day }) -join ',' | Should -BeExactly $script:D1
@@ -810,6 +859,10 @@ Describe 'Puck board: click and place, Line details, fill buttons, export result
         & (Get-Module PuckBoard) { Update-PBFillScope }
         (Get-PB).C.FillAllButton.Visibility | Should -BeExactly 'Collapsed'
         (Get-PB).C.FillDayButton.Content | Should -BeExactly 'Fill Tue 20 Oct'
+        (Get-PB).C.FillDayButton.Visibility | Should -BeExactly 'Visible'
+        (Get-PB).C.ExportButton.Visibility | Should -BeExactly 'Visible'
+        (Get-PB).C.ExportButton.Content | Should -BeExactly 'Export Tue 20 Oct'
+        (Get-PB).C.BackToEditButton.Visibility | Should -BeExactly 'Collapsed' -Because 'nothing on the day was put there by the scheduler'
     }
 
     It 'the export result says what was written, unsats and overrides included' {
@@ -841,7 +894,7 @@ Describe 'Puck board: click and place, Line details, fill buttons, export result
 
     It 'the color key covers every section with a real color for each swatch' {
         $key = @(& (Get-Module PuckBoard) { Get-PBColorKey })
-        $key.Count | Should -BeGreaterOrEqual 8
+        $key.Count | Should -BeGreaterOrEqual 7
         foreach ($section in $key) {
             @($section.Items).Count | Should -BeGreaterThan 0
             foreach ($it in $section.Items) {
@@ -890,7 +943,6 @@ Describe 'Puck board: Add Student Absence (no window)' {
         Mock -ModuleName PuckBoard Request-PBAutosave { }
         Mock -ModuleName PuckBoard Start-PBAssessQueue { }
         Mock -ModuleName PuckBoard Close-PBPopup { }
-        Mock -ModuleName PuckBoard Stop-PBHeat { }
         Mock -ModuleName PuckBoard Update-PBHoldBanner { }
         Mock -ModuleName PuckBoard Show-BusyOverlay { }
         Mock -ModuleName PuckBoard Hide-BusyOverlay { }
@@ -967,14 +1019,6 @@ Describe 'Puck board: Add Student Absence (no window)' {
         Should -Invoke -ModuleName PuckBoard Show-PBAbsenceDialog -Times 1 -Exactly -ParameterFilter { (@($Students) -join ',') -eq 'Brown, Bea' }
         @((Get-Student 'Brown, Bea').Absences).Count | Should -Be 1
         (Get-PB).Held | Should -BeNullOrEmpty
-    }
-
-    It 'while reviewing a fill: the fill is thrown away (it was made without the absence)' {
-        & (Get-Module PuckBoard) { $script:PB.Mode = 'Review'; $script:PB.FillResult = 'old fill' }
-        Mock -ModuleName PuckBoard Show-PBAbsenceDialog { New-AbsAsk -Students @('Brown, Bea') -From '1300' -To '1400' }
-        & (Get-Module PuckBoard) { Invoke-PBAddAbsence }
-        (Get-PB).Mode | Should -BeExactly 'Edit'
-        (Get-PB).FillResult | Should -BeNullOrEmpty
     }
 
     It 'the export result lists the absences Export wrote because they could not be saved before' {
