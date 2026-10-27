@@ -1,0 +1,10 @@
+# Only the files changed since the last FAIS_txt.zip: copy them over your FAIS folder.
+# Paste this whole file into a PowerShell window after cd-ing to this FAIS_txt_update folder,
+# then copy what is here (Modules, Tests, README.md) into your FAIS folder, replacing the old files.
+# (Or copy the .txt files into your FAIS folder first, keeping their folders, and run this there.)
+# It renames every X.ps1.txt / X.psm1.txt / X.xaml.txt / README.md.txt back to X, replacing a file already there.
+Get-ChildItem -Recurse -File -Filter *.txt |
+  Where-Object { $_.Name -match '\.(ps1|psm1|xaml|md)\.txt$' } |
+  ForEach-Object { Move-Item -LiteralPath $_.FullName -Destination (Join-Path $_.DirectoryName ($_.Name -replace '\.txt$','')) -Force }
+Get-ChildItem -Recurse -File | Unblock-File
+Write-Host "Done. Run:  powershell.exe -STA -ExecutionPolicy Bypass -File .\FAIS.ps1"
