@@ -109,6 +109,11 @@ function IngestData {
 
                                                 $debt = 0.0
                                                 if ($null -ne $Student.SimDebt -and [string]$Student.SimDebt -ne '') { [void][double]::TryParse([string]$Student.SimDebt, [ref]$debt) }
+                                                # Blank (or no DiscontinuityScore column): counted from the syllabus once SoftWeights is read
+                                                $disc = $null
+                                                $discNum = 0.0
+                                                if ($null -ne $Student.DiscontinuityScore -and [string]$Student.DiscontinuityScore -ne '' -and
+                                                                [double]::TryParse([string]$Student.DiscontinuityScore, [ref]$discNum)) { $disc = $discNum }
                                                 $priority = 0.0
                                                 if ($null -ne $Student.Priority -and [string]$Student.Priority -ne '') { [void][double]::TryParse([string]$Student.Priority, [ref]$priority) }
 
@@ -133,6 +138,7 @@ function IngestData {
                                                                 OnHold                  = $onHold
                                                                 OnHoldInMasterData      = $onHold
                                                                 SimDebt                 = $debt
+                                                                DiscontinuityScore      = $disc
                                                                 Syllabus                = $cleanSyllabus
                                                                 Absences                = @()
                                                                 Reservations            = @()
@@ -209,12 +215,19 @@ function IngestData {
                                                 TransSimRatio     = $weightRow.TransSimRatio
                                                 FormSimRatio      = $weightRow.FormSimRatio
                                                 SimStopMult       = $weightRow.SimStopMult
+                                                Disc1String       = $weightRow.Disc1String
+                                                DiscCounter       = $weightRow.DiscCounter
+                                                Disc3PlusString   = $weightRow.Disc3PlusString
                                 }
                                 $SoftWeights.TransSimRatio = [double]$SoftWeights.TransSimRatio * [double]$SoftWeights.SimStopMult
                                 $SoftWeights.FormSimRatio = [double]$SoftWeights.FormSimRatio * [double]$SoftWeights.SimStopMult
                 }
                 catch {
                                 Write-Host "An error occurred while loading Soft Weights: $($_.Exception.Message)" -ForegroundColor Yellow
+                }
+                $counted = @(Initialize-StudentDiscontinuity -Students $Students -Instructors $Instructors -SoftWeights $SoftWeights)
+                if ($counted.Count -gt 0) {
+                                Write-Host "DiscontinuityScore is blank in MasterData for $($counted.Count) student(s): counted from their syllabus (Export writes it)." -ForegroundColor DarkGray
                 }
 
                 # ------------------------------------------------------------------

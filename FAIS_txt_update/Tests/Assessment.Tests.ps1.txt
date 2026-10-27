@@ -715,6 +715,20 @@ Describe 'Get-PlacementAssessment: inputs are never changed' {
                                 @($able.Syllabus | Where-Object { $_.IsComplete }).Count | Should -Be 2
                 }
 
+                It 'an earlier pin that day moves the DiscontinuityScore the later line scores with (the original is left alone)' {
+                                $able = New-TestStudent -Name 'Able, Amy' -Done 'FI3101|2026-02-20 08:00' -DiscontinuityScore 1
+                                $data = New-AsData @($able)
+                                $b = New-AsBoard -Lines @(
+                                                @{ Id = 'M1'; ETD = '2026-03-03 07:30'; Type = 'Day Local'; IP = 'Lee, Ann'; Student = 'Able, Amy'; Mission = 'FT5001' },
+                                                @{ Id = 'M2'; ETD = '2026-03-03 13:00'; Type = 'Day Local'; IP = 'Lee, Ann' }
+                                )
+                                # M1 flies FT5001 with Lee first: a 1-string and a counter (+2). (FT5103 is a solo, which scores no strings)
+                                $d = Get-Detail (Get-Assess $b 'M2' 'Able, Amy' $data) 'FT5102'
+                                Get-Points $d 'Continue String' | Should -Be 10
+                                Get-Points $d 'Discontinuity (string)' | Should -Be 3
+                                $able.DiscontinuityScore | Should -Be 1
+                }
+
                 It 'leaves the board lines and Version untouched' {
                                 $able = New-TestStudent -Name 'Able, Amy' -Done $script:AbleDone
                                 $data = New-AsData @($able)
@@ -1258,6 +1272,15 @@ Describe 'Get-StudentPuckInfo' {
                                 $s = New-TestStudent -Name 'Blank, Bea'
                                 $s.SimDebt = ''
                                 (Get-StudentPuckInfo -Student $s -Board $board -Day '2026-03-03').SimDebt | Should -Be 0
+                }
+
+                It 'reports DiscontinuityScore as a number (0 when blank or missing)' {
+                                $s = New-TestStudent -Name 'Disc, Dee' -DiscontinuityScore 6
+                                (Get-StudentPuckInfo -Student $s -Board $board -Day '2026-03-03').Discontinuity | Should -Be 6
+                                $s.DiscontinuityScore = ''
+                                (Get-StudentPuckInfo -Student $s -Board $board -Day '2026-03-03').Discontinuity | Should -Be 0
+                                $s.PSObject.Properties.Remove('DiscontinuityScore')
+                                (Get-StudentPuckInfo -Student $s -Board $board -Day '2026-03-03').Discontinuity | Should -Be 0
                 }
 }
 
