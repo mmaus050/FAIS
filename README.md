@@ -2,6 +2,8 @@
 
 Flight scheduler for student pilots. You build the day on a **puck board**: drag IPs and students onto lines, type ETDs, see why a student fits a line or breaks a rule, then let the scheduler **fill the rest of the lines**.
 
+**Full guide:** `Docs\FAIS_Documentation.html` (double-click to open in a browser) or `Docs/FAIS_Documentation.md`. It covers how to use FAIS, how the scheduler picks students, every rule and score, and how the code works.
+
 ## Running it
 
 ```
