@@ -487,16 +487,17 @@ function Add-StudentReservation {
                                 $Student | Add-Member -MemberType NoteProperty -Name 'Reservations' -Value @() -Force
                 }
 
-                $kept = @($Student.Reservations | Where-Object { $_.LineId -ne $LineId })
-                $kept += [PSCustomObject]@{
+                $kept = [System.Collections.Generic.List[object]]::new()
+                foreach ($res in @($Student.Reservations)) { if ($res.LineId -ne $LineId) { $kept.Add($res) } }
+                $kept.Add([PSCustomObject]@{
                                 LineId     = $LineId
                                 Start      = $start
                                 SortieType = $SortieType
                                 Mission    = $Mission
                                 Instructor = $Instructor
                                 IsSim      = (Test-IsSimSortieType $SortieType)
-                }
-                $Student.Reservations = $kept
+                })
+                $Student.Reservations = $kept.ToArray()
 }
 
 function Remove-StudentReservation {
