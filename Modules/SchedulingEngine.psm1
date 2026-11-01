@@ -312,7 +312,7 @@ function Test-HardRules {
                 }
                 # CAPsters single turn ONLY (flights)
                 if ($isCap -and -not $isSimLine) {
-                                $flights = @($today | Where-Object { -not $_.IsSim })
+                                $flights = @($today.Where({ -not $_.IsSim }))
                                 if ($flights.Count -ge 1) {
                                                 $violations.Add((New-RuleViolation 'CAP_SINGLE_TURN' ("CAP student already flies today ({0})" -f ((@($flights | ForEach-Object { Format-EventLabel $_.Start $_.Mission })) -join ', '))))
                                                 if (& $stop) { return (New-HardRuleResult $violations $notes $eventResults) }
@@ -390,7 +390,7 @@ function Test-HardRules {
                                 $next = $after[0]
                                 $dayEnd = if ($null -ne $returnStart -and $returnStart -gt $start) { $returnStart } else { $start }
                                 # A later event the same day is checked on its own line, so only the day's last event answers for tomorrow
-                                $laterToday = @($today | Where-Object { $_.Start -gt $dayEnd })
+                                $laterToday = @($today.Where({ $_.Start -gt $dayEnd }))
                                 if ($laterToday.Count -eq 0 -and $next.Start.Date -eq $start.Date.AddDays(1)) {
                                                 $rest = ($next.Start - $dayEnd).TotalHours
                                                 if ($rest -lt 15) {
@@ -763,14 +763,17 @@ function SoftRules {
                 #   - Alternating counters (A,B,A + B) are not a string: no Continue String, only the Zipper weight
                 # Flights only: a sim line, solo or check ride never scores here, and past sims never count
                 #####################################
+                # Parse each ETD once (it was parsed up to three times per mission)
                 $PastFlights = @(
-                                $Student.Syllabus | Where-Object {
-                                                (Test-MissionComplete $_) -and
-                                                $null -ne (Parse-ETD $_.ETD) -and
-                                                (Get-MissionKind -Mission $_ -InstructorName (Get-NameText $_.Instructor)) -eq 'Flight' -and
-                                                -not [string]::IsNullOrWhiteSpace((Get-NameText $_.Instructor)) -and
-                                                (Parse-ETD $_.ETD) -lt $SortieDate
-                                } | Sort-Object -Property { Parse-ETD $_.ETD } -Descending
+                                foreach ($pm in @($Student.Syllabus)) {
+                                                if (-not (Test-MissionComplete $pm)) { continue }
+                                                $pmStart = Parse-ETD $pm.ETD
+                                                if ($null -eq $pmStart -or -not ($pmStart -lt $SortieDate)) { continue }
+                                                $pmIp = Get-NameText $pm.Instructor
+                                                if ([string]::IsNullOrWhiteSpace($pmIp)) { continue }
+                                                if ((Get-MissionKind -Mission $pm -InstructorName $pmIp) -ne 'Flight') { continue }
+                                                [PSCustomObject]@{ Item = $pm; Start = $pmStart }
+                                } | Sort-Object -Property Start -Descending | ForEach-Object { $_.Item }
                 )
 
                 $hasRealIP = ($CurrentIP -ne '' -and $CurrentIP -notmatch 'SIM IP' -and $CurrentIP -ne 'NEED IP')
