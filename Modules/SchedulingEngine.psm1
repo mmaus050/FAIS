@@ -123,7 +123,11 @@ function Get-LinkedReturnRow {
                                 }
                 )
                 if ($candidates.Count -eq 0) { return $null }
-                $pick = $candidates | Sort-Object -Property @{ Expression = { -not $_.After } }, Start | Select-Object -First 1
+                # Single pass for the earliest candidate (After-first, then Start); strict '<' keeps the first on ties like a stable sort
+                $pick = $null
+                foreach ($c in $candidates) {
+                                if ($null -eq $pick -or ($c.After -and -not $pick.After) -or ($c.After -eq $pick.After -and $c.Start -lt $pick.Start)) { $pick = $c }
+                }
                 return $pick.Row
 }
 
@@ -581,7 +585,7 @@ function New-HardRuleResult {
                 param ($Violations, $Notes, $EventResults)
 
                 $events = @($EventResults.ToArray())
-                $passedEvents = @($events | Where-Object { $_.Passed } | ForEach-Object { $_.Event })
+                $passedEvents = @(foreach ($e in $events) { if ($e.Passed) { $e.Event } })
                 $studentBlocked = Test-AnyBlocking $Violations.ToArray()
                 $uniqueNotes = @($Notes.ToArray() | Select-Object -Unique)
                 return [PSCustomObject]@{
@@ -1514,7 +1518,8 @@ function Invoke-PinnedLine {
                                 # Nothing was marked complete, so keep holding the student's time on this line (and its return)
                                 # or later lines could double- or triple-book them
                                 foreach ($rid in $release) {
-                                                $held = $Rows | Where-Object { [string]$_.BoardLineId -eq $rid } | Select-Object -First 1
+                                                $held = $null
+                                foreach ($hRow in $Rows) { if ([string]$hRow.BoardLineId -eq $rid) { $held = $hRow; break } }
                                                 if ($null -ne $held) {
                                                                 Add-StudentReservation -Student $Student -LineId $rid -ETD $held.ETD -SortieType ([string]$held.SortieType) -Mission $(if ($rid -eq [string]$Sortie.BoardLineId) { $explicitName } else { '' }) -Instructor (Get-NameText $Sortie.Instructor)
                                                 }
