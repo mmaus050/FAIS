@@ -1197,7 +1197,8 @@ function Pair-FormationWingman {
                                                 }
                                                 else {
                                                                 # No student wingman: claim the soonest open live-fly line as Direct Support
-                                                                $ds = $openLines | Sort-Object -Property { Parse-ETD $_.ETD } | Select-Object -First 1
+                                                                $ds = $null; $dsTime = $null
+                                                                foreach ($ol in $openLines) { $t = Parse-ETD $ol.ETD; if ($null -eq $ds -or ($null -ne $dsTime -and ($null -eq $t -or $t -lt $dsTime))) { $ds = $ol; $dsTime = $t } }
                                                                 if ($null -ne $ds) {
                                                                                 $ds.Student = 'Need Form SP'
                                                                                 [void](Initialize-SortieRow $ds)
