@@ -48,11 +48,13 @@ function Get-NameText {
 }
 
 # Strips "[...]" tags from an instructor name ("Smith [EXP]" -> "Smith")
+# Compiled once; Get-BaseName runs thousands of times per fill
+$script:BaseNameBracketRegex = New-Object System.Text.RegularExpressions.Regex('\s*\[.*?\]', [System.Text.RegularExpressions.RegexOptions]::Compiled -bor [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
 function Get-BaseName {
                 param ([string]$Name)
 
                 if ([string]::IsNullOrWhiteSpace($Name)) { return '' }
-                return ($Name -replace '\s*\[.*?\]', '').Trim()
+                return $script:BaseNameBracketRegex.Replace($Name, '').Trim()
 }
 
 

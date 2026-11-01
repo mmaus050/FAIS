@@ -257,7 +257,16 @@ function Test-HardRules {
                 }
 
                 $timeline = @(Get-StudentTimeline -Student $Student -ExceptLineId $lineId)
-                $today = @($timeline | Where-Object { $_.Start.Date -eq $start.Date })
+                # One pass over the timeline instead of three Where-Object pipelines
+                $startDate = $start.Date
+                $todayL = New-Object System.Collections.Generic.List[object]
+                $beforeL = New-Object System.Collections.Generic.List[object]
+                $afterL = New-Object System.Collections.Generic.List[object]
+                foreach ($t in $timeline) {
+                        $td = $t.Start.Date
+                        if ($td -eq $startDate) { $todayL.Add($t) } elseif ($td -lt $startDate) { $beforeL.Add($t) } else { $afterL.Add($t) }
+                }
+                $today = $todayL.ToArray()
                 $stop = { (-not $Explain) -and (Test-AnyBlocking $violations) }
 
                 # ---------------- O&B RETURN LINES ----------------
@@ -361,7 +370,7 @@ function Test-HardRules {
                 if (& $stop) { return (New-HardRuleResult $violations $notes $eventResults) }
 
                 # Crew rest from the previous day's last event
-                $before = @($timeline | Where-Object { $_.Start.Date -lt $start.Date })
+                $before = $beforeL.ToArray()
                 if ($before.Count -gt 0) {
                                 $last = $before[$before.Count - 1]
                                 if ($last.Start.Date -eq $start.Date.AddDays(-1)) {
@@ -372,7 +381,7 @@ function Test-HardRules {
                                 }
                 }
                 # Crew rest before the next day's first event (multi-day boards)
-                $after = @($timeline | Where-Object { $_.Start.Date -gt $start.Date })
+                $after = $afterL.ToArray()
                 if ($after.Count -gt 0) {
                                 $next = $after[0]
                                 $dayEnd = if ($null -ne $returnStart -and $returnStart -gt $start) { $returnStart } else { $start }
@@ -442,7 +451,8 @@ function Test-HardRules {
                                 foreach ($v in $valid) { $eventsToTest.Add($v) }
                 }
 
-                $completedReal = @($timeline | Where-Object { -not $_.IsReservation })
+                $completedReal = foreach ($t in $timeline) { if (-not $t.IsReservation) { $t } }
+                $completedReal = @($completedReal)
                 # A wingman the board already paired to this line satisfies the formation-lead checks
                 $pinnedWing = if ($IsWingCandidate) { $null } else { Get-PinnedWingRow -Sortie $Sortie -Schedule $Schedule }
 
