@@ -23,6 +23,7 @@ function Get-Weight {
                 )
 
                 $v = Get-OptionalProperty $Config $Name $null
+                if ($v -is [double]) { return $v }
                 if ($null -eq $v -or [string]$v -eq '') { return $Default }
                 $num = 0.0
                 if ([double]::TryParse(([string]$v).Trim(), [System.Globalization.NumberStyles]::Any, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$num)) { return $num }

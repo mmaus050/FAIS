@@ -377,7 +377,7 @@ function Test-IsReturnSortieType {
 # True for the outbound O&B leg only (not the return line)
 function Test-IsOBSortieType {
                 param ([string]$SortieType)
-                return ($SortieType -match '(?i)O\s*&\s*B' -and -not (Test-IsReturnSortieType $SortieType))
+                return ($SortieType -match '(?i)O\s*&\s*B' -and -not ($SortieType -like '*Return*'))
 }
 
 # Lines a formation wingman or direct support can fly on: live-fly Day Local only.
