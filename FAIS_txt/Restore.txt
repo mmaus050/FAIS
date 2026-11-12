@@ -1,7 +1,60 @@
-# Paste this whole file into a PowerShell window after cd-ing to the extracted FAIS_txt folder.
-# It renames every X.ps1.txt / X.psm1.txt / X.xaml.txt / README.md.txt back to X.
-Get-ChildItem -Recurse -File -Filter *.txt |
-  Where-Object { $_.Name -match '\.(ps1|psm1|xaml|md)\.txt$' } |
-  ForEach-Object { Rename-Item $_.FullName ($_.Name -replace '\.txt$','') }
-Get-ChildItem -Recurse -File | Unblock-File
-Write-Host "Done. Run:  powershell.exe -STA -ExecutionPolicy Bypass -File .\FAIS.ps1"
+# FAIS text-only copy: turns the .txt files back into the files FAIS runs from.
+#
+# HOW TO USE
+#   1. Put everything from the FAIS_txt folder into your FAIS folder, keeping the Modules
+#      folder inside it. Your existing FAIS folder is fine (the old program files are
+#      replaced; your MasterData, OutputSchedule, Boards and Templates are not touched),
+#      and so is a new folder, or the FAIS_txt folder itself.
+#   2. Open PowerShell and cd to that folder.
+#   3. Paste this whole file into the PowerShell window and press Enter.
+#
+# WHAT IT DOES
+#   - Renames every X.ps1.txt / X.psm1.txt / X.xaml.txt in this folder and its Modules
+#     folder back to X. An older X already there is replaced by the new one.
+#   - Unblocks the files in this folder and in Modules so Windows lets them run.
+#   - Checks that every file FAIS needs is there, and lists any that are missing.
+#   It does nothing unless FAIS.ps1.txt (or FAIS.ps1) is in the folder you are in, so pasting
+#   it in the wrong folder changes nothing.
+#
+# NOT IN THE TEXT COPY (they are not text): MasterData.xlsx, which FAIS needs next to
+# FAIS.ps1, and Modules\BoardLogo.png, the title-bar logo (FAIS runs without it).
+
+# Every file FAIS needs to run
+$faisFiles = @(
+  'FAIS.ps1',
+  'Modules\DataManipulation.psm1',
+  'Modules\ExcelFiles.psm1',
+  'Modules\Syllabus.psm1',
+  'Modules\DataDownload.psm1',
+  'Modules\SchedulingEngine.psm1',
+  'Modules\DataUpload.psm1',
+  'Modules\SyllabusImport.psm1',
+  'Modules\PreRunMenu.psm1',
+  'Modules\BoardModel.psm1',
+  'Modules\Assessment.psm1',
+  'Modules\PuckBoard.psm1',
+  'Modules\PuckBoard.xaml',
+  'Modules\LoadDayDialog.xaml',
+  'Modules\BulkLinesDialog.xaml',
+  'Modules\PasteLinesDialog.xaml',
+  'Modules\AbsenceDialog.xaml',
+  'Modules\ExportResultDialog.xaml'
+)
+
+# Only in the FAIS folder: the one that has FAIS.ps1.txt (or an FAIS.ps1 from before) in it
+$faisHere = (Test-Path -LiteralPath '.\FAIS.ps1.txt') -or (Test-Path -LiteralPath '.\FAIS.ps1')
+if (-not $faisHere) { Write-Host "FAIS.ps1.txt is not in this folder ($((Get-Location).Path)). Nothing was changed. cd to your FAIS folder, then paste this again." -ForegroundColor Yellow }
+
+# .txt back to .ps1 / .psm1 / .xaml, here and in Modules (a file already there is replaced)
+if ($faisHere) {
+  Get-ChildItem -Path '.\*.txt', '.\Modules\*.txt' -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match '\.(ps1|psm1|xaml)\.txt$' } |
+    ForEach-Object { Move-Item -LiteralPath $_.FullName -Destination (Join-Path $_.DirectoryName ($_.Name -replace '\.txt$', '')) -Force }
+  Get-ChildItem -Path '.\*', '.\Modules\*' -File -ErrorAction SilentlyContinue | Unblock-File
+}
+
+# Is everything FAIS needs there now?
+$faisMissing = @($faisFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path '.' $_)) })
+if ($faisHere -and $faisMissing.Count -gt 0) { Write-Host "$($faisMissing.Count) file(s) FAIS needs are missing. Copy them from FAIS_txt (as .txt) and paste this again:" -ForegroundColor Red; $faisMissing | ForEach-Object { Write-Host "   $_.txt" -ForegroundColor Red } }
+if ($faisHere -and $faisMissing.Count -eq 0 -and -not (Test-Path -LiteralPath '.\MasterData.xlsx')) { Write-Host "MasterData.xlsx is not in this folder yet. FAIS needs it next to FAIS.ps1." -ForegroundColor Yellow }
+if ($faisHere -and $faisMissing.Count -eq 0) { Write-Host "Done: all $($faisFiles.Count) FAIS files are in place. Run:  powershell.exe -STA -ExecutionPolicy Bypass -File .\FAIS.ps1" -ForegroundColor Green }
