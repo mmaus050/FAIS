@@ -766,7 +766,7 @@ function SoftRules {
                 #####################################
                 # Parse each ETD once (it was parsed up to three times per mission)
                 $PastFlights = @(
-                                foreach ($pm in @($Student.Syllabus)) {
+                                $(foreach ($pm in @($Student.Syllabus)) {
                                                 if (-not (Test-MissionComplete $pm)) { continue }
                                                 $pmStart = Parse-ETD $pm.ETD
                                                 if ($null -eq $pmStart -or -not ($pmStart -lt $SortieDate)) { continue }
@@ -774,7 +774,7 @@ function SoftRules {
                                                 if ([string]::IsNullOrWhiteSpace($pmIp)) { continue }
                                                 if ((Get-MissionKind -Mission $pm -InstructorName $pmIp) -ne 'Flight') { continue }
                                                 [PSCustomObject]@{ Item = $pm; Start = $pmStart }
-                                } | Sort-Object -Property Start -Descending | ForEach-Object { $_.Item }
+                                }) | Sort-Object -Property Start -Descending | ForEach-Object { $_.Item }
                 )
 
                 $hasRealIP = ($CurrentIP -ne '' -and $CurrentIP -notmatch 'SIM IP' -and $CurrentIP -ne 'NEED IP')
