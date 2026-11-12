@@ -48,11 +48,13 @@ function Get-NameText {
 }
 
 # Strips "[...]" tags from an instructor name ("Smith [EXP]" -> "Smith")
+# Compiled once; Get-BaseName runs thousands of times per fill
+$script:BaseNameBracketRegex = New-Object System.Text.RegularExpressions.Regex('\s*\[.*?\]', [System.Text.RegularExpressions.RegexOptions]::Compiled -bor [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
 function Get-BaseName {
                 param ([string]$Name)
 
                 if ([string]::IsNullOrWhiteSpace($Name)) { return '' }
-                return ($Name -replace '\s*\[.*?\]', '').Trim()
+                return $script:BaseNameBracketRegex.Replace($Name, '').Trim()
 }
 
 
@@ -375,7 +377,7 @@ function Test-IsReturnSortieType {
 # True for the outbound O&B leg only (not the return line)
 function Test-IsOBSortieType {
                 param ([string]$SortieType)
-                return ($SortieType -match '(?i)O\s*&\s*B' -and -not (Test-IsReturnSortieType $SortieType))
+                return ($SortieType -match '(?i)O\s*&\s*B' -and -not ($SortieType -like '*Return*'))
 }
 
 # Lines a formation wingman or direct support can fly on: live-fly Day Local only.
