@@ -3,6 +3,8 @@
 # IngestData            (MasterData.xlsx + each student's tab in OutputSchedule.xlsx)
 # Open-FaisWorkbookForRead / Close-FaisWorkbookForRead (read a workbook even while Excel has it open)
 # Read-ScheduleSheet / Get-ScheduleSheetDays / Get-ScheduleDayFingerprint (MasterData Schedule sheet)
+# ConvertFrom-ScheduleCells / Find-ScheduleColumns (the lines in a grid of cells: the sheet's, or pasted ones)
+# ConvertFrom-ClipboardCells / Read-PastedSchedule (lines copied from Excel: Paste lines)
 # DownloadPrevSchedule  (previous MasterSchedule with students/missions/IPs linked back up)
 # Import-MasterSchedule (same sheet through Excel COM, strings only)
 
@@ -341,6 +343,8 @@ function Close-FaisWorkbookForRead {
 #  - ETDs can be full dates or times only (0730, 730, 7:30, a time-formatted cell). A time
 #    only row takes its day from a Date column or the date row above it; with neither it
 #    goes onto whichever day it is loaded onto.
+#  - Lines copied from Excel (Paste lines on the puck board) are read the same way, and with
+#    no heading row the columns are worked out from what is in the cells.
 # =================================================================================
 
 $script:ScheduleHeadings = @{
@@ -441,16 +445,49 @@ function Read-ScheduleSheet {
                                 Close-FaisWorkbookForRead $book
                 }
 
-                $cellsOf = {
-                                param($row)
-                                @(foreach ($p in $row.PSObject.Properties) { $p.Value })
-                }
+                # One array of cell values per sheet row
+                $grid = New-Object System.Collections.Generic.List[object]
+                foreach ($sheetRow in $raw) { $grid.Add(@(foreach ($p in $sheetRow.PSObject.Properties) { $p.Value })) }
+
+                $read = ConvertFrom-ScheduleCells -Grid $grid.ToArray() -ReturnType $ReturnType -SimInstructor $SimInstructor -What "The '$WorksheetName' sheet"
+                $result.Layout = $read.Layout
+                $result.HeaderRow = $read.HeaderRow
+                $result.Error = $read.Error
+                $result.Rows = $read.Rows
+                $result.Skipped = $read.Skipped
+                return $result
+}
+
+# The lines in a grid of cells, one array of cell values per row: the Schedule sheet's rows,
+# or cells copied from Excel. Returns
+#   {Error; Layout; HeaderRow; Columns (field -> column number); Detected (the fields found
+#    from the cells, not from a heading); Rows; Skipped}
+# with Rows and Skipped as Read-ScheduleSheet describes them. -What names the source in an
+# error ("The 'Schedule' sheet").
+# -Pasted is for cells copied from somewhere else (Read-PastedSchedule):
+#  - with no heading row, or one that does not name the ETD, sortie type or IP column, those
+#    columns are worked out from what is in the cells (Find-ScheduleColumns; -Instructors and
+#    -Students are the names it looks for) instead of the fixed legacy order;
+#  - a date row must be a cell on its own, and a date more than five years off is not a
+#    date (a tail number like 03-3678 reads as March 3678).
+function ConvertFrom-ScheduleCells {
+                param (
+                                [array]$Grid = @(),
+                                [string]$ReturnType = 'O&B Return',
+                                [string]$SimInstructor = 'SIM IP',
+                                [string]$What = "The 'Schedule' sheet",
+                                [switch]$Pasted,
+                                [array]$Instructors = @(),
+                                [array]$Students = @()
+                )
+
+                $result = [PSCustomObject]@{ Error = ''; Layout = ''; HeaderRow = 0; Columns = @{}; Detected = @(); Rows = @(); Skipped = @() }
 
                 # Heading row: the first row (of the first 15 with anything in them) that names the columns
                 $map = $null
                 $seen = 0
-                for ($i = 0; $i -lt $raw.Count -and $seen -lt 15; $i++) {
-                                $cells = & $cellsOf $raw[$i]
+                for ($i = 0; $i -lt $Grid.Count -and $seen -lt 15; $i++) {
+                                $cells = @($Grid[$i])
                                 if (@($cells | Where-Object { ([string]$_).Trim() -ne '' }).Count -eq 0) { continue }
                                 $seen++
                                 if (Test-ScheduleHeadingRow $cells) {
@@ -459,7 +496,34 @@ function Read-ScheduleSheet {
                                                 break
                                 }
                 }
-                if ($null -eq $map) {
+                if ($Pasted) {
+                                # Headings name what they name: only the columns a line can't do without are then
+                                # looked for in the cells. With no headings, so are the date, student and mission.
+                                $hasHeadings = ($null -ne $map)
+                                if (-not $hasHeadings) { $map = @{} }
+                                $want = if ($hasHeadings) { @('ETD', 'SortieType', 'Instructor') } else { @('ETD', 'Date', 'SortieType', 'Instructor', 'Student', 'Mission') }
+                                $toFind = @($want | Where-Object { -not $map.ContainsKey($_) })
+                                $found = @{}
+                                if ($toFind.Count -gt 0) {
+                                                $found = Find-ScheduleColumns -Grid $Grid -Fields $toFind -Taken @($map.Values) -HeaderRow $result.HeaderRow -ReturnType $ReturnType -Instructors $Instructors -Students $Students
+                                                foreach ($f in @($found.Keys)) { $map[$f] = $found[$f] }
+                                }
+                                $result.Detected = @($want | Where-Object { $found.ContainsKey($_) })
+                                $result.Layout = if ($hasHeadings) { 'Headings on row ' + $result.HeaderRow } else { 'No heading row' }
+                                $result.Columns = $map
+                                $lacks = @(@('ETD', 'SortieType') | Where-Object { -not $map.ContainsKey($_) } | ForEach-Object { if ($_ -eq 'ETD') { 'ETD' } else { 'Sortie Type' } })
+                                if ($lacks.Count -gt 0) {
+                                                $noun = if ($lacks.Count -gt 1) { 'columns' } else { 'column' }
+                                                $result.Error = if ($hasHeadings) {
+                                                                "$What has headings on row $($result.HeaderRow) but no $($lacks -join ' or ') heading, and FAIS could not find the $noun from the cells. A line needs an ETD and a Sortie Type."
+                                                }
+                                                else {
+                                                                "$What has no heading row, and FAIS could not find the $($lacks -join ' and ') $noun from the cells. Copy the heading row too (ETD, Sortie Type, Instructor)."
+                                                }
+                                                return $result
+                                }
+                }
+                elseif ($null -eq $map) {
                                 $map = @{}
                                 for ($c = 0; $c -lt $script:ScheduleLegacyColumns.Count; $c++) { $map[$script:ScheduleLegacyColumns[$c]] = $c + 1 }
                                 $result.Layout = 'Fixed columns (ETD, Instructor, SortieType, Student, Mission, Callsign, Num, Notes)'
@@ -468,18 +532,28 @@ function Read-ScheduleSheet {
                                 $result.Layout = 'Headings on row ' + $result.HeaderRow
                                 if (-not $map.ContainsKey('ETD') -or -not $map.ContainsKey('SortieType')) {
                                                 $missing = @(@('ETD', 'SortieType') | Where-Object { -not $map.ContainsKey($_) }) -join ' and '
-                                                $result.Error = "The '$WorksheetName' sheet has headings on row $($result.HeaderRow) but no $missing column."
+                                                $result.Error = "$What has headings on row $($result.HeaderRow) but no $missing column."
                                                 return $result
                                 }
+                }
+                $result.Columns = $map
+
+                # A time or date cell. In pasted cells a date has to be near today.
+                $thisYear = (Get-Date).Year
+                $timeOf = {
+                                param ($cell)
+                                $read = ConvertTo-FaisTimeValue $cell
+                                if ($Pasted -and $null -ne $read -and $read.HasDate -and [math]::Abs($read.Value.Year - $thisYear) -gt 5) { return $null }
+                                return $read
                 }
 
                 $rows = New-Object System.Collections.Generic.List[object]
                 $skipped = New-Object System.Collections.Generic.List[string]
                 $currentDay = $null
-                for ($i = 0; $i -lt $raw.Count; $i++) {
+                for ($i = 0; $i -lt $Grid.Count; $i++) {
                                 $sheetRow = $i + 1
                                 if ($sheetRow -eq $result.HeaderRow) { continue }
-                                $cells = & $cellsOf $raw[$i]
+                                $cells = @($Grid[$i])
                                 $filled = @($cells | Where-Object { $null -ne $_ -and ([string]$_).Trim() -ne '' })
                                 if ($filled.Count -eq 0) { continue }
                                 if (Test-ScheduleHeadingRow $cells) { continue }
@@ -492,10 +566,10 @@ function Read-ScheduleSheet {
 
                                 # A row with a date and no line on it (or a lone date in any column) dates the rows below it
                                 $noLine = ($typeText -eq '' -and (ConvertTo-ScheduleCellText $get.Instructor) -eq '' -and (ConvertTo-ScheduleCellText $get.Student) -eq '')
-                                if ($noLine -or $filled.Count -eq 1) {
+                                if (($noLine -and -not $Pasted) -or $filled.Count -eq 1) {
                                                 $dayMark = $null
                                                 foreach ($v in $filled) {
-                                                                $tv = ConvertTo-FaisTimeValue $v
+                                                                $tv = & $timeOf $v
                                                                 if ($null -ne $tv -and $tv.HasDate) { $dayMark = $tv.Value.Date; break }
                                                 }
                                                 if ($null -ne $dayMark) { $currentDay = $dayMark; continue }
@@ -508,14 +582,14 @@ function Read-ScheduleSheet {
                                 $type = ConvertTo-CanonicalSortieType -Text $typeText -ReturnType $ReturnType
                                 $etdText = ConvertTo-ScheduleCellText $get.ETD
                                 if ($etdText -eq '') { $skipped.Add("row ${sheetRow}: no ETD ($type line)"); continue }
-                                $tv = ConvertTo-FaisTimeValue $get.ETD
+                                $tv = & $timeOf $get.ETD
                                 if ($null -eq $tv) { $skipped.Add("row ${sheetRow}: ETD '$etdText' is not a time (use 0730, 7:30 or a date and time)"); continue }
                                 if ($typeText -eq '') { $skipped.Add("row ${sheetRow}: no sortie type"); continue }
 
                                 $day = $null
                                 if ($tv.HasDate) { $day = $tv.Value.Date }
                                 else {
-                                                $dv = ConvertTo-FaisTimeValue $get.Date
+                                                $dv = & $timeOf $get.Date
                                                 if ($null -ne $dv -and $dv.HasDate) { $day = $dv.Value.Date }
                                                 elseif ($null -ne $currentDay) { $day = $currentDay }
                                 }
@@ -545,6 +619,214 @@ function Read-ScheduleSheet {
                 }
                 $result.Rows = $rows.ToArray()
                 $result.Skipped = $skipped.ToArray()
+                return $result
+}
+
+# Whether a cell reads as a sortie type: a short form (DL, OB, RTN), or a Local, O&B, Return,
+# OFT or IFT line under any name (Night Local, OFT 3)
+function Test-ScheduleTypeText {
+                param ([string]$Text, [string]$ReturnType = 'O&B Return')
+
+                $t = ([string]$Text).Trim()
+                if ($t -eq '') { return $false }
+                if ((ConvertTo-CanonicalSortieType -Text $t -ReturnType $ReturnType) -cne $t) { return $true }
+                return ($t -match '(?i)\blocal$' -or (Test-IsSimSortieType $t) -or (Test-IsReturnSortieType $t) -or (Test-IsOBSortieType $t))
+}
+
+# Which column holds what, worked out from the cells themselves (cells copied with no
+# heading row, or with headings FAIS does not know). A cell counts as
+#   ETD         a time, or a date and time (0730, 7:30 AM, 10/21/26 8:10; not a bare 7 or 31)
+#   Date        a date with no time
+#   SortieType  Test-ScheduleTypeText
+#   Mission     a mission number (FT5103)
+#   Instructor  a name on MasterData's Instructors sheet (-Instructors)
+#   Student     a name on MasterData's Students sheet (-Students)
+# A column is taken for a field when at least half of its cells count as one; the column
+# with the most wins, the leftmost on a tie. When no column holds instructors FAIS knows,
+# the IP is the first column left over of "Last, First" names.
+# -Fields: the fields to look for. -Taken: column numbers already spoken for (by a heading).
+# Returns field -> column number (1-based) for the fields it found.
+function Find-ScheduleColumns {
+                param (
+                                [array]$Grid = @(),
+                                [string[]]$Fields = @('ETD', 'Date', 'SortieType', 'Instructor', 'Student', 'Mission'),
+                                [int[]]$Taken = @(),
+                                [int]$HeaderRow = 0,
+                                [string]$ReturnType = 'O&B Return',
+                                [array]$Instructors = @(),
+                                [array]$Students = @()
+                )
+
+                $width = 0
+                foreach ($gridRow in $Grid) { $n = @($gridRow).Count; if ($n -gt $width) { $width = $n } }
+                $counts = @{}
+                foreach ($kind in @('ETD', 'Date', 'SortieType', 'Mission', 'Instructor', 'Student', 'Name', 'Filled')) { $counts[$kind] = New-Object 'int[]' $width }
+                $ipIndex = if ($Fields -contains 'Instructor') { New-PersonIndex -Items $Instructors } else { @{} }
+                $spIndex = if ($Fields -contains 'Student') { New-PersonIndex -Items $Students } else { @{} }
+                $thisYear = (Get-Date).Year
+
+                # The same names and types repeat down a column, so each text is read once.
+                # The first 80 lines are plenty to tell the columns apart.
+                $kindsOf = @{}
+                $linesRead = 0
+                for ($i = 0; $i -lt $Grid.Count -and $linesRead -lt 80; $i++) {
+                                if (($i + 1) -eq $HeaderRow) { continue }
+                                $cells = @($Grid[$i])
+                                $texts = @(foreach ($cell in $cells) { ConvertTo-ScheduleCellText $cell })
+                                # A line has at least two cells: a cell on its own is a title or a date row
+                                if (@($texts | Where-Object { $_ -ne '' }).Count -lt 2) { continue }
+                                $linesRead++
+                                for ($c = 0; $c -lt $cells.Count; $c++) {
+                                                $text = $texts[$c]
+                                                if ($text -eq '' -or $Taken -contains ($c + 1)) { continue }
+                                                $counts.Filled[$c]++
+                                                if (-not $kindsOf.ContainsKey($text)) {
+                                                                $kinds = New-Object System.Collections.Generic.List[string]
+                                                                $tv = ConvertTo-FaisTimeValue $cells[$c]
+                                                                if ($null -ne $tv -and $tv.HasDate -and [math]::Abs($tv.Value.Year - $thisYear) -gt 5) { $tv = $null }
+                                                                if ($null -ne $tv) {
+                                                                                if ($tv.HasDate -and $tv.Value.TimeOfDay.Ticks -eq 0) { $kinds.Add('Date') }
+                                                                                elseif ($text -notmatch '^\d{1,2}$') { $kinds.Add('ETD') }
+                                                                }
+                                                                elseif (Test-ScheduleTypeText -Text $text -ReturnType $ReturnType) { $kinds.Add('SortieType') }
+                                                                elseif ($text -match '^[A-Za-z]{1,3}[ -]?\d{3,4}[A-Za-z]?$') { $kinds.Add('Mission') }
+                                                                elseif ($text -match '\p{L}') {
+                                                                                $person = ConvertTo-PersonName $text
+                                                                                if ($ipIndex.Count -gt 0 -and @((Find-PersonMatch -Person $person -Index $ipIndex).Hits).Count -gt 0) { $kinds.Add('Instructor') }
+                                                                                if ($spIndex.Count -gt 0 -and @((Find-PersonMatch -Person $person -Index $spIndex).Hits).Count -gt 0) { $kinds.Add('Student') }
+                                                                                if ($text -match '^\p{L}[\p{L}''\. -]*,\s*\p{L}') { $kinds.Add('Name') }
+                                                                }
+                                                                $kindsOf[$text] = $kinds.ToArray()
+                                                }
+                                                foreach ($kind in $kindsOf[$text]) { $counts[$kind][$c]++ }
+                                }
+                }
+
+                $columns = @{}
+                $used = New-Object System.Collections.Generic.List[int]
+                foreach ($t in $Taken) { $used.Add($t) }
+                # The best column not yet used for a kind of cell, or -1
+                $pick = {
+                                param ($kind)
+                                $best = -1
+                                $bestCount = 0
+                                for ($c = 0; $c -lt $width; $c++) {
+                                                $n = $counts[$kind][$c]
+                                                if ($used.Contains($c + 1) -or $n -lt 1 -or ($n * 2) -lt $counts.Filled[$c]) { continue }
+                                                if ($n -gt $bestCount) { $best = $c; $bestCount = $n }
+                                }
+                                return $best
+                }
+                foreach ($field in @('ETD', 'SortieType', 'Date', 'Instructor', 'Student', 'Mission')) {
+                                if ($Fields -notcontains $field) { continue }
+                                $col = & $pick $field
+                                if ($col -ge 0) { $columns[$field] = $col + 1; $used.Add($col + 1) }
+                }
+                if ($Fields -contains 'Instructor' -and -not $columns.ContainsKey('Instructor')) {
+                                $col = & $pick 'Name'
+                                if ($col -ge 0) { $columns['Instructor'] = $col + 1 }
+                }
+                return $columns
+}
+
+# Cells copied from Excel (or a table in Word, Outlook or Teams) as a grid: one array of
+# cell texts per row. Excel puts a tab between cells and a line break between rows, and
+# wraps a cell that has a line break or a quote in it in "double quotes" (a line break
+# inside a cell comes out as a space). Text with no tabs in it is split on | instead,
+# else on runs of two or more spaces.
+# The rows come back one by one: wrap the call in @( ).
+function ConvertFrom-ClipboardCells {
+                param ([string]$Text)
+
+                $grid = New-Object System.Collections.Generic.List[object]
+                if ([string]::IsNullOrEmpty($Text)) { return @() }
+
+                if ($Text.IndexOf('"') -lt 0) {
+                                foreach ($line in ($Text -split "\r\n|\r|\n")) { $grid.Add($line.Split("`t")) }
+                }
+                else {
+                                # One character at a time, so a quoted cell can hold tabs and line breaks
+                                $row = New-Object System.Collections.Generic.List[string]
+                                $cell = New-Object System.Text.StringBuilder
+                                $quoted = $false
+                                $atStart = $true
+                                $length = $Text.Length
+                                for ($i = 0; $i -lt $length; $i++) {
+                                                $ch = $Text[$i]
+                                                if ($quoted) {
+                                                                if ($ch -ne '"') { [void]$cell.Append($ch) }
+                                                                elseif ($i + 1 -lt $length -and $Text[$i + 1] -eq '"') { [void]$cell.Append('"'); $i++ }
+                                                                else { $quoted = $false }
+                                                }
+                                                elseif ($ch -eq '"' -and $atStart -and $Text.IndexOf('"', $i + 1) -gt $i) { $quoted = $true; $atStart = $false }
+                                                elseif ($ch -eq "`t") { $row.Add($cell.ToString()); [void]$cell.Clear(); $atStart = $true }
+                                                elseif ($ch -eq "`r" -or $ch -eq "`n") {
+                                                                if ($ch -eq "`r" -and $i + 1 -lt $length -and $Text[$i + 1] -eq "`n") { $i++ }
+                                                                $row.Add($cell.ToString()); [void]$cell.Clear(); $atStart = $true
+                                                                $grid.Add($row.ToArray())
+                                                                $row.Clear()
+                                                }
+                                                else { [void]$cell.Append($ch); $atStart = $false }
+                                }
+                                if ($cell.Length -gt 0 -or $row.Count -gt 0) { $row.Add($cell.ToString()); $grid.Add($row.ToArray()) }
+                }
+
+                # No tabs anywhere: a table typed or copied as plain text
+                if ($Text.IndexOf("`t") -lt 0) {
+                                $pattern = if ($Text.IndexOf('|') -ge 0) { '\s*\|\s*' } else { '\s{2,}' }
+                                for ($r = 0; $r -lt $grid.Count; $r++) { $grid[$r] = @(([string]$grid[$r][0]).Trim().Trim('|').Trim() -split $pattern) }
+                }
+                $out = New-Object System.Collections.Generic.List[object]
+                foreach ($gridRow in $grid) { $out.Add(@(foreach ($piece in $gridRow) { (([string]$piece) -replace '\s*[\r\n]+\s*', ' ').Trim() })) }
+                return $out.ToArray()
+}
+
+# Lines copied from Excel, read the way Read-ScheduleSheet reads MasterData's Schedule
+# sheet: columns by their headings (ETD, Instructor, Sortie Type, Student, Mission ...) when
+# the heading row was copied too, else worked out from the cells (ConvertFrom-ScheduleCells
+# -Pasted). -Instructors and -Students are MasterData's, to tell a column of IPs from one
+# of students. Returns
+#   {Found (something was pasted); Error; Layout; HeaderRow; Columns; Detected; ColumnText; Rows; Skipped; ReadAt}
+# Rows are Read-ScheduleSheet rows (SheetRow is the row in what was pasted). ColumnText
+# says where each column was found: 'ETD = column 2, Sortie Type = column 1, IP = column 3
+# (from the headings on row 1)'.
+function Read-PastedSchedule {
+                param (
+                                [string]$Text,
+                                [string]$ReturnType = 'O&B Return',
+                                [string]$SimInstructor = 'SIM IP',
+                                [array]$Instructors = @(),
+                                [array]$Students = @()
+                )
+
+                $result = [PSCustomObject]@{
+                                Found      = $false
+                                Error      = ''
+                                Layout     = ''
+                                HeaderRow  = 0
+                                Columns    = @{}
+                                Detected   = @()
+                                ColumnText = ''
+                                Rows       = @()
+                                Skipped    = @()
+                                ReadAt     = (Get-Date)
+                }
+                $grid = @(ConvertFrom-ClipboardCells -Text $Text)
+                if (@($grid | Where-Object { @($_ | Where-Object { $_ -ne '' }).Count -gt 0 }).Count -eq 0) { return $result }
+                $result.Found = $true
+
+                $read = ConvertFrom-ScheduleCells -Grid $grid -ReturnType $ReturnType -SimInstructor $SimInstructor -What 'What was pasted' -Pasted -Instructors $Instructors -Students $Students
+                foreach ($name in @('Error', 'Layout', 'HeaderRow', 'Columns', 'Detected', 'Rows', 'Skipped')) { $result.$name = $read.$name }
+
+                $labels = [ordered]@{ ETD = 'ETD'; Date = 'Date'; SortieType = 'Sortie Type'; Instructor = 'IP'; Student = 'Student'; Mission = 'Mission'; Callsign = 'Callsign'; Num = '#'; Notes = 'Notes' }
+                $parts = @(foreach ($field in $labels.Keys) { if ($read.Columns.ContainsKey($field)) { "$($labels[$field]) = column $($read.Columns[$field])" } })
+                if ($parts.Count -gt 0) {
+                                $guessed = @($read.Detected | ForEach-Object { $labels[$_] }) -join ', '
+                                $how = if ($read.HeaderRow -eq 0) { 'no heading row: worked out from the cells' }
+                                elseif ($guessed) { "from the headings on row $($read.HeaderRow); $guessed worked out from the cells" }
+                                else { "from the headings on row $($read.HeaderRow)" }
+                                $result.ColumnText = "$($parts -join ', ') ($how)"
+                }
                 return $result
 }
 
