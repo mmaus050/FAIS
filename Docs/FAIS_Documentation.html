@@ -1,0 +1,3534 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>FAIS Documentation</title>
+  <style>
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      background-color: #1a1a1a;
+      border: none;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+  <style>
+  :root{--bg:#ffffff;--fg:#1f2328;--muted:#59636e;--line:#d1d9e0;--code:#f6f8fa;--accent:#0969da;--quote:#eef4ff}
+  @media (prefers-color-scheme: dark){:root{--bg:#0d1117;--fg:#e6edf3;--muted:#9198a1;--line:#3d444d;--code:#151b23;--accent:#4493f8;--quote:#121d2f}}
+  html{background:var(--bg)}
+  body{background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;max-width:980px;margin:0 auto;padding:24px 16px 80px}
+  h1,h2,h3{line-height:1.25;margin-top:1.8em}
+  h1{font-size:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+  h2{font-size:1.5em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+  a{color:var(--accent)}
+  code{background:var(--code);padding:.15em .35em;border-radius:4px;font-family:Consolas,"Cascadia Mono",Menlo,monospace;font-size:.9em}
+  pre{background:var(--code);padding:14px;border-radius:6px;overflow:auto;line-height:1.35}
+  pre code{padding:0;background:none}
+  table{border-collapse:collapse;display:block;overflow-x:auto;margin:1em 0}
+  th,td{border:1px solid var(--line);padding:6px 12px;vertical-align:top}
+  th{background:var(--code)}
+  blockquote{margin:1em 0;padding:.5em 1em;border-left:4px solid var(--accent);background:var(--quote);color:var(--fg)}
+  hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+  #TOC{display:none}
+  </style>
+</head>
+<body>
+<h1 id="fais-documentation-and-how-to-guide">FAIS Documentation and
+How-To Guide</h1>
+<p>This guide covers FAIS from several directions on purpose. The same
+ideas (lines, pins, hard rules, scores, strings, export) come up in the
+user guide, the logic sections, the code sections and the worked
+examples, each time from a different angle. If one explanation doesn’t
+click, the next one usually will. Cross-references like <strong>(see
+§9)</strong> point to the other places a topic is covered.</p>
+<blockquote>
+<p><strong>The README is the short version.</strong>
+<code>README.md</code> in the FAIS folder is the quick reference. This
+document is the long version: it explains <em>why</em> as well as
+<em>what</em>, and walks through the code.</p>
+</blockquote>
+<hr />
+<h2 id="contents">Contents</h2>
+<ul>
+<li><strong>Part A: Getting oriented</strong>
+<ul>
+<li><a href="#0-how-to-open-this-document">§0 How to open this
+document</a></li>
+<li><a href="#1-fais-in-one-page">§1 FAIS in one page</a></li>
+<li><a href="#2-glossary">§2 Glossary</a></li>
+<li><a href="#3-installing-and-first-run">§3 Installing and first
+run</a></li>
+</ul></li>
+<li><strong>Part B: How to use FAIS</strong>
+<ul>
+<li><a href="#4-the-daily-workflow-step-by-step">§4 The daily workflow,
+step by step</a></li>
+<li><a href="#5-the-pre-run-pop-ups">§5 The pre-run pop-ups</a></li>
+<li><a href="#6-the-puck-board-area-by-area">§6 The puck board, area by
+area</a></li>
+<li><a href="#7-typing-lines-keys-and-shortcuts">§7 Typing lines, keys
+and shortcuts</a></li>
+<li><a href="#8-filling-reviewing-and-exporting">§8 Filling, reviewing
+and exporting</a></li>
+<li><a href="#9-changing-a-day-you-already-exported">§9 Changing a day
+you already exported</a></li>
+<li><a href="#10-update-syllabi">§10 Update Syllabi</a></li>
+<li><a href="#11-add-student-absence">§11 Add Student Absence</a></li>
+</ul></li>
+<li><strong>Part C: The logic (how FAIS decides)</strong>
+<ul>
+<li><a href="#12-how-one-line-gets-filled-the-selection-process">§12 How
+one line gets filled: the selection process</a></li>
+<li><a href="#13-hard-rules-pass--fail">§13 Hard rules (pass /
+fail)</a></li>
+<li><a href="#14-soft-rules-the-score">§14 Soft rules (the
+score)</a></li>
+<li><a href="#15-strings-and-counters">§15 Strings and counters</a></li>
+<li><a href="#16-sim-debt-discontinuity-exhaustion-and-bit">§16 Sim
+debt, discontinuity, exhaustion and BIT</a></li>
+<li><a href="#17-formations-wingmen-and-direct-support">§17 Formations,
+wingmen and direct support</a></li>
+<li><a href="#18-obs-and-return-legs">§18 O&amp;Bs and return
+legs</a></li>
+<li><a href="#19-unsats-holds-and-absences">§19 Unsats, holds and
+absences</a></li>
+<li><a href="#20-tie-breaks-and-the-order-lines-are-filled-in">§20
+Tie-breaks and the order lines are filled in</a></li>
+</ul></li>
+<li><strong>Part D: How the code works</strong>
+<ul>
+<li><a href="#21-architecture-at-a-glance">§21 Architecture at a
+glance</a></li>
+<li><a href="#22-module-by-module">§22 Module by module</a></li>
+<li><a href="#23-the-data-objects">§23 The data objects</a></li>
+<li><a href="#24-life-of-a-run-through-the-code">§24 Life of a run,
+through the code</a></li>
+<li><a href="#25-the-puck-boards-internals">§25 The puck board’s
+internals</a></li>
+<li><a href="#26-excel-in-and-out">§26 Excel in and out</a></li>
+</ul></li>
+<li><strong>Part E: Data reference</strong>
+<ul>
+<li><a href="#27-masterdataxlsx-sheet-by-sheet">§27 MasterData.xlsx,
+sheet by sheet</a></li>
+<li><a href="#28-outputschedulexlsx-and-atisxlsx">§28
+OutputSchedule.xlsx and ATIS.xlsx</a></li>
+<li><a href="#29-what-is-read-and-written-and-when">§29 What is read and
+written, and when</a></li>
+<li><a href="#30-settings">§30 Settings</a></li>
+</ul></li>
+<li><strong>Part F: The same thing, explained again</strong>
+<ul>
+<li><a href="#31-life-of-a-student">§31 Life of a student</a></li>
+<li><a href="#32-life-of-a-line">§32 Life of a line</a></li>
+<li><a href="#33-worked-scoring-example">§33 Worked scoring
+example</a></li>
+<li><a href="#34-scenarios-and-recipes">§34 Scenarios and
+recipes</a></li>
+</ul></li>
+<li><strong>Part G: Help</strong>
+<ul>
+<li><a href="#35-troubleshooting">§35 Troubleshooting</a></li>
+<li><a href="#36-faq">§36 FAQ</a></li>
+<li><a href="#37-testing">§37 Testing</a></li>
+<li><a href="#38-developer-guide-changing-fais-safely">§38 Developer
+guide: changing FAIS safely</a></li>
+<li><a href="#39-file-map">§39 File map</a></li>
+<li><a href="#40-quick-index">§40 Quick index</a></li>
+</ul></li>
+</ul>
+<hr />
+<h1 id="part-a-getting-oriented">Part A: Getting oriented</h1>
+<h2 id="0-how-to-open-this-document">§0 How to open this document</h2>
+<p>This guide comes in two copies in the <code>Docs</code> folder. They
+have the same content:</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>File</th>
+<th>Best way to open it</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>Docs\FAIS_Documentation.html</code></td>
+<td><strong>Double-click it.</strong> It opens in your web browser
+(Edge, Chrome, Firefox) with a clickable table of contents. No internet
+needed.</td>
+</tr>
+<tr class="even">
+<td><code>Docs\FAIS_Documentation.md</code></td>
+<td>Read it on <strong>GitHub</strong> (it renders there), or open it in
+VS Code and press <strong>Ctrl+Shift+V</strong> for the preview. In
+Notepad it shows as plain text with <code>#</code> and <code>**</code>
+marks.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Getting it onto your computer:</strong></p>
+<ol type="1">
+<li><strong>With Git:</strong> in the FAIS folder run
+<code>git pull</code>, or check out the branch the docs are on. The
+files appear in <code>Docs\</code>.</li>
+<li><strong>Without Git:</strong> on GitHub, open the repository, pick
+the branch, click <strong>Code &gt; Download ZIP</strong>, unzip it, and
+open <code>Docs\FAIS_Documentation.html</code>.</li>
+<li><strong>Just one file:</strong> on GitHub, open
+<code>Docs/FAIS_Documentation.html</code>, click <strong>Download raw
+file</strong> (the download icon), save it, then double-click it.</li>
+</ol>
+<blockquote>
+<p>If Windows shows the HTML file as blocked (it came from the
+internet), right-click it, choose <strong>Properties</strong>, tick
+<strong>Unblock</strong>, and click OK. The page has no scripts, so it’s
+safe to open.</p>
+</blockquote>
+<h2 id="1-fais-in-one-page">§1 FAIS in one page</h2>
+<p><strong>What it is.</strong> FAIS builds the daily flying schedule
+for student pilots (SPs). It is a Windows PowerShell program with a WPF
+window called the <strong>puck board</strong>. It reads its data from
+Excel (<code>MasterData.xlsx</code>, <code>OutputSchedule.xlsx</code>)
+and writes the finished schedule back to Excel
+(<code>OutputSchedule.xlsx</code>, <code>ATIS.xlsx</code>).</p>
+<p><strong>The idea.</strong> A schedule is a list of
+<strong>lines</strong> (ETD, line type, IP). Every line needs a student
+and a mission. You put on the students you already know about
+(<strong>hardcoding</strong>, or <strong>pinning</strong>). The
+<strong>scheduler</strong> fills the rest:</p>
+<ol type="1">
+<li>It throws out every student who <strong>can’t</strong> fly the line
+(<strong>hard rules</strong>: crew rest, turn time, prereqs and so
+on).</li>
+<li>It <strong>scores</strong> everyone left (<strong>soft
+rules</strong>: keep students with the same IP, pay down sim debt,
+prevent long breaks).</li>
+<li>The highest score gets the line.</li>
+</ol>
+<p><strong>The run, in five steps:</strong></p>
+<pre><code> Start FAIS ─► Pre-run pop-ups ─► Puck board ─► Fill ─► Export
+               (unsats, holds,     (build lines,  (scheduler   (OutputSchedule,
+                incompletes,        pin people)    fills open   MasterData,
+                absences)                          lines)       ATIS)</code></pre>
+<p><strong>You always have the final say.</strong> Anything the
+scheduler picks can be moved. Anything that breaks a rule can still be
+placed: it goes out flagged <code>OVERRIDE</code>.</p>
+<p><strong>Nothing is written until Export.</strong> The exceptions are
+the pre-run pop-ups, Update Syllabi and Add Student Absence, which save
+right away. The board also autosaves its own lines to
+<code>Boards\</code> so you never lose work.</p>
+<h2 id="2-glossary">§2 Glossary</h2>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Term</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>SP</strong></td>
+<td>Student pilot.</td>
+</tr>
+<tr class="even">
+<td><strong>IP</strong></td>
+<td>Instructor pilot. Listed on MasterData’s
+<strong>Instructors</strong> sheet.</td>
+</tr>
+<tr class="odd">
+<td><strong>Line</strong> / <strong>sortie</strong></td>
+<td>One row of the schedule: an ETD, a line type, an IP, and (once
+filled) a student and a mission. The code calls them <em>sorties</em> or
+<em>rows</em>; the board calls them <em>lines</em>.</td>
+</tr>
+<tr class="even">
+<td><strong>ETD</strong></td>
+<td>Estimated time of departure. The line’s start time.</td>
+</tr>
+<tr class="odd">
+<td><strong>Line type</strong> / <strong>SortieType</strong></td>
+<td><code>Day Local</code> (DL), <code>O&amp;B</code>,
+<code>O&amp;B Return</code> (RTN), <code>OFT</code>, <code>IFT</code>.
+Decides which events can be flown (§13).</td>
+</tr>
+<tr class="even">
+<td><strong>Event</strong> / <strong>mission</strong></td>
+<td>One item of the syllabus, for example <code>FT5001</code>.</td>
+</tr>
+<tr class="odd">
+<td><strong>Syllabus</strong></td>
+<td>The ordered list of events every student goes through, with prereqs.
+Each student has their own copy (their tab in OutputSchedule) that
+records what they have completed.</td>
+</tr>
+<tr class="even">
+<td><strong>Opted</strong></td>
+<td>A student is <em>opted</em> for an event when it isn’t complete and
+all its prereqs are complete. Only opted events can be scheduled
+automatically.</td>
+</tr>
+<tr class="odd">
+<td><strong>Hardcode</strong> / <strong>pin</strong></td>
+<td>Putting a specific student (and maybe a mission) on a line yourself.
+The scheduler never moves a pinned student.</td>
+</tr>
+<tr class="even">
+<td><strong>Fill</strong></td>
+<td>Running the scheduler over the open lines.</td>
+</tr>
+<tr class="odd">
+<td><strong>Hard rule</strong></td>
+<td>A pass/fail rule (crew rest, turn time…). A student who breaks one
+is never picked by the scheduler.</td>
+</tr>
+<tr class="even">
+<td><strong>Soft rule</strong></td>
+<td>A scoring rule. Points are added or taken off; highest total
+wins.</td>
+</tr>
+<tr class="odd">
+<td><strong>SoftWeights</strong></td>
+<td>The MasterData sheet that holds the soft-rule point values.</td>
+</tr>
+<tr class="even">
+<td><strong>OVERRIDE</strong></td>
+<td>Note written on a line whose pinned student breaks a hard rule.
+Allowed, but visible.</td>
+</tr>
+<tr class="odd">
+<td><strong>Counter</strong></td>
+<td>An IP who flies a sortie with a student. AETCI continuity rules
+limit how many a student should have.</td>
+</tr>
+<tr class="even">
+<td><strong>Non-counter</strong></td>
+<td>An IP with <code>IsCounter</code> = FALSE (supervisors). Doesn’t
+count, unless they fly the student two rides in a row.</td>
+</tr>
+<tr class="odd">
+<td><strong>String</strong></td>
+<td>Rides in a row with the same counter, in one category (FT, FF, AA).
+3 is the goal.</td>
+</tr>
+<tr class="even">
+<td><strong>Zipper</strong></td>
+<td>One different counter in the middle of a string
+(<code>Lee, Lee, Ortiz, Lee</code>). The string survives.</td>
+</tr>
+<tr class="odd">
+<td><strong>Sim debt</strong></td>
+<td>A running number: flights add to it, sims pay it down. Keeps
+students from running out of sims (a <em>sim stop</em>).</td>
+</tr>
+<tr class="even">
+<td><strong>Discontinuity score</strong></td>
+<td>How broken up a student’s strings have been. High = lots of
+1-strings and counters. Gives those students priority to stay with an
+IP.</td>
+</tr>
+<tr class="odd">
+<td><strong>BIT</strong></td>
+<td>Break in training: too many days without a flight.</td>
+</tr>
+<tr class="even">
+<td><strong>Unsat</strong> / <strong>hook</strong></td>
+<td>A failed event. An unsat sim blocks flying until a re-sim; an unsat
+flight blocks sims until a re-fly.</td>
+</tr>
+<tr class="odd">
+<td><strong>CAP</strong></td>
+<td>Students flagged <code>IsCAP</code>. One flight a day, no O&amp;Bs,
+need an experienced IP.</td>
+</tr>
+<tr class="even">
+<td><strong>INTL</strong></td>
+<td>International students (<code>IsInternational</code>). Need an
+experienced IP.</td>
+</tr>
+<tr class="odd">
+<td><strong>Wingman</strong></td>
+<td>A second student flying formation with a formation lead.</td>
+</tr>
+<tr class="even">
+<td><strong>DS (Direct support)</strong></td>
+<td>When no student can fly wing, an open line is claimed as
+<code>Need Form SP</code> to support the formation lead.</td>
+</tr>
+<tr class="odd">
+<td><strong>For Sale</strong> / <strong>NEED SP</strong></td>
+<td>A line with no student. The scheduler writes For Sale when no one
+can fly it; Export writes NEED SP for any open line.</td>
+</tr>
+<tr class="even">
+<td><strong>Reservation</strong></td>
+<td>A pinned line later in the day “holding” the student’s time so
+earlier lines respect it.</td>
+</tr>
+<tr class="odd">
+<td><strong>Context rows</strong></td>
+<td>Days already exported that aren’t being filled, loaded as fixed
+lines so the fill doesn’t double-book anyone.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="3-installing-and-first-run">§3 Installing and first run</h2>
+<p><strong>Needs:</strong> - Windows with <strong>Windows PowerShell
+5.1</strong> (the blue PowerShell that comes with Windows). - The
+<strong>ImportExcel</strong> PowerShell module. If it’s missing, FAIS
+says <em>“Please install or copy the ImportExcel module”</em>. Install
+it with <code>Install-Module ImportExcel -Scope CurrentUser</code>, or
+copy the module folder into
+<code>Documents\WindowsPowerShell\Modules</code>. -
+<code>MasterData.xlsx</code> in the FAIS folder, next to
+<code>FAIS.ps1</code>. - <code>OutputSchedule.xlsx</code> in the same
+folder (created on the first export if it isn’t there).</p>
+<p><strong>Run it:</strong></p>
+<pre><code>cd &lt;your FAIS folder&gt;
+powershell.exe -STA -ExecutionPolicy Bypass -File .\FAIS.ps1</code></pre>
+<ul>
+<li><code>-STA</code> is needed by the WPF window. If you forget it,
+FAIS restarts itself in STA mode.</li>
+<li><code>-ExecutionPolicy Bypass</code> avoids the “running scripts is
+disabled” error on locked-down machines.</li>
+<li>Add <code>-Trace</code> to print every scheduling decision (every
+candidate and score) to the console.</li>
+</ul>
+<p><strong>Check an install</strong> without touching your real
+files:</p>
+<pre><code>powershell.exe -STA -ExecutionPolicy Bypass -File .\Tests\Invoke-SelfTest.ps1</code></pre>
+<p>It prints PASS/FAIL for each check and exits 0 when all pass (see
+§37).</p>
+<p><strong>Text-only copies.</strong> If your machine blocks
+<code>.ps1</code> downloads, the repository also has
+<code>FAIS_txt.zip</code>, <code>FAIS_catalog.txt</code> and
+<code>FAIS_txt_update\</code> (only the changed files as
+<code>.txt</code>). <code>FAIS_txt_update\Restore.txt</code> is a short
+script that renames <code>X.psm1.txt</code> back to <code>X.psm1</code>
+and unblocks the files.</p>
+<hr />
+<h1 id="part-b-how-to-use-fais">Part B: How to use FAIS</h1>
+<h2 id="4-the-daily-workflow-step-by-step">§4 The daily workflow, step
+by step</h2>
+<p>This is the normal day. Each step is covered in more detail
+later.</p>
+<ol type="1">
+<li><strong>Close nothing.</strong> You can leave
+<code>MasterData.xlsx</code> and <code>OutputSchedule.xlsx</code> open
+in Excel. FAIS saves them before reading (so unsaved edits are read too)
+and saves/closes/reopens them around writes.</li>
+<li><strong>Start FAIS</strong> (§3). The console shows what was loaded:
+<em>“Loaded 14 students, 103 IPs, 72 formation callsigns…”</em> and the
+days found on the Schedule sheet.</li>
+<li><strong>Pre-run pop-ups</strong> (§5). Log anything that went wrong
+on the last schedule:
+<ul>
+<li><strong>Log Hooked Event</strong> for unsats,</li>
+<li><strong>Log Incomplete Event</strong> for events that didn’t
+happen,</li>
+<li><strong>Change Student HOLD status</strong>,</li>
+<li><strong>Add Student Absence</strong>.</li>
+</ul>
+Then click <strong>Open Puck Board</strong>.</li>
+<li><strong>Build the day on the puck board</strong> (§6, §7). The lines
+usually come from MasterData’s <strong>Schedule</strong> sheet
+automatically, one tab per day. Otherwise type them
+(<code>0730 DL</code>), use <strong>Add Bulk Lines</strong>, a template,
+or <strong>Copy previous day’s lines</strong>.</li>
+<li><strong>Put IPs on lines</strong> (drag IP pucks onto the IP slots)
+if the sheet didn’t already.</li>
+<li><strong>Hardcode the students you already know about</strong> (drag
+student pucks onto student slots). Watch the corner marker: green =
+fine, amber = warning, red = breaks a hard rule.</li>
+<li><strong>Fill.</strong> Press <strong>Fill <day></strong>
+(Ctrl+Shift+Enter) or <strong>Fill all N days</strong> (Ctrl+Enter). The
+scheduler’s picks go on the board in blue italics, marked
+<code>AUTO</code>.</li>
+<li><strong>Review.</strong> Click any line to see <strong>Line
+details</strong>: why that student fits, their + / − score, and
+<strong>See options</strong> to rank every other student for that line.
+Move anyone you want. <strong>Clear fill</strong> /
+<strong>Re-fill</strong> / <strong>Ctrl+Z</strong> are there if you want
+to start over.</li>
+<li><strong>Export</strong> (bottom bar). Writes the board exactly as it
+stands. A window tells you what was written; <strong>Open
+OutputSchedule</strong> and <strong>Open ATIS</strong> open the
+files.</li>
+</ol>
+<p>Closing the board without exporting writes nothing to OutputSchedule
+or MasterData (only the pop-ups have saved). The board’s lines are kept
+in <code>Boards\</code> for next time.</p>
+<h2 id="5-the-pre-run-pop-ups">§5 The pre-run pop-ups</h2>
+<p>Before the board opens, FAIS reads the <strong>last exported
+schedule</strong> (the MasterSchedule sheet of OutputSchedule) and shows
+a small menu. Use it to record what happened since then. Each choice
+saves straight away.</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Button</th>
+<th>What you do</th>
+<th>What it changes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>Log Hooked Event</strong></td>
+<td>Tick the lines from the last schedule that were unsat (hooked).</td>
+<td><code>UnsatSim</code> (for an OFT / IFT line) or
+<code>UnsatFlight</code> (for a flight) = TRUE on MasterData’s Students
+sheet. The student’s next lines are limited (§19).</td>
+</tr>
+<tr class="even">
+<td><strong>Log Incomplete Event</strong></td>
+<td>Tick the lines that didn’t happen (weather, maintenance, CX).</td>
+<td>The event is made <strong>not complete</strong> on the student’s tab
+(IP and ETD cleared), and only that event’s part of
+<strong>SimDebt</strong> and <strong>DiscontinuityScore</strong> is
+taken back off.</td>
+</tr>
+<tr class="odd">
+<td><strong>Change Student HOLD status</strong></td>
+<td>Tick students to put on hold (checked = on hold).</td>
+<td><code>OnHold</code> = TRUE / FALSE. A student on hold is never
+scheduled.</td>
+</tr>
+<tr class="even">
+<td><strong>Add Student Absence</strong></td>
+<td>Block students off for a time (§11).</td>
+<td>A line on the <strong>StudentAbsences</strong> sheet.</td>
+</tr>
+<tr class="odd">
+<td><strong>Open Puck Board</strong></td>
+<td></td>
+<td>Goes on to the board.</td>
+</tr>
+<tr class="even">
+<td><strong>Exit</strong></td>
+<td></td>
+<td>Stops FAIS.</td>
+</tr>
+</tbody>
+</table>
+<p>If a file can’t be saved (for example a cell is still being edited in
+Excel), the change still applies for this run and
+<strong>Export</strong> writes it later. The message box tells you which
+happened.</p>
+<blockquote>
+<p><strong>Why do this before the board?</strong> The scheduler works
+from each student’s syllabus. If FT5003 is still marked complete when it
+was really cancelled, the scheduler thinks the student is ready for
+FT5004. Logging the incomplete puts the syllabus right first.</p>
+</blockquote>
+<h2 id="6-the-puck-board-area-by-area">§6 The puck board, area by
+area</h2>
+<pre><code>┌──────────────────────────────────────────────────────────────────────────────┐
+│ File  Edit  Line  Day  Fill  View  Help                       (menu bar)     │
+│ [Add lines: 0730 DL ...] [Add Bulk Lines] [Template] [Load a day...]         │
+│ [Update Syllabi] [Add Student Absence]                        [Colors]       │
+│ ── blue banner: &quot;MasterData&#39;s Schedule sheet has lines for ...&quot; ──           │
+├────────────┬──────────────────────────────────────────────┬──────────────────┤
+│ IP pucks   │  Day tabs:  Wed 21 Oct | Thu 22 Oct | +       │ Student pucks    │
+│ (search)   │  ┌─ETD──Type──────IP slot──────Student slot──┐│ (search)         │
+│ Albertson  │  │0730  Day Local [Lee      ] [Smith  FT5004]││ Smith  CAP  1t   │
+│ Avara  NC  │  │0745  O&amp;B       [Ortiz    ] [  open       ]││ Jones  U-SIM     │
+│ ...        │  │1045  O&amp;B Return[Ortiz    ] [ follows O&amp;B ]││ Diaz   HOLD      │
+│            │  └───────────────────────────────────────────┘│ ...              │
+│            │ ═══ Line details ═══════════════════════════  │                  │
+│            │ left: hard rules / warnings / + − score       │                  │
+│            │ right: [See options] ranked list of students  │                  │
+├────────────┴──────────────────────────────────────────────┴──────────────────┤
+│ status line                [Fill Wed 21 Oct] [Fill all 2 days] [Export]       │
+└──────────────────────────────────────────────────────────────────────────────┘</code></pre>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Area</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>Add lines</strong> box</td>
+<td>Type lines and press Enter (§7).</td>
+</tr>
+<tr class="even">
+<td><strong>Add Bulk Lines</strong></td>
+<td>Start time, number of lines, minutes between them (3 by default) and
+the line type. <code>0730</code>, <code>10</code>, <code>3</code> gives
+0730, 0733 … 0757. An O&amp;B gets its return leg. One Ctrl+Z takes the
+whole run off. A return type on its own is refused.</td>
+</tr>
+<tr class="odd">
+<td><strong>Template / Copy previous day’s lines</strong></td>
+<td>Reuse a saved wave (<code>Templates\</code>), or copy the last
+flying day’s times, types and IPs.</td>
+</tr>
+<tr class="even">
+<td><strong>Load a day…</strong></td>
+<td>Load one day from MasterData’s Schedule sheet, or from the last
+exported schedule (§9). Choose <strong>Replace</strong> or
+<strong>Add</strong>, and whether to keep the students and missions it
+names.</td>
+</tr>
+<tr class="odd">
+<td><strong>Update Syllabi</strong></td>
+<td>Bring syllabi in line with the day’s flying schedule or the Big
+Board (§10).</td>
+</tr>
+<tr class="even">
+<td><strong>Add Student Absence</strong></td>
+<td>Block students off (§11).</td>
+</tr>
+<tr class="odd">
+<td><strong>Blue banner</strong></td>
+<td>MasterData’s Schedule sheet changed and has lines the board doesn’t:
+load them or keep the board’s lines.</td>
+</tr>
+<tr class="even">
+<td><strong>Menu bar</strong></td>
+<td>Every action in one place: File, Edit, <strong>Line</strong> (acts
+on the selected line), Day, Fill, View, Help.</td>
+</tr>
+<tr class="odd">
+<td><strong>Day tabs</strong></td>
+<td>One tab per day. <strong>Add day</strong> builds several days at
+once; crew rest is checked across them. <strong>Remove day</strong>
+takes a day off.</td>
+</tr>
+<tr class="even">
+<td><strong>IP pucks</strong> (left)</td>
+<td>Drag onto a line’s IP slot. The badge shows how many lines that IP
+has that day. Non-counter IPs are <strong>purple</strong> (NC); counters
+are blue. Badges: EXP (experienced), CHK (check IP), NC.</td>
+</tr>
+<tr class="odd">
+<td><strong>Student pucks</strong> (right)</td>
+<td>Drag onto a student slot to hardcode. Badges: CAP, INTL, HOLD,
+U-SIM, U-FLT, ABS times, turns that day (green 1, amber 2, red 3+).
+Hover for next events, sim debt, discontinuity score and priority.</td>
+</tr>
+<tr class="even">
+<td><strong>Line details</strong> (under the days)</td>
+<td>The selected line’s student against every rule, and <strong>See
+options</strong> (§8).</td>
+</tr>
+<tr class="odd">
+<td><strong>Colors</strong> (top right)</td>
+<td>A key to every color on the board (also Help &gt; What the colors
+mean).</td>
+</tr>
+<tr class="even">
+<td><strong>Fill / Clear fill / Re-fill / Export</strong> (bottom)</td>
+<td>§8.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Putting pucks on lines.</strong> Two ways: - <strong>Drag and
+drop.</strong> Drag a puck onto a slot. Drag between lines to move (hold
+<strong>Ctrl</strong> to copy). Drop back on its pool to take it off. -
+<strong>Click and place.</strong> Click a puck to pick it up (thick
+outline; a dark banner says what you’re holding), then click a slot.
+Hold <strong>Ctrl</strong> while clicking the slot to keep holding it
+for another line. <strong>Esc</strong> or <strong>Let go</strong> puts
+it down. <strong>Double-click</strong> a puck to put it straight on the
+selected line.</p>
+<p>Nothing is checked while you drag (that used to be slow). When you
+drop a student, their rules are checked once and the line is selected so
+<strong>Line details</strong> shows the result.</p>
+<p><strong>Colors, in short:</strong></p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Where</th>
+<th>Color</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Stripe at the left of a line</td>
+<td>(by type)</td>
+<td>Day Local, O&amp;B, O&amp;B Return, OFT / IFT, other.</td>
+</tr>
+<tr class="even">
+<td>Corner marker on a hardcoded student</td>
+<td>green / amber / red / grey</td>
+<td>Passes / passes with warnings / breaks a hard rule (OVERRIDE) /
+still checking.</td>
+</tr>
+<tr class="odd">
+<td>Student slot</td>
+<td>green</td>
+<td>Hardcoded.</td>
+</tr>
+<tr class="even">
+<td>Student slot</td>
+<td>white-grey</td>
+<td>Open: the scheduler fills it.</td>
+</tr>
+<tr class="odd">
+<td>Student slot</td>
+<td>lilac</td>
+<td>Return leg: follows its O&amp;B.</td>
+</tr>
+<tr class="even">
+<td>Student slot</td>
+<td>blue italics, <code>AUTO</code></td>
+<td>Put on by the scheduler (or its wingman).</td>
+</tr>
+<tr class="odd">
+<td>Student slot</td>
+<td>amber</td>
+<td>Direct support for a formation.</td>
+</tr>
+<tr class="even">
+<td>Student slot</td>
+<td>red, <code>NEED SP</code></td>
+<td>No student could fly the line.</td>
+</tr>
+<tr class="odd">
+<td>Student puck</td>
+<td>green / amber / grey</td>
+<td>Available / has an unsat or absence / on hold.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Right-click</strong> a hardcoded student for more: explain,
+take off, <em>Fly wing to…</em>, duplicate, delete line.</p>
+<p><strong>The mission dropdown</strong> on a hardcoded student: -
+<code>(auto)</code> picks the best-scoring event that passes the rules
+(§12). - Then the events the student can fly on this line. - Then the
+next events they are <strong>not opted for</strong> yet, marked
+<code>(not opted)</code>. - Then <strong>Type a mission…</strong> for
+anything else.</p>
+<p>If you pick a mission that breaks a rule (not opted, already flown,
+not in the syllabus, wrong line type), FAIS explains why and offers the
+mission it would choose: <strong>Yes</strong> = use the recommended one,
+<strong>No</strong> = keep yours (flagged
+<code>OVERRIDE: Not opted for ...</code>), <strong>Cancel</strong> = no
+change.</p>
+<h2 id="7-typing-lines-keys-and-shortcuts">§7 Typing lines, keys and
+shortcuts</h2>
+<p><strong>The Add lines box:</strong></p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Type this</th>
+<th>You get</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>0730 DL</code> (or <code>730 dl</code>,
+<code>7:30 local</code>)</td>
+<td>Day Local at 0730</td>
+</tr>
+<tr class="even">
+<td><code>1015 O&amp;B</code></td>
+<td>O&amp;B, plus its <strong>O&amp;B Return</strong> 3 hr later (same
+IP, linked)</td>
+</tr>
+<tr class="odd">
+<td><code>1015 OB 1330</code></td>
+<td>O&amp;B with the return at 1330</td>
+</tr>
+<tr class="even">
+<td><code>1330 RTN</code></td>
+<td>Return line linked to the latest O&amp;B before it that has no
+return</td>
+</tr>
+<tr class="odd">
+<td><code>1300 OFT x2</code></td>
+<td>Two OFT lines (IFT works the same)</td>
+</tr>
+<tr class="even">
+<td><code>0800 DL Jones sp:Smith m:FT5103</code></td>
+<td>IP Jones, student Smith hardcoded on FT5103</td>
+</tr>
+<tr class="odd">
+<td><code>0730 DL, 0745 DL, 0800 DL</code></td>
+<td>Several lines at once (<code>,</code> or <code>;</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>Line type short names accepted: <code>DL</code>, <code>LOCAL</code>,
+<code>DAYLOCAL</code> → Day Local; <code>OB</code>,
+<code>O&amp;B</code>, <code>ONB</code>, <code>O/B</code> → O&amp;B;
+<code>RTN</code>, <code>RET</code>, <code>RETURN</code>, <code>R</code>
+→ O&amp;B Return; <code>OFT</code>; <code>IFT</code>. <code>SIM</code>
+is ambiguous and asks you to pick OFT or IFT.</p>
+<p>Times accepted: <code>0730</code>, <code>730</code>,
+<code>7:30</code>, <code>07:30</code>, <code>07.30</code>,
+<code>0730L</code>, <code>7</code>.</p>
+<p><strong>ETD box:</strong> click an ETD, type a new time, press Enter.
+<strong>Up/Down</strong> = 5 min, <strong>Shift+Up/Down</strong> = 30
+min, <strong>Esc</strong> cancels. Moving an O&amp;B moves its return
+leg by the same amount.</p>
+<p><strong>Keys:</strong></p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Key</th>
+<th>Does</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Ctrl+L</td>
+<td>Jump to the Add lines box</td>
+</tr>
+<tr class="even">
+<td>Ctrl+Z</td>
+<td>Undo (up to 50 steps; a whole fill is one step)</td>
+</tr>
+<tr class="odd">
+<td>Delete</td>
+<td>Clear the selected slot</td>
+</tr>
+<tr class="even">
+<td>Ctrl+D / Ctrl+Delete</td>
+<td>Duplicate / delete the selected line</td>
+</tr>
+<tr class="odd">
+<td>Ctrl+PgUp / Ctrl+PgDn</td>
+<td>Previous / next day</td>
+</tr>
+<tr class="even">
+<td>Esc</td>
+<td>Let go of a puck you picked up</td>
+</tr>
+<tr class="odd">
+<td>F5</td>
+<td>Re-check everything</td>
+</tr>
+<tr class="even">
+<td>Ctrl+Enter</td>
+<td>Fill all days</td>
+</tr>
+<tr class="odd">
+<td>Ctrl+Shift+Enter</td>
+<td>Fill the day on screen</td>
+</tr>
+<tr class="even">
+<td>Arrow keys on a mission dropdown</td>
+<td>Open it; arrows to move, Enter to pick</td>
+</tr>
+</tbody>
+</table>
+<h2 id="8-filling-reviewing-and-exporting">§8 Filling, reviewing and
+exporting</h2>
+<h3 id="fill">Fill</h3>
+<ul>
+<li><strong>Fill <day></strong> fills only the day on screen.
+<strong>Fill all N days</strong> (shown when there’s more than one day)
+fills every day on the board.</li>
+<li>Before filling, FAIS checks the day for problems and asks <em>“Fill
+anyway?”</em> if it finds any: a line with no IP (it will be
+<code>NEED IP</code>), an IP or student not on MasterData, an O&amp;B
+with no return line, a student pinned twice at the same time, a day with
+no lines.</li>
+<li>Only <strong>open</strong> lines are filled. Hardcoded students, and
+the picks of an earlier fill, stay where they are. So you can fill,
+change things, and fill again.</li>
+<li>The picks go <strong>on the board</strong> as ordinary lines (blue
+italics, <code>AUTO</code>). You can drag them, swap them, change
+missions.</li>
+<li>A line nobody can fly shows <strong>NEED SP</strong> in red.</li>
+<li>The status line sums it up: <em>“Filled Wed 21 Oct: the scheduler
+put 18 student(s) on (2 wingmen), 3 return legs, 1 line(s) with no
+student (NEED SP), 0 override flag(s).”</em></li>
+<li>If filling this day makes a line on <strong>another day you already
+exported</strong> break a rule, the status line says <em>HEADS UP</em>
+and names it (§9).</li>
+</ul>
+<h3 id="clear-fill-re-fill-undo">Clear fill, Re-fill, Undo</h3>
+<ul>
+<li><strong>Clear fill</strong> takes the scheduler’s picks off the day
+on screen. Students you hardcoded, or picks you moved, stay.</li>
+<li><strong>Re-fill</strong> = Clear fill, then Fill.</li>
+<li><strong>Ctrl+Z</strong> takes the whole fill back off in one
+step.</li>
+</ul>
+<h3 id="review-with-line-details">Review with Line details</h3>
+<p>Click anywhere on a line. The <strong>Line details</strong> panel
+shows:</p>
+<ul>
+<li><strong>Left:</strong> the line’s student against the <strong>hard
+rules</strong> (✖ broken), the <strong>warnings</strong>, and the
+<strong>soft rules</strong> (every + / − reason and the total). For an
+open line it says the scheduler will fill it (or that Export writes NEED
+SP).</li>
+<li><strong>Right:</strong> <strong>See options</strong> ranks
+<strong>every student</strong> for that line: ✔ fits, ! fits with
+warnings, ✖ breaks a hard rule (with the first rule broken). Each shows
+the mission <code>(auto)</code> would pick and its score. Fits come
+first, best score first. <strong>Hide rule breaks</strong> hides the ✖
+students. Click a student to see their full check on the left;
+double-click, or <strong>Put on this line</strong>, to hardcode them
+there.</li>
+</ul>
+<p>See options is only run when you press it (it takes a while), and any
+change to the board clears the list.</p>
+<h3 id="export">Export</h3>
+<p><strong>Export</strong> writes the board <strong>as it
+stands</strong>. Nobody new is picked; every student stays where they
+are. Rule breaks are flagged <code>OVERRIDE</code>. A line with no
+student goes out as <strong>NEED SP</strong>.</p>
+<p>It writes the day on screen <strong>and</strong> every day you filled
+since the board opened (the button names them). <strong>All or
+nothing:</strong> every file is backed up first and put back if any part
+fails.</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>File</th>
+<th>What changes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>OutputSchedule: <strong>MasterSchedule</strong> (first tab)</td>
+<td>The exported days are replaced. Other days already exported (today
+onward) are kept, so you can update one day at a time.</td>
+</tr>
+<tr class="even">
+<td>OutputSchedule: <strong>each student’s tab</strong></td>
+<td>Only the Instructor, ETD and IsComplete cells of events that
+changed. Your own columns, notes and formatting stay. A student with no
+tab gets one.</td>
+</tr>
+<tr class="odd">
+<td>MasterData: <strong>Students</strong></td>
+<td>SimDebt, DiscontinuityScore, and UnsatSim / UnsatFlight reset to
+FALSE where the schedule cleans them up.</td>
+</tr>
+<tr class="even">
+<td>MasterData: <strong>String Tracker</strong></td>
+<td>One row per student: 5+, 4, 3, 2 and 1-strings and unique counters
+(§15).</td>
+</tr>
+<tr class="odd">
+<td>MasterData: <strong>StudentAbsences</strong></td>
+<td>Any absence Add Student Absence couldn’t save earlier.</td>
+</tr>
+<tr class="even">
+<td><strong>ATIS.xlsx</strong> (Desktop)</td>
+<td>One tab per exported day (<code>Wednesday. October 21, 2026</code>):
+flights in ETD order, a thick border, then sims. Other days’ tabs are
+kept.</td>
+</tr>
+</tbody>
+</table>
+<p>Afterwards a window says what was written (days, line counts, files,
+unsats cleared, OVERRIDE lines) or, if it failed, that
+<strong>nothing</strong> was written and why.</p>
+<h2 id="9-changing-a-day-you-already-exported">§9 Changing a day you
+already exported</h2>
+<ol type="1">
+<li>Start FAIS, click <strong>Load a day…</strong>, choose <strong>Last
+exported schedule (OutputSchedule)</strong> and the day. Everyone goes
+back on the board where they were exported, hardcoded.</li>
+<li>Change what changed: take a student off, swap an IP, add a
+line.</li>
+<li>Press <strong>Fill <day></strong>, adjust, then
+<strong>Export</strong>.</li>
+</ol>
+<p>Only the open lines are filled, and only that day is replaced in
+MasterSchedule. <strong>Other exported days ride along as fixed
+context</strong> (§12, §24): their students are treated as already
+booked, so nobody is double-booked or flown out of order. If your change
+breaks a line on another exported day (say you moved a student’s FT5004
+to today, and tomorrow’s exported line has them on FT5004 too), the
+status line says which. Load and fill that day too.</p>
+<h2 id="10-update-syllabi">§10 Update Syllabi</h2>
+<p><strong>Update Syllabi</strong> (toolbar) brings each student’s
+syllabus in line with an official training file. Pick the file; FAIS
+works out which kind it is from its headings.</p>
+<p><strong>The day’s flying schedule</strong> (tabs with Student,
+Mission and Line Status columns). Its <strong>Flying</strong> and
+<strong>Sims</strong> tabs are read: - Line Status <strong>CM</strong>
+or <strong>EXEC</strong> → the mission is marked complete, with that
+line’s Instructor and ETD (Start Time on Sims). - Line Status
+<strong>INC</strong> or <strong>CX</strong> → the mission is made not
+complete. - Anything else → nothing changes. - The same student and
+mission more than once that day → a complete line wins.</p>
+<p><strong>The Big Board</strong> (a Student Name column, then a block
+of columns per event: date, status, grade, IP): - Anything in the
+event’s columns → complete, with the IP and the date as the ETD. -
+Nothing there → not complete, <strong>except</strong> an event FAIS has
+planned for later than now (the Big Board can’t show it yet).</p>
+<p><strong>Left alone:</strong> events not in the student’s syllabus
+(most Big Board columns are academics), people who aren’t FAIS students,
+and unsat flags.</p>
+<p><strong>Name matching.</strong> <code>Quill, Casey B. [2d Lt]</code>,
+<code>Quill, Casey</code>, <code>Quill</code> and
+<code>Casey B. Quill</code> are all the same student. Ranks, suffixes,
+case, periods and hyphens don’t matter. Last name <strong>and</strong>
+first name must agree (an initial matches the name it starts). A
+last-name-only MasterData name matches only when exactly one person in
+the file has that last name. A name that could be more than one student
+is left alone and listed.</p>
+<p><strong>Before saving</strong> you see every change, student by
+student, including each SimDebt and Discontinuity change.
+<strong>Yes</strong> saves the changed tab cells in OutputSchedule and
+SimDebt / DiscontinuityScore in MasterData, both or neither. Students
+already on lines are re-checked against their new syllabi.</p>
+<h2 id="11-add-student-absence">§11 Add Student Absence</h2>
+<p>Blocks students off for a stretch of time (appointment, leave, a
+duty). The same as typing a line on MasterData’s
+<strong>StudentAbsences</strong> sheet.</p>
+<ol type="1">
+<li><strong>Put students in the box:</strong> drag from the list, click
+then click the box, double-click, or paste names
+(<strong>Ctrl+V</strong> or <strong>Paste names</strong>, one per line).
+Pasted names are matched like Update Syllabi.</li>
+<li><strong>Pick the day</strong> on the calendar.</li>
+<li><strong>Type From and To</strong>: <code>0730</code>,
+<code>1530</code>, <code>0330 PM</code>, <code>330pm</code>,
+<code>3:30 p.m.</code>. <strong>on</strong> is the end day, for an
+absence past midnight or over several days.</li>
+<li>Optional <strong>Reason</strong> (shows on the puck and in the rule
+flag).</li>
+<li><strong>Add absence.</strong></li>
+</ol>
+<p>The absence applies at once: pucks show <code>ABS 0900-1130</code>,
+the scheduler keeps the student off any line it overlaps, and a line
+they’re already on turns red. It is also saved to StudentAbsences
+(IsActive TRUE). If MasterData can’t be saved, the absence holds for
+this run and Export writes it. An absence with the same start and end
+isn’t added twice.</p>
+<p><strong>How overlap is judged</strong> (§13, §19): a sortie occupies
+<strong>1.5 hr before</strong> to <strong>2.5 hr after</strong> its ETD.
+A 1000 line conflicts with any absence touching 0830–1230.</p>
+<hr />
+<h1 id="part-c-the-logic-how-fais-decides">Part C: The logic (how FAIS
+decides)</h1>
+<h2 id="12-how-one-line-gets-filled-the-selection-process">§12 How one
+line gets filled: the selection process</h2>
+<p>This is the heart of FAIS. Here it is in plain English first; §24
+walks the same path through the code, and §32 tells it as the story of
+one line.</p>
+<h3 id="the-short-version">The short version</h3>
+<p>For each open line, in ETD order:</p>
+<pre><code>for every student:
+    run the HARD RULES for this student on this line
+    if any rule fails → skip this student
+    for every event the student could fly here:
+        compute the SOFT RULE score
+        keep the best (student, event) pair so far
+put the best student on the line with that event
+mark the event complete on that student (so later lines see it)
+if it&#39;s a formation event → find a wingman (or direct support)
+if it&#39;s an O&amp;B → fill the return leg with the same student
+if nobody passed → the line is &quot;For Sale&quot; (NEED SP on the board)</code></pre>
+<h3 id="the-longer-version">The longer version</h3>
+<ol type="1">
+<li><strong>Prepare.</strong> Every line gets an id, its IP is looked up
+on the Instructors sheet (unknown → a placeholder; blank →
+<code>NEED IP</code>), and the callsign defaults to the IP’s callsign.
+Placeholders like <code>For Sale</code> or <code>NEED SP</code> are
+cleared.</li>
+<li><strong>Sort</strong> the lines by ETD (lines without a valid time
+go last).</li>
+<li><strong>Reserve pinned time.</strong> Every hardcoded student gets a
+<strong>reservation</strong> for their line (and its O&amp;B return).
+Reservations sit in the student’s timeline like completed events, so an
+<em>earlier</em> open line won’t give the student a turn that clashes
+with a <em>later</em> hardcoded one.</li>
+<li><strong>Walk the lines in order.</strong> For each line:
+<ul>
+<li><strong>Hardcoded line:</strong> keep the student. Pick the mission
+(the one you chose, or the best-scoring one that passes). Mark it
+complete. Pair a wingman if it’s a formation lead. Fill the return leg
+if it’s an O&amp;B. Any hard rule broken is written as
+<code>OVERRIDE: ...</code>.</li>
+<li><strong>Return leg with no O&amp;B student:</strong>
+<code>For Sale</code> (<em>O&amp;B Leg 1 Not Filled</em>). Return legs
+are only ever filled from their O&amp;B.</li>
+<li><strong>Open line:</strong> test every student (step 5).</li>
+</ul></li>
+<li><strong>Test every student</strong> on the open line:
+<ul>
+<li><strong>Hard rules</strong> (§13). Fail → out.</li>
+<li>For each event that passed, compute the <strong>score</strong>
+(§14).</li>
+<li>Keep the best by score, then priority, then name, then syllabus
+order (§20).</li>
+</ul></li>
+<li><strong>Place the winner.</strong> Write the student and mission on
+the line, mark the event complete on their syllabus (moving SimDebt and
+DiscontinuityScore, and clearing any unsat this line cleans up), add the
+notes. Then wingman / DS (§17) and return leg (§18).</li>
+<li><strong>No winner</strong> → <code>For Sale</code>, note <em>No
+Available SP</em>.</li>
+</ol>
+<p>Because each pick is marked complete straight away, <strong>later
+lines see it</strong>: turn time, triple turns and sim debt all count
+it. That’s why the order matters (§20).</p>
+<h3 id="where-the-event-comes-from">Where the event comes from</h3>
+<p>The scheduler never invents events. For a student and a line it
+takes:</p>
+<ol type="1">
+<li>the student’s <strong>opted</strong> events (not complete, every
+prereq complete),</li>
+<li>minus missions already <strong>reserved</strong> on another
+line,</li>
+<li>that <strong>fit the line type</strong>:</li>
+</ol>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Line type</th>
+<th>Event types allowed</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Day Local</td>
+<td>Single, SingleSolo, Formation, FormSolo, Both</td>
+</tr>
+<tr class="even">
+<td>O&amp;B</td>
+<td>Single, Formation, Both (and there must be a flyable event left for
+the return leg)</td>
+</tr>
+<tr class="odd">
+<td>OFT</td>
+<td>IFT, OFT</td>
+</tr>
+<tr class="even">
+<td>IFT</td>
+<td>IFT</td>
+</tr>
+<tr class="odd">
+<td>O&amp;B Return</td>
+<td>(filled only from its O&amp;B)</td>
+</tr>
+</tbody>
+</table>
+<p>Then the hard rules check each of those events, and the soft rules
+score each one that passes. So one student can be scored on several
+events for the same line; the best (student, event) pair wins.</p>
+<h3 id="when-you-hardcode">When you hardcode</h3>
+<p>The same machinery runs on your pins, but <strong>nothing is
+refused</strong>: - <code>(auto)</code> mission = the best-scoring event
+that passes. A wingman line only considers formation events; a lead with
+a paired wing prefers formation events. - A typed mission is used as
+typed, even if it’s not in the syllabus. - Every hard rule broken goes
+in the note as <code>OVERRIDE: ...</code> and in the export summary.</p>
+<h2 id="13-hard-rules-pass--fail">§13 Hard rules (pass / fail)</h2>
+<p>Hard rules decide <strong>who is allowed</strong> on a line. The
+scheduler never picks a student who breaks one. The board shows each
+broken rule as a red ✖ with a reason, and still lets you place the
+student (flagged <code>OVERRIDE</code>).</p>
+<p>They’re checked in this order. When filling, FAIS stops at the first
+failure (fast); on the board it checks them all (so it can list
+them).</p>
+<h3
+id="student-level-rules-about-the-student-and-the-time">Student-level
+rules (about the student and the time)</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>#</th>
+<th>Rule (code)</th>
+<th>Fails when</th>
+<th>Example message</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>1</td>
+<td>No ETD (<code>BAD_ETD</code>)</td>
+<td>The line has no valid time.</td>
+<td><code>Line has no valid ETD ('')</code></td>
+</tr>
+<tr class="even">
+<td>2</td>
+<td>Return line (<code>RETURN_LINE</code>)</td>
+<td>The line is an O&amp;B Return. They’re filled from their O&amp;B,
+never on their own.</td>
+<td><code>O&amp;B Return lines are filled from their O&amp;B</code></td>
+</tr>
+<tr class="odd">
+<td>3</td>
+<td>On hold (<code>ON_HOLD</code>)</td>
+<td><code>OnHold</code> is TRUE.</td>
+<td><code>Student is on hold</code></td>
+</tr>
+<tr class="even">
+<td>4</td>
+<td>Absence (<code>ABSENCE</code>)</td>
+<td>An active absence overlaps <strong>ETD − 1.5 hr to ETD + 2.5
+hr</strong>.</td>
+<td><code>Unavailable 0900-1130 (Dentist); sortie window 0830-1230</code></td>
+</tr>
+<tr class="odd">
+<td>5</td>
+<td>CAP on O&amp;B (<code>CAP_OB</code>)</td>
+<td>CAP student on an O&amp;B.</td>
+<td><code>CAP students can't fly O&amp;Bs</code></td>
+</tr>
+<tr class="even">
+<td>6</td>
+<td>CAP single turn (<code>CAP_SINGLE_TURN</code>)</td>
+<td>CAP student already flies a flight that day (sims don’t count).</td>
+<td><code>CAP student already flies today (0730 FT5003)</code></td>
+</tr>
+<tr class="odd">
+<td>7</td>
+<td>Triple turn (<code>TRIPLE_TURN</code>)</td>
+<td>Already 2 events that day.</td>
+<td><code>Already has 2 events today (...) - triple turn</code></td>
+</tr>
+<tr class="even">
+<td>8</td>
+<td>O&amp;B not only event (<code>OB_NOT_ONLY_EVENT</code>)</td>
+<td>An O&amp;B when the student already has an event that day.</td>
+<td><code>O&amp;B must be the day's only event (has 0730 FT5003)</code></td>
+</tr>
+<tr class="odd">
+<td>9</td>
+<td>Turn time (<code>TURN_TIME</code>)</td>
+<td>Less than <strong>3.25 hr</strong> from another event that day.</td>
+<td><code>Turn time 2.8 hr &lt; 3.25 hr minimum (vs 0730 FT5103)</code></td>
+</tr>
+<tr class="even">
+<td>10</td>
+<td>Duty day (<code>DUTY_DAY</code>)</td>
+<td>More than <strong>9 hr</strong> between the day’s events.</td>
+<td><code>Duty day: 9.5 hr between 0700 and 1630 events (&gt; 9 hr max)</code></td>
+</tr>
+<tr class="odd">
+<td>11</td>
+<td>Return-leg turn / duty (<code>RETURN_TURN_TIME</code>,
+<code>RETURN_DUTY_DAY</code>)</td>
+<td>The same two checks for an O&amp;B’s return leg.</td>
+<td><code>Return leg 1315: turn time 3.0 hr &lt; 3.25 hr (vs ...)</code></td>
+</tr>
+<tr class="even">
+<td>12</td>
+<td>Crew rest (<code>CREW_REST</code>)</td>
+<td>Less than <strong>15 hr</strong> since yesterday’s last event (ETD
+to ETD).</td>
+<td><code>Crew rest 13.5 hr &lt; 15 hr since Tue 1730 FT5004</code></td>
+</tr>
+<tr class="odd">
+<td>13</td>
+<td>Crew rest next day (<code>CREW_REST_NEXT</code>)</td>
+<td>Less than <strong>15 hr</strong> before tomorrow’s first event
+(multi-day boards). Only the day’s last event is checked.</td>
+<td><code>Crew rest 14.0 hr &lt; 15 hr before Thu 0700 ...</code></td>
+</tr>
+<tr class="even">
+<td>14</td>
+<td>Experienced IP (<code>EXP_IP</code>)</td>
+<td>CAP or international student on a Day Local / O&amp;B with an IP
+whose <code>IsExperienced</code> is FALSE.</td>
+<td><code>CAP student needs an experienced IP (Lee isn't)</code></td>
+</tr>
+<tr class="odd">
+<td>15</td>
+<td>Unsat sim (<code>UNSAT_SIM</code>)</td>
+<td><code>UnsatSim</code> TRUE and the line is a Day Local /
+O&amp;B.</td>
+<td><code>Unsat sim on record - no Day Local/O&amp;B until a re-sim in an OFT</code></td>
+</tr>
+<tr class="even">
+<td>16</td>
+<td>Unsat flight (<code>UNSAT_FLIGHT</code>)</td>
+<td><code>UnsatFlight</code> TRUE and the line is an OFT / IFT.</td>
+<td><code>Unsat flight on record - no OFT/IFT until re-fly</code></td>
+</tr>
+<tr class="odd">
+<td>17</td>
+<td>No eligible event (<code>NO_ELIGIBLE_EVENT</code>)</td>
+<td>Nothing in the syllabus is opted and fits this line type.</td>
+<td><code>No eligible Day Local events (next: FE4002 OFT, ...)</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Warnings</strong> (shown amber, never block): - Turn time
+3.25–3.5 hr: <code>Less than 3.5 hr TT, Flt/CC Approval Required</code>.
+- 6–9 hr between events:
+<code>If this is a Night Flight SP will not have Duty Day</code>. - The
+same two for a return leg.</p>
+<h3 id="event-level-rules-about-one-event-on-this-line">Event-level
+rules (about one event on this line)</h3>
+<p>Each candidate event is checked too. A student passes only if at
+least one event passes.</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Rule (code)</th>
+<th>Fails when</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>NOT_OPTED</code></td>
+<td>You chose an event the student isn’t opted for (already complete, or
+a prereq isn’t). <em>e.g.</em>
+<code>Not opted for FE3102: FT5001 isn't complete yet</code>.</td>
+</tr>
+<tr class="even">
+<td><code>MISSION_NOT_ELIGIBLE</code></td>
+<td>You chose an event that can’t go on this line (wrong type, pinned
+elsewhere, no O&amp;B second leg).</td>
+</tr>
+<tr class="odd">
+<td><code>MISSION_NOT_FOUND</code></td>
+<td>The mission you typed isn’t in the student’s syllabus.</td>
+</tr>
+<tr class="even">
+<td><code>FORM_ON_OB</code></td>
+<td>A formation event on an O&amp;B.</td>
+</tr>
+<tr class="odd">
+<td><code>CHECK_ON_OB</code></td>
+<td>A check ride on an O&amp;B.</td>
+</tr>
+<tr class="even">
+<td><code>OB_NO_SECOND_LEG</code></td>
+<td>An O&amp;B event with no flyable event left for the return.</td>
+</tr>
+<tr class="odd">
+<td><code>OB_RETURN_CHECK</code></td>
+<td>The return leg would be a check ride.</td>
+</tr>
+<tr class="even">
+<td><code>CHECK_SAME_IP</code></td>
+<td>Check ride with an IP who already flew with the student (evaluator
+independence).</td>
+</tr>
+<tr class="odd">
+<td><code>CHECK_NEEDS_CHECK_IP</code></td>
+<td>Check ride with an IP whose <code>IsCheck</code> is FALSE.</td>
+</tr>
+<tr class="even">
+<td><code>FORM_NO_WING_LINE</code></td>
+<td>A formation lead with no open Day Local line within
+<strong>FormLookAhead</strong> minutes (22 by default) for a wingman or
+DS.</td>
+</tr>
+<tr class="odd">
+<td><code>FORM_PREFER_SINGLE</code></td>
+<td><em>(Advisory, doesn’t block)</em> No other student can fly
+formation here, but another can fly single-ship.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Notes</strong> added to lines (no effect on the pick):
+<code>Direct Support Required</code>, <code>Solo Flight</code>,
+<code>Need IP in Continuity to Brief</code> (solo whose IP hasn’t flown
+the student in their last 5 flights).</p>
+<blockquote>
+<p><strong>Another way to see it.</strong> Hard rules answer <em>“can
+this student legally fly this line?”</em>. Soft rules (§14) answer
+<em>“of everyone who can, who should?”</em>.</p>
+</blockquote>
+<h2 id="14-soft-rules-the-score">§14 Soft rules (the score)</h2>
+<p>Every student who passes the hard rules gets a <strong>score</strong>
+for each event they could fly. Higher wins. Each rule adds or takes away
+points; the values come from MasterData’s <strong>SoftWeights</strong>
+sheet (first data row). The board lists every rule that scored as a + /
+− line, for example <code>3 String (zipper over Lee) +25</code>.</p>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Rule (board label)</th>
+<th>SoftWeights column</th>
+<th>Points</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>Dollar Ride Bonus</strong></td>
+<td><code>DollarRideBonus</code></td>
+<td>+weight</td>
+<td>Mission is FT5001. Gets new students flying.</td>
+</tr>
+<tr class="even">
+<td><strong>Sim Debt (flight)</strong></td>
+<td>(student’s SimDebt)</td>
+<td><strong>− SimDebt</strong></td>
+<td>Mission is a flight (FT5, FF5, AA5). A student deep in sim debt is
+pushed toward sims instead. A negative debt (sim credit) <em>adds</em>
+points.</td>
+</tr>
+<tr class="odd">
+<td><strong>Sim Debt (sim)</strong></td>
+<td>(student’s SimDebt)</td>
+<td><strong>+ SimDebt</strong></td>
+<td>Mission is a sim (FI3, FE3, FI4, FE4, FN3, FN4, AA4). Students in
+debt are pulled into sims.</td>
+</tr>
+<tr class="even">
+<td><strong>CAP Bonus</strong></td>
+<td><code>CAPBonus</code></td>
+<td>+weight</td>
+<td>CAP student (they can only fly once a day, so they get a
+boost).</td>
+</tr>
+<tr class="odd">
+<td><strong>Continue String</strong></td>
+<td><code>ContString</code></td>
+<td>+weight</td>
+<td>The ride makes a 2- or 3-string with this IP (a zipper return
+included) (§15).</td>
+</tr>
+<tr class="even">
+<td><strong>Discontinuity (string)</strong></td>
+<td>(student’s DiscontinuityScore)</td>
+<td>+ score</td>
+<td>Added on top of Continue String only (§16).</td>
+</tr>
+<tr class="odd">
+<td><strong>CAP Bonus (string)</strong></td>
+<td><code>CAPBonus</code></td>
+<td>+weight</td>
+<td>A CAP student continuing a string gets the CAP bonus a second
+time.</td>
+</tr>
+<tr class="even">
+<td><strong>String 4</strong></td>
+<td><code>String4</code></td>
+<td>weight (default −10)</td>
+<td>The ride makes a 4-string.</td>
+</tr>
+<tr class="odd">
+<td><strong>String 5</strong></td>
+<td><code>String5</code></td>
+<td>weight (default −100)</td>
+<td>The ride makes a 5+ string.</td>
+</tr>
+<tr class="even">
+<td><strong>String Swap</strong></td>
+<td>—</td>
+<td>0</td>
+<td>Ends a 2-string to make a new 2-string. Even.</td>
+</tr>
+<tr class="odd">
+<td><strong>Break String</strong></td>
+<td><code>BreakString</code></td>
+<td>weight × strings broken</td>
+<td>Really ends a 2-string (two different counters in a row).</td>
+</tr>
+<tr class="even">
+<td><strong>Zipper</strong></td>
+<td><code>Zipper</code></td>
+<td>weight</td>
+<td>The zipper ride itself, or alternating counters (§15).</td>
+</tr>
+<tr class="odd">
+<td><strong>Non-Counter</strong></td>
+<td>—</td>
+<td>0</td>
+<td>The IP is a non-counter (and didn’t fly the ride before).</td>
+</tr>
+<tr class="even">
+<td><strong>Counter Continuity</strong></td>
+<td><code>CounterContinuity</code></td>
+<td>weight (default 5)</td>
+<td>The IP already counts for this student in this phase.</td>
+</tr>
+<tr class="odd">
+<td><strong>New Counter</strong></td>
+<td><code>NewCounter</code> (optional)</td>
+<td>weight (default 0)</td>
+<td>A new counter. Shown only when it scores or reaches the phase
+limit.</td>
+</tr>
+<tr class="even">
+<td><strong>OFT/IFT Mismatch</strong></td>
+<td><code>OFTIFTPen</code></td>
+<td>weight</td>
+<td>An IFT event in an OFT slot.</td>
+</tr>
+<tr class="odd">
+<td><strong>Exhaustion</strong></td>
+<td><code>ExhaustMult</code>, <code>ExhaustDays</code></td>
+<td>(2 × flights + sims) × mult</td>
+<td>Events in the last <code>ExhaustDays</code> days (default 5, mult
+1). Use a negative mult to penalise busy students.</td>
+</tr>
+<tr class="even">
+<td><strong>BIT Tracker</strong></td>
+<td><code>BITPerDay</code>, <code>BITDays</code></td>
+<td>days off × BITPerDay (× 2 for CAP)</td>
+<td>Flight lines only. Days without a flight (not counting the day
+before), up to <code>BITDays</code>.</td>
+</tr>
+<tr class="odd">
+<td><strong>BIT Tracker (capped)</strong></td>
+<td>same</td>
+<td>BITPerDay × BITDays ÷ 2</td>
+<td>Past the BIT limit; the line gets a note
+<code>BIT! n days without a flight, consider an 86</code>.</td>
+</tr>
+<tr class="even">
+<td><strong>Checkride Priority</strong></td>
+<td>—</td>
+<td>+50</td>
+<td>A check ride with a check IP. Note
+<code>Checkride! Requires Formal</code>.</td>
+</tr>
+<tr class="odd">
+<td><strong>Student Priority</strong></td>
+<td>(student’s <code>Priority</code>)</td>
+<td>+ priority</td>
+<td>Always. Your manual nudge.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The values on the current MasterData</strong>
+(<code>SoftWeights</code> row 2) are, for reference:</p>
+<pre><code>ContString 25   String4 -20   String5 -60   Zipper -3   NonCounter 5 (no longer used)
+BreakString -10 ExhaustMult -0.25  ExhaustDays 5   BITPerDay 6   BITDays 5
+CAPBonus 5      FormLookAhead 22   LevelDifference -10   CounterContinuity 5
+OFTIFTPen -10   DollarRideBonus 10 TransSimRatio 2   FormSimRatio 3.3333   SimStopMult 3</code></pre>
+<p>Optional columns you can add: <code>NewCounter</code>,
+<code>Disc1String</code>, <code>DiscCounter</code>,
+<code>Disc3PlusString</code>. A blank or missing cell uses the default
+in the table above (0 if none is listed).</p>
+<blockquote>
+<p><strong>The same rules, grouped by purpose:</strong> - <strong>Keep
+training moving:</strong> Dollar Ride Bonus, BIT Tracker, Checkride
+Priority, CAP Bonus. - <strong>Instructor continuity (AETCI):</strong>
+Continue String, String 4/5, Break String, Zipper, String Swap, Counter
+Continuity, New Counter, Discontinuity. - <strong>Balance sims and
+flights:</strong> Sim Debt (flight / sim), OFT/IFT Mismatch. -
+<strong>Don’t overwork anyone:</strong> Exhaustion. - <strong>Your
+override:</strong> Student Priority.</p>
+</blockquote>
+<p>§33 works a full example by hand.</p>
+<h2 id="15-strings-and-counters">§15 Strings and counters</h2>
+<p>FAIS follows the AETCI instructor continuity rules. This section
+explains them three ways: plain rules, examples, and how the code
+counts.</p>
+<h3 id="the-rules-in-plain-english">The rules in plain English</h3>
+<ul>
+<li><strong>An IP who flies a sortie with a student is a
+counter</strong>, and that sortie is part of a
+<strong>string</strong>.</li>
+<li><strong>Three sorties in a row with one counter is the
+goal.</strong> 2 or 4 is acceptable (to prevent BITs); 5 or more is
+not.</li>
+<li><strong>Each category (FT, FF, AA) is its own string</strong>,
+counted in mission order (FT5001, FT5002, …), even if rides from another
+category were flown in between.</li>
+<li><strong>One different counter in between doesn’t break a
+string.</strong> <code>Lee, Lee, Ortiz, Lee</code> is a 3-string with
+Lee (a <strong>zipper</strong> over Ortiz). Two different counters in a
+row end it.</li>
+<li><strong>Non-counters</strong> (<code>IsCounter</code> FALSE, usually
+supervisors) score 0, break no strings and aren’t counters,
+<strong>unless</strong> they fly the student two rides in a row: then
+they count for that student like anyone else.</li>
+<li><strong>Sims, solos and check rides are left out</strong>
+entirely.</li>
+<li><strong>Counter limit:</strong> 6 counters in Fundamental (FT, FF)
+and 3 in Airmanship (AA). FAIS shows where a student stands
+(<code>Diaz is a new counter (4 of 3 Airmanship counters)</code>) but
+doesn’t enforce it.</li>
+</ul>
+<h3 id="the-rules-as-examples">The rules as examples</h3>
+<p>History is the student’s past rides in one category, oldest first. “+
+X” is the ride being scored.</p>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>History</th>
+<th>Next ride</th>
+<th>What it is</th>
+<th>Score</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Lee</td>
+<td>+ Lee</td>
+<td>2-string</td>
+<td>Continue String (+ Discontinuity)</td>
+</tr>
+<tr class="even">
+<td>Lee, Lee</td>
+<td>+ Lee</td>
+<td>3-string</td>
+<td>Continue String (+ Discontinuity)</td>
+</tr>
+<tr class="odd">
+<td>Lee, Lee, Lee</td>
+<td>+ Lee</td>
+<td>4-string</td>
+<td>String 4</td>
+</tr>
+<tr class="even">
+<td>Lee ×4</td>
+<td>+ Lee</td>
+<td>5-string</td>
+<td>String 5</td>
+</tr>
+<tr class="odd">
+<td>Lee, Lee</td>
+<td>+ Ortiz</td>
+<td>Zipper ride: Lee’s 2-string waits on the next ride</td>
+<td>Zipper only (not Break String)</td>
+</tr>
+<tr class="even">
+<td>Lee, Lee, Ortiz</td>
+<td>+ Lee</td>
+<td>Zipper return: 3-string with Lee</td>
+<td>Continue String</td>
+</tr>
+<tr class="odd">
+<td>Lee, Lee, Ortiz</td>
+<td>+ Smith</td>
+<td>Two different counters in a row: Lee’s 2-string ends</td>
+<td>Break String</td>
+</tr>
+<tr class="even">
+<td>Lee, Lee, Ortiz</td>
+<td>+ Ortiz</td>
+<td>Ends Lee’s 2-string to make Ortiz’s 2-string</td>
+<td>String Swap (0)</td>
+</tr>
+<tr class="odd">
+<td>Lee, Ortiz, Lee</td>
+<td>+ Ortiz</td>
+<td>Alternating counters: not a string</td>
+<td>Zipper only (no Continue String)</td>
+</tr>
+<tr class="even">
+<td>Lee, Lee, Lee</td>
+<td>+ Ortiz</td>
+<td>Lee’s string is already 3: nothing to lose</td>
+<td>(no Break String)</td>
+</tr>
+<tr class="odd">
+<td>Lee</td>
+<td>+ Avara (non-counter)</td>
+<td>Non-counter</td>
+<td>Non-Counter (0)</td>
+</tr>
+<tr class="even">
+<td>Lee, Avara</td>
+<td>+ Avara</td>
+<td>Non-counter two in a row: now counts</td>
+<td>Scored like a counter’s 2-string</td>
+</tr>
+</tbody>
+</table>
+<p>On top of those, <strong>Counter Continuity</strong> (+5) applies
+whenever the IP already counts in this phase, and <strong>New
+Counter</strong> whenever they don’t.</p>
+<h3 id="how-the-string-tracker-counts">How the String Tracker
+counts</h3>
+<p>At Export, FAIS writes one row per student to MasterData’s
+<strong>String Tracker</strong>: number of 5+, 4, 3, 2 and 1-strings,
+and unique counters. The counting:</p>
+<ol type="1">
+<li>Take the student’s completed rides that count
+(<code>Test-StringRide</code>: a flight, not a sim, solo or check ride,
+with an IP).</li>
+<li>Group them by category (FT, FF, AA) and sort by mission number.</li>
+<li>Work out who the student’s non-counters are: the Instructors sheet’s
+non-counters, minus any who flew the student two rides back to
+back.</li>
+<li>For each category, measure every string (below), and count a string
+as <em>finished</em> at a ride when that IP’s next ride starts over at
+1, or the IP never flies the category again.</li>
+<li>Counters = the unique IPs who aren’t non-counters.</li>
+</ol>
+<h3 id="how-the-code-measures-one-string">How the code measures one
+string</h3>
+<p><code>Measure-String</code> (in <code>Syllabus.psm1</code>) walks
+back from the newest ride one step at a time:</p>
+<pre><code>IP1 = the newest ride&#39;s IP
+step back one ride (IPn):
+    IPn is IP1?             → +1, and forget any skip
+    IPn is a non-counter?   → skip it (doesn&#39;t break anything)
+    IPn is a different counter, and we haven&#39;t skipped one yet?
+                            → skip it (the zipper), remember we skipped
+    otherwise (second different counter, or no more rides)
+                            → stop</code></pre>
+<p>So <code>A, A, B, A, A, A</code> measured from the end is 5: A A A,
+skip B, A A.</p>
+<p><code>Get-StringOutlook</code> uses this to answer “what does one
+more ride with IP X do?”: the new length, whether it’s a zipper, whether
+the pattern is alternating, which other IPs’ strings it
+<strong>breaks</strong> (they could no longer reach 2) and which it
+<strong>bridges</strong> (still alive, waiting on the next ride).
+<code>Get-StringPlacement</code> adds the counter information
+(non-counter? new counter? count vs limit). <code>SoftRules</code> turns
+that into points (§14).</p>
+<h2 id="16-sim-debt-discontinuity-exhaustion-and-bit">§16 Sim debt,
+discontinuity, exhaustion and BIT</h2>
+<p>These four numbers are what make FAIS “remember” a student’s recent
+history.</p>
+<h3 id="sim-debt">Sim debt</h3>
+<p><strong>Why:</strong> students need sims at the right pace. If they
+fly too far ahead, they hit a <em>sim stop</em> and can’t fly until they
+catch up.</p>
+<p><strong>How it moves:</strong> every event marked complete changes
+the student’s SimDebt by:</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Event</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Flight (FT5, FF5, AA5)</td>
+<td><strong>+ SimStopMult</strong> (3 on the current sheet)</td>
+</tr>
+<tr class="even">
+<td>Transition sim (FI3, FE3, FI4, FE4)</td>
+<td><strong>− TransSimRatio × SimStopMult</strong> (2 × 3 = 6)</td>
+</tr>
+<tr class="odd">
+<td>Formation sim (FN3, FN4, AA4)</td>
+<td><strong>− FormSimRatio × SimStopMult</strong> (3.3333 × 3 = 10)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>How it scores:</strong> a flight scores −SimDebt, a sim
+scores +SimDebt. A student 12 in debt loses 12 points on every flight
+and gains 12 on every sim, so sims win.</p>
+<p><strong>Where it’s kept:</strong> the <code>SimDebt</code> column of
+MasterData’s Students sheet. Read at start, moved by every scheduled
+event (hardcoded lines, picks, wingmen, return legs), by logged
+incompletes, by re-planning, and by Update Syllabi; written back on
+Export, Log Incomplete Event and Update Syllabi. Taking an event back
+only takes back <em>its own</em> change, so a number you typed in by
+hand is kept and moved from there.</p>
+<h3 id="discontinuity-score">Discontinuity score</h3>
+<p><strong>Why:</strong> two students could both stay with an IP. The
+one whose training has been more broken up (lots of different IPs)
+should get to.</p>
+<p><strong>How it’s counted</strong> (from the same strings and counters
+as the String Tracker):</p>
+<table>
+<thead>
+<tr class="header">
+<th>Each</th>
+<th>Points (SoftWeights column, default)</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>1-string</td>
+<td><code>Disc1String</code>, +1</td>
+</tr>
+<tr class="even">
+<td>unique counter</td>
+<td><code>DiscCounter</code>, +1</td>
+</tr>
+<tr class="odd">
+<td>3+ string (3, 4, 5+)</td>
+<td><code>Disc3PlusString</code>, −1</td>
+</tr>
+</tbody>
+</table>
+<p><strong>How it scores:</strong> only on a <strong>Continue
+String</strong> ride, as its own line:
+<code>Discontinuity 4, 2 String +4</code>. Negative scores take points
+off. String 4/5, String Swap, Zipper, Break String and Non-Counter lines
+don’t get it.</p>
+<p><strong>Where it’s kept:</strong> like SimDebt, in the
+<code>DiscontinuityScore</code> column (FAIS adds the heading the first
+time). A blank cell is counted from the syllabus at start and written on
+Export; clear a cell to have FAIS recount it. Every ride that changes
+the student’s strings moves it by exactly what that ride changed.</p>
+<h3 id="exhaustion">Exhaustion</h3>
+<p>Counts the student’s completed events in the last
+<code>ExhaustDays</code> days (5) before this line: <strong>(2 × flights
++ sims) × ExhaustMult</strong>. With the current −0.25, two flights and
+two sims cost (4 + 2) × −0.25 = −1.5. The board shows
+<code>2 Flights and 2 Sims in last 5 Days</code>.</p>
+<h3 id="bit-tracker">BIT tracker</h3>
+<p>On flight lines only. <strong>Days off</strong> = days between the
+last flight and this line, minus one (flying yesterday = 0 days off). -
+1 to <code>BITDays</code> days: <strong>days × BITPerDay</strong>
+(doubled for CAP). With the current sheet, 3 days off = 3 × 6 = +18. -
+More than <code>BITDays</code>: capped at <strong>BITPerDay × BITDays ÷
+2</strong>, and the line gets
+<code>BIT! n days without a flight, consider an 86</code>.</p>
+<h2 id="17-formations-wingmen-and-direct-support">§17 Formations,
+wingmen and direct support</h2>
+<p>When a student is placed on a <strong>formation</strong> event (type
+contains “Form”) as a lead:</p>
+<ol type="1">
+<li><strong>Callsigns.</strong> The lead takes the next pair on the
+<strong>FormCallsigns</strong> sheet (<code>HAZE 11</code> lead,
+<code>HAZE 12</code> wing). Each formation uses two entries; the list
+restarts at the first pair <strong>each day</strong>.</li>
+<li><strong>Look for open lines</strong> within
+<strong>FormLookAhead</strong> minutes (22) of the lead’s ETD that a
+wingman can fly: open local flying lines (Day Local). Never an OFT /
+IFT, an O&amp;B or a return leg.</li>
+<li><strong>Look for a student wingman</strong> on those lines: anyone
+(not the lead) with an opted formation event who passes the hard rules
+there. Score each with the soft rules, plus <strong>(wing level − lead
+level) × LevelDifference</strong> (from the syllabus <code>Level</code>
+column). With LevelDifference −10, a wingman far ahead of the lead loses
+points. The best becomes the wingman (<code>Wing</code>), noted
+<code>Wingman to &lt;lead&gt;</code>.</li>
+<li><strong>No student wingman →</strong> the soonest open line becomes
+<strong>Direct Support</strong>: student <code>Need Form SP</code>,
+noted <code>Direct Support for &lt;lead&gt;</code>.</li>
+<li><strong>No open line at all →</strong> the lead gets
+<code>Wingman: none found</code>.</li>
+</ol>
+<p>On the board you can also pair a wing yourself: right-click a
+hardcoded student and choose <strong>Fly wing to…</strong>. A paired
+wing satisfies the lead’s formation check.</p>
+<p>The hard rule <code>FORM_NO_WING_LINE</code> (§13) stops the
+scheduler choosing a formation event when there’s no line for a wing at
+all. <code>FORM_PREFER_SINGLE</code> warns when nobody else can fly
+formation but someone could fly single-ship.</p>
+<h2 id="18-obs-and-return-legs">§18 O&amp;Bs and return legs</h2>
+<p>An <strong>O&amp;B</strong> (out-and-back) is two lines: the O&amp;B
+and its <strong>O&amp;B Return</strong> (by default 3 hr later, same
+IP). The student flies both.</p>
+<ul>
+<li><strong>On the board:</strong> typing <code>1015 O&amp;B</code>
+makes both lines, linked. Moving the O&amp;B moves the return; deleting
+it deletes the return; changing a line to O&amp;B adds a return. The
+return’s student slot just says it follows its O&amp;B.</li>
+<li><strong>Hard rules for the O&amp;B:</strong> it must be the day’s
+only event, no CAP students, no formation or check events, and there
+must be a flyable event left for the return leg that isn’t a check ride.
+Turn time and duty day are checked for the return leg too.</li>
+<li><strong>When the O&amp;B is filled</strong> (by you or the
+scheduler), <code>Schedule-ReturnLeg</code> puts the same student and IP
+on the return, and gives it the student’s next valid event in syllabus
+order.</li>
+<li><strong>A return whose O&amp;B is open</strong> goes out
+<code>For Sale</code> (<em>O&amp;B Leg 1 Not Filled</em>).</li>
+<li><strong>Which return belongs to which O&amp;B:</strong> by the link
+first; for lines from old sheets with no link, the return on the same
+day with the same IP that’s still open (preferring one after the
+O&amp;B).</li>
+</ul>
+<h2 id="19-unsats-holds-and-absences">§19 Unsats, holds and
+absences</h2>
+<p><strong>Unsats</strong> (logged with <em>Log Hooked Event</em>, or
+TRUE in MasterData):</p>
+<table>
+<thead>
+<tr class="header">
+<th>Hooked</th>
+<th>Blocked</th>
+<th>Cleaned up by</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>OFT</td>
+<td>Day Local and O&amp;B</td>
+<td>an <strong>OFT</strong></td>
+</tr>
+<tr class="even">
+<td>IFT</td>
+<td>Day Local and O&amp;B</td>
+<td>an <strong>OFT or IFT</strong></td>
+</tr>
+<tr class="odd">
+<td>Flight</td>
+<td>OFT and IFT</td>
+<td>any <strong>flight</strong></td>
+</tr>
+</tbody>
+</table>
+<p>MasterData only stores TRUE / FALSE, so for an unsat typed there FAIS
+takes the hooked sim to be the student’s last sim flown (an OFT if
+unknown).</p>
+<p>As soon as a line that cleans the unsat is scheduled, the unsat is
+cleared for every line after it, and the line’s Notes say
+<code>Clears Unsat Sim (OFT)</code> (or IFT, or
+<code>Clears Unsat Flight</code>). Export writes FALSE to MasterData. If
+you re-plan a day whose schedule cleaned up an unsat, the unsat comes
+back until the new schedule cleans it up again.</p>
+<p><strong>Hold:</strong> a student on hold breaks the
+<code>ON_HOLD</code> rule on every line.</p>
+<p><strong>Absences:</strong> come from MasterData’s StudentAbsences
+sheet (active rows only, IsActive TRUE) or from Add Student Absence. A
+name must match the student’s name <strong>exactly</strong> (case
+aside); a name that matches no one is reported in the console. A line
+clashes when the absence overlaps ETD − 1.5 hr to ETD + 2.5 hr.</p>
+<h2 id="20-tie-breaks-and-the-order-lines-are-filled-in">§20 Tie-breaks
+and the order lines are filled in</h2>
+<p><strong>Order.</strong> Lines are filled in <strong>ETD
+order</strong>, across every day being filled. Each pick is marked
+complete straight away, so it counts toward later lines’ turn time,
+triple turns, crew rest and sim debt.</p>
+<p><strong>Why reservations exist.</strong> If a student is hardcoded at
+1400, filling the 1100 line first would otherwise not know about it. The
+reservation puts 1400 in the student’s timeline before anything is
+filled, so the 1100 line won’t give them a 2.5 hr turn.</p>
+<p><strong>Tie-breaks</strong>, when two (student, event) pairs score
+the same: 1. higher <strong>Priority</strong>, 2. then
+<strong>name</strong> alphabetically, 3. then the event earlier in the
+syllabus.</p>
+<p>This makes runs repeatable: the same board and the same data always
+give the same fill.</p>
+<p><strong>Formation callsign counter</strong> resets at the start of
+each day.</p>
+<hr />
+<h1 id="part-d-how-the-code-works">Part D: How the code works</h1>
+<h2 id="21-architecture-at-a-glance">§21 Architecture at a glance</h2>
+<p>FAIS is plain PowerShell modules plus WPF XAML files. No compiled
+code, no database.</p>
+<pre><code>             ┌──────────────────────────────────────────────────────────┐
+             │ FAIS.ps1 (entry point, settings, run order)              │
+             └──────────────────────────────────────────────────────────┘
+                 │ imports, in order
+                 ▼
+ DataManipulation ─► ExcelFiles ─► Syllabus ─► DataDownload ─► SchedulingEngine
+   (helpers)          (Excel COM)   (syllabus,   (read Excel)    (hard rules,
+                                     strings,                      soft rules,
+                                     sim debt)                     fill)
+                 ─► DataUpload ─► SyllabusImport ─► PreRunMenu ─► BoardModel
+                    (write Excel)  (Update Syllabi) (WinForms     (board data,
+                                                     pop-ups)      no UI)
+                 ─► Assessment ─► PuckBoard (+ .xaml files)
+                    (&quot;what if&quot;     (the WPF window)
+                     for the board)</code></pre>
+<p><strong>Layers:</strong></p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Layer</th>
+<th>Modules</th>
+<th>Knows about</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Helpers</td>
+<td>DataManipulation, ExcelFiles</td>
+<td>Values, names, dates, Excel files</td>
+</tr>
+<tr class="even">
+<td>Domain</td>
+<td>Syllabus, SchedulingEngine</td>
+<td>Students, events, rules, scores. No UI, no files.</td>
+</tr>
+<tr class="odd">
+<td>Data in / out</td>
+<td>DataDownload, DataUpload, SyllabusImport</td>
+<td>Excel sheets ↔︎ objects</td>
+</tr>
+<tr class="even">
+<td>Board model</td>
+<td>BoardModel, Assessment</td>
+<td>Days, lines, pins, undo, autosave. No WPF, so it’s testable.</td>
+</tr>
+<tr class="odd">
+<td>UI</td>
+<td>PreRunMenu (WinForms), PuckBoard (WPF)</td>
+<td>Windows, buttons, drag and drop</td>
+</tr>
+</tbody>
+</table>
+<p>The engine never touches Excel and the board never makes scheduling
+decisions itself: the board turns its lines into <strong>schedule
+rows</strong>, hands them to the engine, and turns the result back into
+lines.</p>
+<h2 id="22-module-by-module">§22 Module by module</h2>
+<h3 id="faisps1-entry-point"><code>FAIS.ps1</code> (entry point)</h3>
+<ol type="1">
+<li>Checks FullLanguage mode and STA (restarts itself with
+<code>-STA</code> if needed).</li>
+<li>Settings: paths, <code>$BoardSettings</code>,
+<code>$OutputSettings</code> (§30).</li>
+<li>Imports ImportExcel, then the modules <strong>in order</strong>
+(later ones call earlier ones).</li>
+<li>Saves open workbooks in Excel, then <code>IngestData</code>. Stops
+if OutputSchedule can’t be opened (carrying on would start every student
+from a blank syllabus) or SoftWeights can’t be read.</li>
+<li><code>DownloadPrevSchedule</code> and
+<code>Invoke-PreRunMenu</code>.</li>
+<li><code>Show-PuckBoard</code>. If the board returns anything but
+Export, stops (“nothing was written”).</li>
+<li><code>Export-FaisOutput</code>, then
+<code>Show-FaisExportResult</code>.</li>
+</ol>
+<h3
+id="datamanipulationpsm1-shared-helpers"><code>DataManipulation.psm1</code>
+(shared helpers)</h3>
+<ul>
+<li><code>ConvertTo-FaisBool</code>: Excel gives <code>TRUE</code>,
+<code>"FALSE"</code>, 1, blanks… and <code>"FALSE"</code> as text is
+<em>true</em> in PowerShell. Every flag goes through here.</li>
+<li><code>Get-NameText</code>, <code>Get-BaseName</code>: a name whether
+the field holds an object, a string or nothing; the base name without
+<code>[rank]</code>.</li>
+<li><code>Parse-ETD</code>, <code>ConvertTo-FaisTimeValue</code>: dates,
+times, Excel serial numbers, <code>0730</code>,
+<code>7:30 PM</code>…</li>
+<li><code>Resolve-SortieInstructor</code>,
+<code>Get-MatchedInstructor</code>: a line’s IP as an instructor object
+(placeholder <code>NEED IP</code> when blank).</li>
+<li><code>Resolve-StudentByName</code>: exact name, then a last name
+only one student has.</li>
+<li><code>Test-IsSimSortieType</code>,
+<code>Test-IsReturnSortieType</code>, <code>Test-IsOBSortieType</code>,
+<code>Test-IsWingCapableType</code>,
+<code>ConvertTo-CanonicalSortieType</code>: what a line type is.</li>
+<li><code>Test-IsSentinelStudent</code>: <code>For Sale</code>,
+<code>NEED SP</code>, <code>Need Form SP</code>, <code>NEED IP</code>,
+<code>SIM IP</code> aren’t real students.</li>
+<li><code>Copy-StudentForEval</code>, <code>Copy-StudentList</code>:
+deep-enough copies so “what if” never changes the real students.</li>
+</ul>
+<h3
+id="excelfilespsm1-keeping-excel-out-of-the-way"><code>ExcelFiles.psm1</code>
+(keeping Excel out of the way)</h3>
+<p>Talks to a running Excel through COM (Windows only; does nothing
+elsewhere). <code>Close-FaisExcelFiles -SaveOnly</code> saves a workbook
+before reading; <code>Request-FaisFileWritable</code> saves and closes
+before writing (and shows the “file is open” box only if Excel can’t be
+reached); <code>Open-FaisWorkbooks</code> reopens afterwards.</p>
+<h3 id="syllabuspsm1-the-students-syllabus"><code>Syllabus.psm1</code>
+(the student’s syllabus)</h3>
+<ul>
+<li><strong>Lookups:</strong> <code>Test-MissionComplete</code>,
+<code>Find-SyllabusMission</code>, <code>Get-SyllabusSortKey</code>,
+<code>Get-MissionKind</code> (Sim for OFT/IFT types).</li>
+<li><strong>Eligibility:</strong> <code>Get-OptedEvents</code>
+(incomplete with prereqs met), <code>Get-AllowedEventTypes</code> (by
+line type), <code>Get-ValidOptedEvents</code> (both, minus reserved,
+plus the O&amp;B look-ahead).</li>
+<li><strong>Completing:</strong> <code>Complete-StudentMission</code> is
+<em>the one place</em> an event is marked complete: sets IsComplete, IP,
+ETD; moves SimDebt once; moves DiscontinuityScore by what the ride
+changed; clears an unsat the line cleans up.
+<code>Undo-StudentMission</code> reverses exactly that.
+<code>Reset-PlannedCompletions</code> undoes events dated from the
+board’s first day on (they were plans from an earlier run, not flown
+events).</li>
+<li><strong>Reservations:</strong> <code>Add-StudentReservation</code>,
+<code>Remove-StudentReservation</code>,
+<code>Get-ReservedMissionNames</code>.</li>
+<li><strong>Timeline:</strong> <code>Get-StudentTimeline</code>:
+completed events plus reservations, oldest first. The time-based hard
+rules read this.</li>
+<li><strong>Strings:</strong> <code>Measure-String</code>,
+<code>Get-StringLength(s)</code>, <code>Get-StringCounts</code>,
+<code>Get-StringFlights</code>, <code>Get-StudentNonCounters</code>,
+<code>Get-StringOutlook</code>, <code>Get-StringPlacement</code>
+(§15).</li>
+<li><strong>Discontinuity:</strong> <code>Get-DiscontinuityScore</code>,
+<code>Add-StudentDiscontinuity</code>,
+<code>Initialize-StudentDiscontinuity</code> (§16).</li>
+<li><strong>Unsats:</strong> <code>Clear-CleanedUnsat</code>,
+<code>Restore-PlannedUnsat</code>, <code>Get-LastSimType</code>.</li>
+</ul>
+<h3 id="datadownloadpsm1-reading-excel"><code>DataDownload.psm1</code>
+(reading Excel)</h3>
+<ul>
+<li><code>IngestData</code>: Instructors, Students (first 100) with each
+student’s syllabus from their OutputSchedule tab (or MasterData’s
+Syllabus sheet if they have none), the Schedule sheet, FormCallsigns,
+SoftWeights, StudentAbsences. Returns one object.</li>
+<li><code>Open-FaisWorkbookForRead</code>: reads a workbook even while
+Excel has it open.</li>
+<li><code>Read-ScheduleSheet</code>, <code>Get-ScheduleSheetDays</code>,
+<code>Get-ScheduleDayFingerprint</code>: the Schedule sheet, headings
+found by name, blank rows skipped, a fingerprint per day so the board
+can tell when the sheet changed.</li>
+<li><code>DownloadPrevSchedule</code>: the last MasterSchedule with
+students, missions and IPs linked back to objects (for the pre-run
+pop-ups and for context rows).</li>
+</ul>
+<h3
+id="schedulingenginepsm1-the-decisions"><code>SchedulingEngine.psm1</code>
+(the decisions)</h3>
+<ul>
+<li><code>Test-HardRules</code> (§13): returns
+<code>{Passed, Violations, Notes, PassedEvents, EventResults}</code>.
+Never changes anything. <code>-Explain</code> checks every rule (for the
+board); without it, stops at the first failure (for the fill).</li>
+<li><code>SoftRules</code> (§14): one student, one event, one line → a
+score. <code>-Detailed</code> adds the breakdown and the reason text the
+board shows.</li>
+<li><code>Get-EventScore</code>: scores on a <em>copy</em> of the line
+so the real line is never half-assigned.</li>
+<li><code>Test-CandidateBetter</code>: the tie-break (§20).</li>
+<li><code>Invoke-FillSchedule</code>: the main loop (§12, §24).</li>
+<li><code>Invoke-OpenLine</code>, <code>Invoke-PinnedLine</code>,
+<code>Select-PinnedMission</code>, <code>Process-HardcodedSortie</code>:
+one line each way.</li>
+<li><code>Pair-FormationWingman</code> (§17),
+<code>Schedule-ReturnLeg</code> (§18).</li>
+<li><code>Trace-SchedulingDecision</code>: the <code>-Trace</code>
+output.</li>
+</ul>
+<h3 id="datauploadpsm1-writing-excel"><code>DataUpload.psm1</code>
+(writing Excel)</h3>
+<ul>
+<li><code>ConvertTo-ExportRows</code>: rows as plain text.</li>
+<li><code>Read-MasterScheduleRows</code>,
+<code>Merge-MasterScheduleRows</code>: one day at a time; other days
+kept.</li>
+<li><code>Export-FormattedMasterSchedule</code>,
+<code>Apply-GroupBorders</code>,
+<code>Set-MasterScheduleFirst</code>.</li>
+<li><code>Export-StudentSyllabusTabs</code>,
+<code>Update-SyllabusTabCells</code>: in-place cell updates.</li>
+<li><code>Update-MasterDataStudents</code>,
+<code>Get-UnsatFlagUpdates</code>,
+<code>Update-StringTracker</code>.</li>
+<li><code>Add-MasterDataAbsences</code>,
+<code>Get-PendingStudentAbsences</code>,
+<code>Save-StudentAbsences</code>.</li>
+<li><code>Export-AtisWorkbook</code>,
+<code>Export-DailyScheduleSheets</code> (optional Teams copy).</li>
+<li><code>Invoke-WithFileBackup</code>: copies every target file to
+Temp, runs the writes, and copies them all back if anything throws. This
+is what makes Export <strong>all or nothing</strong>.</li>
+<li><code>Export-FaisOutput</code>: ties it together (§26).</li>
+</ul>
+<h3
+id="syllabusimportpsm1-update-syllabi"><code>SyllabusImport.psm1</code>
+(Update Syllabi)</h3>
+<p>Reads the training file, detects its kind from headings
+(<code>Find-DailyScheduleHeadings</code>,
+<code>Find-BigBoardHeadings</code>), matches names
+(<code>ConvertTo-PersonName</code>, <code>Get-PersonNameMatch</code>,
+<code>New-PersonIndex</code>, <code>Find-PersonMatch</code>), builds a
+plan (<code>Get-SyllabusUpdatePlan</code>), shows it
+(<code>Format-SyllabusUpdateSummary</code>) and saves it
+(<code>Save-SyllabusUpdate</code>) (§10).</p>
+<h3 id="prerunmenupsm1-pop-ups"><code>PreRunMenu.psm1</code>
+(pop-ups)</h3>
+<p>WinForms menus: <code>Show-PreRunMenu</code>,
+<code>Show-EventSelectionMenu</code>, <code>Show-HoldStatusMenu</code>,
+then <code>Process-HookedEvents</code>,
+<code>Process-IncompleteEvents</code>,
+<code>Update-StudentHoldStatus</code>, <code>Save-PreRunChanges</code>.
+<code>Invoke-PreRunMenu</code> loops until Open Puck Board or Exit
+(§5).</p>
+<h3
+id="boardmodelpsm1-the-boards-data-no-ui"><code>BoardModel.psm1</code>
+(the board’s data, no UI)</h3>
+<ul>
+<li><strong>Board and lines:</strong> <code>New-Board</code>,
+<code>New-BoardLine</code>, <code>Get-BoardDayLines</code>. A board is
+<code>{Days, Lines, Version, Undo, Settings, SheetSync}</code>.</li>
+<li><strong>Undo:</strong> each edit saves a JSON snapshot first
+(<code>Save-BoardUndoPoint</code>, up to 50). <code>Version</code>
+always goes up, so cached checks are never reused after a change.</li>
+<li><strong>Edits:</strong> add/remove days and lines, ETD, type, IP,
+pin, move, mission, formation pair. O&amp;B rules (return follows) live
+here.</li>
+<li><strong>Typing:</strong> <code>ConvertTo-BoardTime</code>,
+<code>ConvertTo-BoardSortieType</code>,
+<code>ConvertFrom-QuickEntry</code>,
+<code>New-BulkBoardLines</code>.</li>
+<li><strong>Absences:</strong> <code>ConvertTo-ClockTime</code>,
+<code>Resolve-PastedStudents</code>, <code>New-StudentAbsences</code>,
+<code>Add-StudentAbsences</code>.</li>
+<li><strong>Engine hand-off:</strong>
+<code>ConvertTo-ScheduleRows</code> (lines → engine rows),
+<code>ConvertFrom-ScheduleRows</code> (rows → lines),
+<code>Set-BoardFill</code> / <code>Clear-BoardFill</code>,
+<code>Test-BoardReadyToFill</code>.</li>
+<li><strong>One day at a time:</strong> reading sheet days, banner
+logic, <code>Get-PublishedContextRows</code> (exported days as fixed
+context), <code>Split-FillResult</code> (separate the filled days from
+the context).</li>
+<li><strong>Files:</strong> <code>Save-BoardState</code> /
+<code>Open-BoardState</code> (one JSON per day in <code>Boards\</code>,
+written to a temp file then renamed so a crash never leaves half a
+file), templates, <code>Copy-BoardPreviousDay</code>,
+<code>Get-NextFlyingDay</code> (next Monday–Friday).</li>
+</ul>
+<h3
+id="assessmentpsm1-what-if-for-the-board"><code>Assessment.psm1</code>
+(“what if” for the board)</h3>
+<p><code>Get-PlacementAssessment</code> runs the <strong>real</strong>
+hard and soft rules for one student on one board line, against the
+board’s other pins, on copies of the students. Status is
+<code>Clean</code>, <code>Warn</code>, <code>Hard</code> or
+<code>Error</code> (that’s the corner marker color). Results are cached
+per board version. Also the mission dropdown texts
+(<code>Get-MissionChoiceTexts</code>, <code>Get-MissionAdvice</code>)
+and puck tooltips (<code>Get-StudentPuckInfo</code>,
+<code>Get-InstructorPuckInfo</code>).</p>
+<h3
+id="puckboardpsm1--xaml-files-the-window"><code>PuckBoard.psm1</code> +
+XAML files (the window)</h3>
+<p>§25.</p>
+<h3 id="oldfunctionspsm1"><code>OldFunctions.psm1</code></h3>
+<p>Legacy code kept for reference. <strong>Not loaded.</strong></p>
+<h2 id="23-the-data-objects">§23 The data objects</h2>
+<p>These are the shapes passed between modules. Knowing them makes the
+code much easier to read.</p>
+<p><strong>Student</strong> (built by <code>IngestData</code>):</p>
+<pre><code>Name, ID, IsCap, IsInternational, Priority
+OnHold, UnsatSim, UnsatSimType (&#39;OFT&#39;/&#39;IFT&#39;), UnsatFlight
+  (+ ...InMasterData copies: what MasterData holds, so Export only writes changes)
+SimDebt, DiscontinuityScore
+Syllabus      = [ syllabus entries ]
+Absences      = [ {Student, StartTime, EndTime, Reason} ]
+Reservations  = [ {LineId, Start, SortieType, Mission, Instructor, IsSim} ]
+SyllabusRevision (goes up on every change, for caching)</code></pre>
+<p><strong>Syllabus entry:</strong></p>
+<pre><code>SyllabusID, Mission (&#39;FT5003&#39;), Prereqs (&#39;FT5002&#39; or &#39;FE4001, FT5005&#39; or 0),
+Type (&#39;Single&#39;,&#39;SingleSolo&#39;,&#39;Formation&#39;,&#39;FormSolo&#39;,&#39;Both&#39;,&#39;OFT&#39;,&#39;IFT&#39;),
+IsCheck, IsComplete, Instructor, ETD (&#39;yyyy-MM-dd HH:mm:ss&#39;), NumOpting, Level</code></pre>
+<p><strong>Instructor:</strong></p>
+<pre><code>Name (&#39;Lee, Pat A. [Capt]&#39;), IsCounter (blank = TRUE), IsExperienced, IsCheck,
+Callsign, Num, OSC, OSNum</code></pre>
+<p><strong>Schedule row</strong> (what the engine works on;
+<code>ConvertTo-ScheduleRows</code> makes these from board lines):</p>
+<pre><code>ETD, Instructor (name, then an instructor object), SortieType,
+Student (name, then a student object), Mission (name, then a syllabus entry),
+Callsign, Num, Notes,
+BoardLineId, LinkedLineId (O&amp;B → its return), WingOfLineId (wing → its lead),
+FilledBy: Pin | Engine | Wing | Return | DS | ForSale | NeedSP</code></pre>
+<p><strong>Board line</strong> (what the board stores and
+autosaves):</p>
+<pre><code>Id, Day (&#39;yyyy-MM-dd&#39;), ETD, SortieType, Instructor, Student, Mission,
+Callsign, Num, Notes, LinkedLineId, WingOfLineId,
+Source: Manual | Sheet | Exported | Copied | Template ...
+Filled: &#39;&#39; (typed/dropped) | Engine | Wing | ForSale | DS   (what the last fill did)</code></pre>
+<p><strong>Hard rule result</strong> (<code>Test-HardRules</code>):</p>
+<pre><code>Passed       (no student-level block AND at least one event passed)
+Violations   [ {Rule, Severity &#39;Hard&#39;|&#39;Advisory&#39;, Message, Mission, Blocks} ]
+Notes        [ warnings ]
+PassedEvents [ syllabus entries ]
+EventResults [ {Event, Mission, Passed, Violations, Notes} ]</code></pre>
+<p><strong>Soft rule result</strong>
+(<code>SoftRules -Detailed</code>):</p>
+<pre><code>Score, Breakdown (label → points), Reasons (label → text), Notes, Student, Mission, ETD</code></pre>
+<p><strong>Fill result</strong> (<code>Invoke-FillSchedule</code>, then
+<code>Split-FillResult</code>):</p>
+<pre><code>Schedule (the filled days&#39; rows), Context (exported days that rode along),
+Students (the copies, with picks marked complete), Overrides, ContextOverrides,
+Stats {Lines, Pinned, Filled, Wing, Return, DS, ForSale, NeedSP, Overrides}, Log, Days</code></pre>
+<h2 id="24-life-of-a-run-through-the-code">§24 Life of a run, through
+the code</h2>
+<p>The same run as §4, but following the function calls.</p>
+<pre><code>FAIS.ps1
+ ├─ Close-FaisExcelFiles -SaveOnly            save open workbooks so edits are read
+ ├─ IngestData                                → Instructors, Students (+ syllabi), ScheduleSheet,
+ │    └─ Initialize-StudentDiscontinuity        Formations, SoftWeights, absences attached
+ ├─ DownloadPrevSchedule                      → the last MasterSchedule, linked to objects
+ ├─ Invoke-PreRunMenu                         loop: Hook / Incomplete / Hold / Absence
+ │    ├─ Process-HookedEvents → Save-PreRunChanges        (UnsatSim / UnsatFlight)
+ │    ├─ Process-IncompleteEvents → Undo-StudentMission → Save-PreRunChanges
+ │    └─ Update-StudentHoldStatus → Save-PreRunChanges
+ ├─ Show-PuckBoard
+ │    ├─ Open-BoardState (Boards\*.json)       your autosaved lines
+ │    ├─ Reset-PlannedCompletions              events planned from the first day on → not complete
+ │    ├─ load Schedule sheet days, start timers (assess, autosave, sheet watch)
+ │    ├─ ... you edit: every change → Request-PBCommand → BoardModel edit → Save-BoardUndoPoint
+ │    ├─ Fill → Invoke-PBFill
+ │    │    ├─ Test-BoardReadyToFill            &quot;Fill anyway?&quot;
+ │    │    ├─ Invoke-PBScheduler
+ │    │    │    ├─ ConvertTo-ScheduleRows       board lines → engine rows
+ │    │    │    ├─ Get-PublishedContextRows     other exported days as fixed rows
+ │    │    │    ├─ Copy-StudentList             work on copies
+ │    │    │    ├─ Invoke-FillSchedule          ← §12
+ │    │    │    └─ Split-FillResult
+ │    │    └─ Set-BoardFill                     picks → board lines (Filled = Engine/Wing)
+ │    └─ Export → Invoke-PBExport
+ │         └─ Invoke-PBScheduler -NoAutoFill    same pass, but open lines → NEED SP
+ ├─ Get-UnsatFlagUpdates, Get-PendingStudentAbsences
+ ├─ Export-FaisOutput                          ← §26
+ └─ Show-FaisExportResult</code></pre>
+<p><strong>Inside <code>Invoke-FillSchedule</code>:</strong></p>
+<pre><code>prep every row (ids, IP objects, callsigns, clear placeholders)
+sort by ETD
+for every pinned row: Add-StudentReservation (and for its O&amp;B return)
+for every row in order:
+    new day → FormIndex = 0
+    already filled (e.g. a return leg or wingman done earlier) → skip
+    pinned   → Invoke-PinnedLine
+                 Remove-StudentReservation (this line&#39;s own hold)
+                 Select-PinnedMission → Test-HardRules -Explain, best-scoring passing event
+                 Process-HardcodedSortie → Complete-StudentMission,
+                                           Pair-FormationWingman (lead), Schedule-ReturnLeg (O&amp;B)
+                 hard violations → &quot;OVERRIDE: ...&quot; note + Overrides list
+    -NoAutoFill → NEED SP
+    return leg  → For Sale (its O&amp;B wasn&#39;t filled)
+    open     → Invoke-OpenLine
+                 for each student: Test-HardRules; for each passed event: Get-EventScore
+                 best by Test-CandidateBetter
+                 → Complete-StudentMission, notes, Pair-FormationWingman, Schedule-ReturnLeg
+                 nobody → For Sale
+count FilledBy into Stats</code></pre>
+<p><strong>Why Export runs the engine again with
+<code>-NoAutoFill</code>:</strong> the board stores names. Export needs
+the full picture: missions resolved, events marked complete on the
+students’ syllabi (so tabs, SimDebt, DiscontinuityScore, unsat clean-ups
+and the String Tracker are right), wingman notes, return legs, OVERRIDE
+flags. Running the same engine with “don’t pick anyone new” produces
+exactly that from the board as it stands.</p>
+<h2 id="25-the-puck-boards-internals">§25 The puck board’s
+internals</h2>
+<p><code>PuckBoard.psm1</code> (the biggest file) builds the window from
+<code>PuckBoard.xaml</code>. The design notes at the top of the file,
+expanded:</p>
+<ul>
+<li><strong>View models.</strong> Every row, puck and slot is a WPF
+<code>DataTemplate</code> bound to a plain PSCustomObject. A row is
+refreshed by replacing its view model in the day’s
+<code>ObservableCollection</code>.</li>
+<li><strong>One handler per event type.</strong> Mouse, drag, key and
+focus events are handled once at window level; the element is found by
+its <code>Tag</code> (<code>IPSlot</code>, <code>StudentSlot</code>,
+<code>EtdBox</code>, …).</li>
+<li><strong>Commands run after the event.</strong> Anything that changes
+the board goes through <code>Request-PBCommand</code>, which runs it
+after the current WPF event finishes, so rows are never rebuilt inside
+their own events.</li>
+<li><strong>Background checking.</strong> Pinned students are re-checked
+after every change by a <code>DispatcherTimer</code> (every 40 ms, a few
+at a time), keeping the corner markers current without freezing the
+window.</li>
+<li><strong>Autosave</strong> every 2 s when something changed
+(<code>Boards\yyyy-MM-dd.json</code>).</li>
+<li><strong>Sheet watch.</strong> Another timer (2 s) watches
+MasterData’s modified time. When it changes, the Schedule sheet is
+re-read; each day gets a <strong>fingerprint</strong>. A new day gets a
+tab; a day you haven’t edited since it was loaded updates by itself; a
+day you’ve edited gets the blue banner. A day you removed stays off
+until its fingerprint changes.</li>
+<li><strong>Click and place.</strong> <code>PB.Held</code> is the puck
+you’re holding; the next slot clicked gets it.</li>
+<li><strong>Line details.</strong> <code>PB.SelectedLineId</code> is the
+selected line; <code>DetailsTimer</code> (30 ms) fills the See options
+list a few students at a time.</li>
+<li><strong>Fill / Export</strong> call <code>Invoke-PBScheduler</code>
+(§24) behind a busy overlay with a progress bar.</li>
+<li><strong>Dialogs:</strong> <code>LoadDayDialog.xaml</code>,
+<code>BulkLinesDialog.xaml</code>, <code>AbsenceDialog.xaml</code>,
+<code>ExportResultDialog.xaml</code>.</li>
+</ul>
+<h2 id="26-excel-in-and-out">§26 Excel in and out</h2>
+<p><strong>Reading:</strong> ImportExcel (EPPlus underneath) reads
+sheets as rows of objects keyed by the heading row.
+<code>Open-FaisWorkbookForRead</code> opens the file with <em>read,
+allow others to write</em> sharing, so a workbook open in Excel can
+still be read (its last saved copy, which is why FAIS saves it
+first).</p>
+<p><strong>Writing (<code>Export-FaisOutput</code>):</strong></p>
+<ol type="1">
+<li>Work out the rows for the days being exported, and the SimDebt,
+DiscontinuityScore, unsat flags and pending absences to write.</li>
+<li>(Optional) save and close every open workbook
+(<code>CloseAllExcelWorkbooks</code>).</li>
+<li>For each target file, <code>Request-FaisFileWritable</code>: save
+and close it in Excel; if that’s impossible, show the “file is open” box
+(OK = retry, Cancel = give up and write nothing).</li>
+<li>Read the existing MasterSchedule and merge: drop past days (before
+today minus <code>KeepPastDays</code>), replace the exported days, keep
+the rest.</li>
+<li>Inside <code>Invoke-WithFileBackup</code> (all or nothing):
+<ul>
+<li>MasterSchedule (formatted, group borders, first tab),</li>
+<li>each student’s tab (changed cells only),</li>
+<li>MasterData Students (SimDebt, DiscontinuityScore, flags),</li>
+<li>String Tracker,</li>
+<li>pending absences,</li>
+<li>ATIS.</li>
+</ul></li>
+<li>Optional Teams copy (<code>PublishToTeams</code>).</li>
+<li>Reopen the workbooks FAIS closed (<code>ReopenExcel</code>).</li>
+</ol>
+<hr />
+<h1 id="part-e-data-reference">Part E: Data reference</h1>
+<h2 id="27-masterdataxlsx-sheet-by-sheet">§27 MasterData.xlsx, sheet by
+sheet</h2>
+<p><strong>Don’t rename columns.</strong> FAIS finds most columns by
+their heading.</p>
+<h3 id="students">Students</h3>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Column</th>
+<th>Used for</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>SPKey</code></td>
+<td>Id</td>
+</tr>
+<tr class="even">
+<td><code>SPName</code></td>
+<td>The student’s name. Must match their tab name in OutputSchedule and
+their name on StudentAbsences. (Only the first 100 named rows are
+used.)</td>
+</tr>
+<tr class="odd">
+<td><code>IsCAP</code></td>
+<td>CAP rules (§13) and bonus (§14)</td>
+</tr>
+<tr class="even">
+<td><code>IsInternational</code></td>
+<td>Needs an experienced IP</td>
+</tr>
+<tr class="odd">
+<td><code>Priority</code></td>
+<td>Added to every score; first tie-break</td>
+</tr>
+<tr class="even">
+<td><code>UnsatSim</code>, <code>UnsatFlight</code></td>
+<td>§19</td>
+</tr>
+<tr class="odd">
+<td><code>OnHold</code></td>
+<td>Never scheduled</td>
+</tr>
+<tr class="even">
+<td><code>SimDebt</code></td>
+<td>§16 (column P if no heading)</td>
+</tr>
+<tr class="odd">
+<td><code>DiscontinuityScore</code></td>
+<td>§16 (added after the last heading the first time)</td>
+</tr>
+<tr class="even">
+<td><code>CAPCounter1..7</code></td>
+<td>Not read by the current code</td>
+</tr>
+</tbody>
+</table>
+<h3 id="instructors">Instructors</h3>
+<p><code>IPName</code>, <code>IsCounter</code> (blank = counter),
+<code>IsExperienced</code>, <code>IsCheck</code>, <code>Callsign</code>,
+<code>Num</code>, <code>OSC</code>, <code>OSNum</code>.</p>
+<h3 id="syllabus">Syllabus</h3>
+<p>The master syllabus a student starts from when they have no tab in
+OutputSchedule: <code>SyllabusID</code> (order), <code>Mission</code>,
+<code>Prereqs</code> (comma list, or 0), <code>OptingEvents</code>,
+<code>Type</code>, <code>IsCheck</code>, <code>Level</code> (formation
+level, used by LevelDifference), <code>Instructor</code>,
+<code>ETD</code>, <code>IsComplete</code>.</p>
+<p>Current flow: FT5001 (dollar ride) opens the FE/FI sims and FT5002;
+FT5001–FT5008, solo FT5201, FT5101–FT5105, check ride
+<strong>FT5390</strong>; formation sims FN3001/FN3002/FN4001; formation
+FF5001–FF5008, solo FF5201, FF5101–FF5106, check ride
+<strong>FF5390</strong>; then AA5001–AA5007 with AA4001–AA4003 sims,
+check ride <strong>AA5190</strong>.</p>
+<h3 id="schedule-optional">Schedule (optional)</h3>
+<p>The day’s lines. Headings found by name, in any order:
+<code>ETD</code> (or <code>Time</code>), <code>Date</code>,
+<code>Instructor</code> (or <code>IP</code>), <code>SortieType</code>
+(or <code>Type</code>), <code>Student</code> (or <code>SP</code>),
+<code>Mission</code> (or <code>Event</code>), <code>Callsign</code>,
+<code>Num</code> (or <code>#</code>), <code>Notes</code> (or
+<code>Remarks</code>). With no heading row, the old fixed order: ETD,
+Instructor, SortieType, Student, Mission, Callsign, Num, Notes. -
+<strong>ETD</strong> can be a date and time or just a time
+(<code>0730</code>, <code>7:30 AM</code>…). A time-only row takes its
+date from the <code>Date</code> column or a row above that holds only a
+date. - <strong>SortieType</strong> can be short: <code>DL</code>,
+<code>OB</code>, <code>RTN</code>, <code>OFT</code>, <code>IFT</code>. -
+Blank rows and repeated heading rows are skipped.</p>
+<h3 id="softweights">SoftWeights</h3>
+<p>One data row of weights (§14). Header names: <code>ContString</code>,
+<code>String4</code>, <code>String5</code>, <code>Zipper</code>,
+<code>NonCounter</code>, <code>BreakString</code>,
+<code>ExhaustMult</code>, <code>ExhaustDays</code>,
+<code>BITPerDay</code>, <code>BITDays</code>, <code>CAPBonus</code>,
+<code>FormLookAhead</code>, <code>LevelDifference</code>,
+<code>CounterContinuity</code>, <code>OFTIFTPen</code>,
+<code>DollarRideBonus</code>, <code>TransSimRatio</code>,
+<code>FormSimRatio</code>, <code>SimStopMult</code>, optional
+<code>NewCounter</code>, <code>Disc1String</code>,
+<code>DiscCounter</code>, <code>Disc3PlusString</code>.</p>
+<h3 id="formcallsigns">FormCallsigns</h3>
+<p><code>Callsign</code>, <code>Num</code>, in lead/wing pairs
+(<code>HAZE 11</code>, <code>HAZE 12</code>, …).</p>
+<h3 id="studentabsences">StudentAbsences</h3>
+<p><code>Student</code>, <code>StartTime</code>, <code>EndTime</code>,
+<code>Reason</code>, <code>IsActive</code>. Only active rows with both
+times are used.</p>
+<h3 id="string-tracker-written-by-fais">String Tracker (written by
+FAIS)</h3>
+<p><code>StudentName</code>, <code>5+ Strings</code>,
+<code>4-Strings</code>, <code>3-Strings</code>, <code>2-Strings</code>,
+<code>1-Strings</code>, <code>TotalUniqueCounters</code>.</p>
+<h3 id="other-sheets">Other sheets</h3>
+<p><code>Instructions</code>, <code>Formation Sorties</code>,
+<code>All Students</code>, <code>Full Syllabus</code>,
+<code>Schedule People to Checkrides</code> are kept for people; the code
+doesn’t read them.</p>
+<h2 id="28-outputschedulexlsx-and-atisxlsx">§28 OutputSchedule.xlsx and
+ATIS.xlsx</h2>
+<p><strong>OutputSchedule.xlsx</strong> (FAIS folder): -
+<strong>MasterSchedule</strong> (first tab): every exported day from
+today on. Columns ETD, Instructor, SortieType, Student, Mission,
+Callsign, Num, Notes. Only this sheet is rewritten, and only the
+exported days in it change. - <strong>One tab per student</strong>
+(named exactly as <code>SPName</code>): their syllabus with Instructor,
+ETD and IsComplete for what they’ve done (and what’s been scheduled).
+This is where each run <strong>starts</strong> from. FAIS writes only
+the changed cells, so your own columns and formatting are safe.</p>
+<p><strong>ATIS.xlsx</strong> (Desktop): one tab per exported day,
+flights in ETD order, a thick border, then sims. Rebuilt for the
+exported days; other tabs kept.</p>
+<h2 id="29-what-is-read-and-written-and-when">§29 What is read and
+written, and when</h2>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>When</th>
+<th>Reads</th>
+<th>Writes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Start</td>
+<td>MasterData: Schedule, Instructors, Students, SoftWeights,
+FormCallsigns, StudentAbsences, (Syllabus). OutputSchedule: each
+student’s tab, MasterSchedule.</td>
+<td>Nothing</td>
+</tr>
+<tr class="even">
+<td>Log Hooked Event</td>
+<td></td>
+<td>MasterData: UnsatSim / UnsatFlight = TRUE</td>
+</tr>
+<tr class="odd">
+<td>Log Incomplete Event</td>
+<td></td>
+<td>MasterData: SimDebt, DiscontinuityScore. OutputSchedule: that
+event’s cells</td>
+</tr>
+<tr class="even">
+<td>Change HOLD status</td>
+<td></td>
+<td>MasterData: OnHold</td>
+</tr>
+<tr class="odd">
+<td>Puck board</td>
+<td>Schedule sheet again whenever MasterData is saved</td>
+<td><code>Boards\*.json</code> (autosave), <code>Templates\</code> when
+you save one</td>
+</tr>
+<tr class="even">
+<td>Update Syllabi</td>
+<td>The training file</td>
+<td>OutputSchedule: changed cells. MasterData: SimDebt,
+DiscontinuityScore</td>
+</tr>
+<tr class="odd">
+<td>Add Student Absence</td>
+<td></td>
+<td>MasterData: StudentAbsences</td>
+</tr>
+<tr class="even">
+<td>Export</td>
+<td></td>
+<td>OutputSchedule: MasterSchedule, student tabs. MasterData: SimDebt,
+DiscontinuityScore, unsat resets, String Tracker, unsaved absences.
+ATIS</td>
+</tr>
+</tbody>
+</table>
+<h2 id="30-settings">§30 Settings</h2>
+<p>In <code>FAIS.ps1</code>:</p>
+<p><strong><code>$BoardSettings</code></strong></p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Setting</th>
+<th>Default</th>
+<th>What</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>OBReturnOffsetMinutes</code></td>
+<td>180</td>
+<td>Typing <code>1015 O&amp;B</code> adds the return this many minutes
+later</td>
+</tr>
+<tr class="even">
+<td><code>ReturnSortieType</code></td>
+<td><code>O&amp;B Return</code></td>
+<td>Line type written on return lines</td>
+</tr>
+<tr class="odd">
+<td><code>SimInstructor</code></td>
+<td><code>SIM IP</code></td>
+<td>IP shown on OFT / IFT lines with no IP</td>
+</tr>
+<tr class="even">
+<td><code>BoardDir</code></td>
+<td><code>Boards</code></td>
+<td>Autosave folder</td>
+</tr>
+<tr class="odd">
+<td><code>TemplateDir</code></td>
+<td><code>Templates</code></td>
+<td>Templates folder</td>
+</tr>
+<tr class="even">
+<td><code>Trace</code></td>
+<td><code>-Trace</code> switch</td>
+<td>Print every decision</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>$OutputSettings</code></strong></p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Setting</th>
+<th>Default</th>
+<th>What</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>WriteAtis</code></td>
+<td><code>$true</code></td>
+<td>Write ATIS.xlsx</td>
+</tr>
+<tr class="even">
+<td><code>KeepPastDays</code></td>
+<td>0</td>
+<td>Exported days before today MasterSchedule keeps</td>
+</tr>
+<tr class="odd">
+<td><code>SaveAndCloseExcel</code></td>
+<td><code>$true</code></td>
+<td>Save and close a workbook before writing it</td>
+</tr>
+<tr class="even">
+<td><code>ReopenExcel</code></td>
+<td><code>$true</code></td>
+<td>Reopen those workbooks afterwards</td>
+</tr>
+<tr class="odd">
+<td><code>CloseAllExcelWorkbooks</code></td>
+<td><code>$false</code></td>
+<td>Save and close <em>every</em> open workbook first</td>
+</tr>
+<tr class="even">
+<td><code>PublishToTeams</code></td>
+<td><code>$false</code></td>
+<td>Also write daily sheets to a Teams/OneDrive workbook</td>
+</tr>
+<tr class="odd">
+<td><code>TeamsFolder</code>, <code>TeamsFileName</code></td>
+<td></td>
+<td>Where</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rules that are fixed in code</strong> (change them in
+<code>SchedulingEngine.psm1</code>, see §38): turn time 3.25 / 3.5 hr,
+duty day 9 hr, crew rest 15 hr, absence window −1.5 / +2.5 hr, Checkride
+Priority +50, counter limits 6 / 3.</p>
+<hr />
+<h1 id="part-f-the-same-thing-explained-again">Part F: The same thing,
+explained again</h1>
+<h2 id="31-life-of-a-student">§31 Life of a student</h2>
+<p>Follow one student, <strong>Smith</strong>, through a run.</p>
+<ol type="1">
+<li><strong>Start.</strong> FAIS reads Smith’s row on Students
+(<code>SimDebt 6</code>, <code>Priority 1</code>,
+<code>DiscontinuityScore 3</code>) and Smith’s tab in OutputSchedule:
+FT5001 complete with Diaz, FT5002 and FT5003 with Lee.</li>
+<li><strong>Reset.</strong> Anything on Smith’s tab dated from the
+board’s first day on was a <em>plan</em> from an earlier run. It’s made
+not complete again (and its sim debt and discontinuity backed out)
+because this run will plan those days again.</li>
+<li><strong>Pre-run.</strong> Nothing logged for Smith.</li>
+<li><strong>Opted events.</strong> FT5004 (prereq FT5003 done) and the
+sims whose prereqs are met.</li>
+<li><strong>Board.</strong> Smith’s puck shows no badges. Hover: next
+events, sim debt 6, discontinuity 3, priority 1.</li>
+<li><strong>Fill, 0800 Day Local with Lee.</strong> Hard rules: not on
+hold, no absence, no other events, crew rest fine, FT5004 fits a Day
+Local. Pass. Score: Continue String (3-string with Lee) +25,
+Discontinuity +3, Counter Continuity +5, Sim Debt (flight) −6,
+Exhaustion −0.75, Priority +1 = <strong>27.25</strong>. Highest on the
+line → Smith gets it.</li>
+<li><strong>Marked complete.</strong> FT5004 is now complete on Smith’s
+(copied) syllabus with Lee at 0800. SimDebt 6 → 9. DiscontinuityScore
+moves by whatever the new 3-string changed (one more 3+ string: −1 →
+2).</li>
+<li><strong>Later lines.</strong> At 1000 Smith fails turn time (2 hr
+after 0800). At 1200 Smith could pass, but FT5004 is now done, so FT5005
+is Smith’s next flight; with SimDebt 9 a flight costs Smith 9 points and
+a sim on a sim line earns 9, so Smith is pulled toward the OFT / IFT
+lines.</li>
+<li><strong>Export.</strong> Smith’s tab gets FT5004’s Instructor, ETD
+and IsComplete. MasterData gets SimDebt 9 and DiscontinuityScore 2. The
+String Tracker row for Smith is updated.</li>
+<li><strong>Tomorrow.</strong> The next run starts from that tab.</li>
+</ol>
+<h2 id="32-life-of-a-line">§32 Life of a line</h2>
+<p>Follow one line, <strong>0800 Day Local, IP Lee</strong>.</p>
+<ol type="1">
+<li><strong>Created</strong> by the Schedule sheet (or typed
+<code>0800 DL Lee</code>). Board line:
+<code>{ETD 0800, SortieType Day Local, Instructor 'Lee, Pat [Capt]', Student '', Filled ''}</code>.</li>
+<li><strong>On the board</strong> it shows a Day Local stripe, Lee in
+the IP slot, an open student slot.</li>
+<li><strong>Fill pressed.</strong> <code>ConvertTo-ScheduleRows</code>
+turns it into an engine row with <code>BoardLineId</code>. Lee is looked
+up: counter, experienced, not a check IP, callsign
+<code>TWEET 04</code>.</li>
+<li><strong>Its turn</strong> in ETD order. Every student is tested.
+Jones has an unsat sim → <code>UNSAT_SIM</code>, out. Diaz is on hold →
+out. Smith and Brown pass.</li>
+<li><strong>Scoring.</strong> Smith 27.25 (FT5004), Brown 12.5 (FT5004).
+Smith wins (§33 shows the arithmetic).</li>
+<li><strong>Filled.</strong>
+<code>Student Smith, Mission FT5004, FilledBy Engine</code>, note added
+if any. Not a formation, not an O&amp;B, so nothing more.</li>
+<li><strong>Back on the board</strong> (<code>Set-BoardFill</code>):
+blue italics, <code>AUTO</code>, <code>Filled = Engine</code>.</li>
+<li><strong>You review</strong> it: click it, Line details shows Smith’s
++ / − list. See options shows Brown second.</li>
+<li><strong>You might move Brown here.</strong> Then the line is a plain
+pin (Filled cleared); the marker shows Brown’s check.</li>
+<li><strong>Export.</strong> The engine runs once more with
+<code>-NoAutoFill</code>. The line is pinned, so
+<code>Invoke-PinnedLine</code> re-checks and records it. It’s written to
+MasterSchedule and ATIS:
+<code>0800 | Lee, Pat [Capt] | Day Local | Smith | FT5004 | TWEET | 04 | ...</code>.</li>
+</ol>
+<h2 id="33-worked-scoring-example">§33 Worked scoring example</h2>
+<p>Two students can both fly <strong>FT5004</strong> on <strong>0800 Day
+Local with Lee</strong> (a counter). Weights from the current
+SoftWeights row.</p>
+<p><strong>Smith:</strong> FT rides so far: FT5001 Diaz, FT5002 Lee,
+FT5003 Lee. SimDebt 6. DiscontinuityScore 3 (one 1-string with Diaz, two
+counters). Last flew yesterday (FT5003); 1 flight and 1 sim in the last
+5 days. Priority 1.</p>
+<p><strong>Brown:</strong> FT rides: FT5001 Diaz, FT5002 Ortiz, FT5003
+Ortiz. SimDebt −3 (ahead on sims). Last flew 3 days ago (FT5003), and
+that is the only event in the last 5 days. Priority 1. Lee has never
+flown Brown.</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Rule</th>
+<th>Smith</th>
+<th>Brown</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>String</td>
+<td>Diaz, Lee, Lee + <strong>Lee</strong> = 3-string with Lee →
+<strong>Continue String +25</strong></td>
+<td>Diaz, Ortiz, Ortiz + <strong>Lee</strong> = zipper ride (Ortiz’s
+2-string waits on the next ride) → <strong>Zipper −3</strong></td>
+</tr>
+<tr class="even">
+<td>Discontinuity (string)</td>
+<td><strong>+3</strong> (only with Continue String)</td>
+<td>—</td>
+</tr>
+<tr class="odd">
+<td>Counter</td>
+<td>Lee already counts → <strong>Counter Continuity +5</strong></td>
+<td>Lee is new → New Counter 0 (not shown)</td>
+</tr>
+<tr class="even">
+<td>Sim Debt (flight)</td>
+<td>−SimDebt = <strong>−6</strong></td>
+<td>−(−3) = <strong>+3</strong></td>
+</tr>
+<tr class="odd">
+<td>Exhaustion</td>
+<td>(2×1 + 1) × −0.25 = <strong>−0.75</strong></td>
+<td>(2×1) × −0.25 = <strong>−0.5</strong></td>
+</tr>
+<tr class="even">
+<td>BIT Tracker</td>
+<td>flew yesterday → 0 days off → none</td>
+<td>3 days − 1 = 2 days × 6 = <strong>+12</strong></td>
+</tr>
+<tr class="odd">
+<td>Student Priority</td>
+<td><strong>+1</strong></td>
+<td><strong>+1</strong></td>
+</tr>
+<tr class="even">
+<td><strong>Total</strong></td>
+<td><strong>27.25</strong></td>
+<td><strong>12.5</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Smith gets the line: keeping Smith’s string with Lee is worth more
+than Brown’s days off. If Brown had been off 5 days, the BIT points (4 ×
+6 = 24) would have pushed Brown to 24.5 and made it close. If Lee had
+flown Brown once before, Brown would also have had Counter Continuity
++5.</p>
+<p>After Smith flies it, Smith’s DiscontinuityScore moves from 3 to 2:
+the Lee rides are now a 3-string (−1), while the Diaz 1-string (+1) and
+the two counters (+2) stay.</p>
+<p>On the board, Smith’s Line details would read something like:</p>
+<pre><code>✔ No hard rules broken
++ 3 String                                             +25
++ Discontinuity 3, 3 String                             +3
++ Lee already counts (2 of 6 Fundamental counters)      +5
+− Sim Debt 6, flight adds to it                         −6
+− 1 Flight and 1 Sim in last 5 Days                  −0.75
++ Student Priority                                      +1
+  Total                                              27.25</code></pre>
+<h2 id="34-scenarios-and-recipes">§34 Scenarios and recipes</h2>
+<p><strong>“A student must fly a specific event at a specific
+time.”</strong> Drag them onto the line and pick the mission in the
+dropdown (or type <code>0800 DL Lee sp:Smith m:FT5103</code>). If it
+breaks a rule, choose <strong>No</strong> to keep it; it goes out
+<code>OVERRIDE</code>.</p>
+<p><strong>“Keep a student off the schedule today.”</strong> Put them on
+hold (pre-run), or add an absence covering the whole day.</p>
+<p><strong>“The scheduler keeps picking the same student.”</strong>
+Click the line, press <strong>See options</strong>, and compare the + /
+− lists. Usually it’s a big Continue String or BIT. Lower that student’s
+<code>Priority</code>, or raise another’s.</p>
+<p><strong>“A line comes out NEED SP.”</strong> See options with
+<strong>Hide rule breaks</strong> off: the ✖ next to each student says
+the first rule they break. Common causes: everyone has 2 events already,
+crew rest, no opted event for that line type (e.g. everyone needs sims
+and it’s a Day Local).</p>
+<p><strong>“An event got cancelled after I exported.”</strong> Next run:
+<strong>Log Incomplete Event</strong> in the pre-run. Or, same run:
+<strong>Load a day… &gt; Last exported schedule</strong>, take the
+student off, Fill, Export.</p>
+<p><strong>“I updated the Schedule sheet in Excel while the board was
+open.”</strong> Save it. The board follows within a few seconds: a day
+you haven’t edited updates itself; otherwise the blue banner asks.</p>
+<p><strong>“Formation lead but no wingman.”</strong> Add a Day Local
+line within 22 minutes of the lead, or pair one yourself with
+right-click &gt; <em>Fly wing to…</em>.</p>
+<p><strong>“I want to tune the scoring.”</strong> Change values on the
+SoftWeights sheet, save, and restart FAIS. Use <code>-Trace</code> and
+See options to see the effect.</p>
+<p><strong>“Count a student’s discontinuity again from
+scratch.”</strong> Clear their <code>DiscontinuityScore</code> cell in
+MasterData. The next start recounts it and Export writes it.</p>
+<p><strong>“Plan two days at once.”</strong> <strong>Add day</strong>,
+build both, <strong>Fill all 2 days</strong>. Crew rest is checked
+across them.</p>
+<hr />
+<h1 id="part-g-help">Part G: Help</h1>
+<h2 id="35-troubleshooting">§35 Troubleshooting</h2>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Symptom</th>
+<th>Cause / fix</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><em>“Please install or copy the ImportExcel module”</em></td>
+<td>Install it (§3).</td>
+</tr>
+<tr class="even">
+<td><em>“FAIS needs PowerShell in FullLanguage mode”</em></td>
+<td>The machine runs PowerShell in Constrained Language mode (policy).
+WPF can’t run; ask your admin.</td>
+</tr>
+<tr class="odd">
+<td><em>“running scripts is disabled on this system”</em></td>
+<td>Start with <code>-ExecutionPolicy Bypass</code>. If files came from
+the internet, <code>Get-ChildItem -Recurse | Unblock-File</code>.</td>
+</tr>
+<tr class="even">
+<td><em>“OutputSchedule.xlsx could not be opened”</em> and FAIS
+stops</td>
+<td>It’s corrupt or locked by another user. Fix or close it. FAIS stops
+on purpose: carrying on would start everyone from a blank syllabus.</td>
+</tr>
+<tr class="odd">
+<td><em>“The SoftWeights sheet could not be read”</em></td>
+<td>Check the SoftWeights sheet exists with its heading row.</td>
+</tr>
+<tr class="even">
+<td><em>“File is open”</em> box at Export</td>
+<td>Excel couldn’t be reached (a cell is being edited, a dialog is open,
+or someone else has it). Finish the edit, click OK. Cancel writes
+nothing.</td>
+</tr>
+<tr class="odd">
+<td>Export failed, <em>nothing was written</em></td>
+<td>Read the reason in the result window. The board is saved; fix and
+Export again.</td>
+</tr>
+<tr class="even">
+<td>A student’s absence doesn’t apply</td>
+<td>The name on StudentAbsences doesn’t exactly match
+<code>SPName</code>. The console lists it at start.</td>
+</tr>
+<tr class="odd">
+<td><em>“No tab for X in OutputSchedule yet”</em></td>
+<td>Normal for a new student; they start from the master Syllabus and
+get a tab at Export.</td>
+</tr>
+<tr class="even">
+<td><em>“student ‘X’ not found in MasterData”</em></td>
+<td>A name on a line doesn’t match a student. Check spelling, or use the
+full name if two students share a last name.</td>
+</tr>
+<tr class="odd">
+<td>Lines from the Schedule sheet don’t appear</td>
+<td>They’re dated before the board’s first day (today or earlier). The
+banner offers <strong>Put them on <first day></strong>, or use Load a
+day…</td>
+</tr>
+<tr class="even">
+<td>A day you removed came back</td>
+<td>Its lines on the Schedule sheet changed.</td>
+</tr>
+<tr class="odd">
+<td>Board is slow</td>
+<td>Avoid pressing See options on many lines; it ranks every
+student.</td>
+</tr>
+<tr class="even">
+<td>Picks look odd</td>
+<td>Run with <code>-Trace</code>, or use See options, to see every
+candidate’s score.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="36-faq">§36 FAQ</h2>
+<p><strong>Does the scheduler ever move a student I put on?</strong>
+No. Pinned students stay, even if they break a rule (they’re flagged
+OVERRIDE).</p>
+<p><strong>Why did it put no one on a line?</strong> Nobody passed the
+hard rules. See options shows why each student failed.</p>
+<p><strong>Does Export fill open lines?</strong> No. Export writes the
+board as it stands; open lines go out NEED SP. Press Fill first if you
+want them filled.</p>
+<p><strong>Can I fill, change things, and fill again?</strong> Yes. Only
+open lines are filled; your changes stay.</p>
+<p><strong>What happens if I close the board without exporting?</strong>
+Nothing is written to OutputSchedule or MasterData. Your lines are
+autosaved and come back next time.</p>
+<p><strong>Why does FAIS make planned events “not complete” when it
+starts?</strong> A previous run marked them complete when it scheduled
+them. They’re plans, not flown events, so they’re reset from the board’s
+first day on, and re-planned. Flown events before that day stay
+complete.</p>
+<p><strong>Is the counter limit enforced?</strong> No. It’s shown in the
+score reasons only.</p>
+<p><strong>Why is a non-counter purple?</strong> Non-counters (IsCounter
+FALSE) don’t count toward strings unless they fly a student twice in a
+row.</p>
+<p><strong>Where’s the old code?</strong>
+<code>OldFunctions.psm1</code>, kept for reference, not loaded.</p>
+<p><strong>Can I run it on a Mac or Linux?</strong> The engine and tests
+can run under PowerShell 7, but the board needs WPF and Excel COM, so
+day-to-day use is Windows only.</p>
+<h2 id="37-testing">§37 Testing</h2>
+<ul>
+<li><strong>Self-test</strong> (no Pester needed, no real files
+touched):
+<code>powershell.exe -STA -ExecutionPolicy Bypass -File .\Tests\Invoke-SelfTest.ps1</code>
+Checks the engine, board model and placement checks with synthetic
+students; an Excel round trip on temp files (if ImportExcel is
+installed); and the board window driven off-screen (it may flash).
+<code>-SkipWindow</code> skips the window. Exit code 0 = all
+passed.</li>
+<li><strong>Pester 5 suites</strong> in <code>Tests\*.Tests.ps1</code>,
+one per area: <code>HardRules</code>, <code>FillSchedule</code>,
+<code>BoardModel</code>, <code>Assessment</code>,
+<code>PuckBoardLogic</code>, <code>DataIO</code> (needs ImportExcel),
+<code>DataUpload</code>, <code>ExcelFiles</code>, <code>Export</code>,
+<code>ScheduleSheet</code>, <code>SyllabusImport</code>,
+<code>OneDay</code>, <code>Static</code>. Test data comes from
+<code>Tests\Fixtures\New-FaisTestData.ps1</code>. Run with
+<code>Invoke-Pester .\Tests</code>.</li>
+</ul>
+<h2 id="38-developer-guide-changing-fais-safely">§38 Developer guide:
+changing FAIS safely</h2>
+<p><strong>Golden rules:</strong> 1. <strong>The engine decides, the
+board displays.</strong> Put rule logic in
+<code>SchedulingEngine.psm1</code> / <code>Syllabus.psm1</code>, never
+in <code>PuckBoard.psm1</code>. The board’s checks
+(<code>Assessment.psm1</code>) call the same functions, so they stay in
+step automatically. 2. <strong>Never change the real students in a “what
+if”.</strong> Use <code>Copy-StudentForEval</code> /
+<code>Copy-StudentList</code>. 3. <strong>Mark events complete only
+through <code>Complete-StudentMission</code></strong> (and take them
+back through <code>Undo-StudentMission</code>), so SimDebt,
+DiscontinuityScore and unsats move exactly once. 4. <strong>Read flags
+through <code>ConvertTo-FaisBool</code>.</strong> 5. <strong>Keep module
+order</strong> in <code>FAIS.ps1</code> (a module can only call ones
+loaded before it). 6. <strong>Write tests</strong> next to the matching
+suite and run the self-test.</p>
+<p><strong>Add a hard rule:</strong> in <code>Test-HardRules</code>, add
+a block in the right section:</p>
+<div class="sourceCode" id="cb20"><pre
+class="sourceCode powershell"><code class="sourceCode powershell"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="kw">if</span> <span class="op">(&lt;</span>condition<span class="op">&gt;)</span> <span class="op">{</span></span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>    <span class="va">$violations</span><span class="op">.</span><span class="fu">Add</span><span class="op">((</span>New<span class="op">-</span>RuleViolation <span class="st">&#39;MY_RULE&#39;</span> <span class="st">&quot;Plain reason with the numbers&quot;</span><span class="op">))</span></span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">if</span> <span class="op">(&amp;</span> <span class="va">$stop</span><span class="op">)</span> <span class="op">{</span> <span class="kw">return</span> <span class="op">(</span>New<span class="op">-</span>HardRuleResult <span class="va">$violations</span> <span class="va">$notes</span> <span class="va">$eventResults</span><span class="op">)</span> <span class="op">}</span></span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Use <code>$ev.Add(...)</code> instead inside the per-event loop for
+an event-level rule. Use <code>-Severity Advisory</code> for a warning
+that shouldn’t block. Add a case to
+<code>Tests\HardRules.Tests.ps1</code>.</p>
+<p><strong>Add a soft rule with a new weight:</strong> 1. Add the column
+to MasterData’s SoftWeights sheet. 2. Read it in <code>IngestData</code>
+(the <code>$SoftWeights</code> object in
+<code>DataDownload.psm1</code>). 3. In <code>SoftRules</code>, add
+points with <code>Get-Weight $Config 'MyWeight' &lt;default&gt;</code>,
+and set both <code>$Breakdown['My Rule']</code> and
+<code>$Reasons['My Rule']</code> (the text the board shows). 4. Add a
+test in <code>Tests\FillSchedule.Tests.ps1</code> or
+<code>Assessment.Tests.ps1</code>.</p>
+<p><strong>Change a fixed number</strong> (turn time, crew rest…):
+search <code>Test-HardRules</code> for the number
+(e.g. <code>3.25</code>, <code>15</code>), and update the README and
+this guide.</p>
+<p><strong>Add a line type:</strong> update
+<code>Get-AllowedEventTypes</code> (Syllabus), the
+<code>Test-Is...SortieType</code> helpers and
+<code>ConvertTo-CanonicalSortieType</code> (DataManipulation), and
+<code>ConvertTo-BoardSortieType</code> (BoardModel).</p>
+<p><strong>Keep the text-only copies in step</strong> if you use them:
+refresh <code>FAIS_txt_update\</code> with the changed files as
+<code>.txt</code>.</p>
+<h2 id="39-file-map">§39 File map</h2>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Path</th>
+<th>What</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>FAIS.ps1</code></td>
+<td>Entry point, settings, run order</td>
+</tr>
+<tr class="even">
+<td><code>Modules\DataManipulation.psm1</code></td>
+<td>Shared helpers</td>
+</tr>
+<tr class="odd">
+<td><code>Modules\ExcelFiles.psm1</code></td>
+<td>Save / close / reopen workbooks in Excel</td>
+</tr>
+<tr class="even">
+<td><code>Modules\Syllabus.psm1</code></td>
+<td>Syllabus, opted events, sim debt, strings, discontinuity</td>
+</tr>
+<tr class="odd">
+<td><code>Modules\DataDownload.psm1</code></td>
+<td>Reading MasterData / OutputSchedule</td>
+</tr>
+<tr class="even">
+<td><code>Modules\SchedulingEngine.psm1</code></td>
+<td>Hard rules, soft rules, the fill</td>
+</tr>
+<tr class="odd">
+<td><code>Modules\DataUpload.psm1</code></td>
+<td>Export</td>
+</tr>
+<tr class="even">
+<td><code>Modules\SyllabusImport.psm1</code></td>
+<td>Update Syllabi</td>
+</tr>
+<tr class="odd">
+<td><code>Modules\PreRunMenu.psm1</code></td>
+<td>Pre-run pop-ups</td>
+</tr>
+<tr class="even">
+<td><code>Modules\BoardModel.psm1</code></td>
+<td>Board data, undo, typing, autosave</td>
+</tr>
+<tr class="odd">
+<td><code>Modules\Assessment.psm1</code></td>
+<td>Board checks and tooltips</td>
+</tr>
+<tr class="even">
+<td><code>Modules\PuckBoard.psm1</code> +
+<code>PuckBoard.xaml</code></td>
+<td>The board window</td>
+</tr>
+<tr class="odd">
+<td><code>Modules\LoadDayDialog.xaml</code>,
+<code>BulkLinesDialog.xaml</code>, <code>AbsenceDialog.xaml</code>,
+<code>ExportResultDialog.xaml</code></td>
+<td>Dialogs</td>
+</tr>
+<tr class="even">
+<td><code>Modules\BoardLogo.png</code></td>
+<td>Title-bar logo</td>
+</tr>
+<tr class="odd">
+<td><code>MasterData.xlsx</code></td>
+<td>Input data (§27)</td>
+</tr>
+<tr class="even">
+<td><code>OutputSchedule.xlsx</code></td>
+<td>Output and each student’s progress (§28)</td>
+</tr>
+<tr class="odd">
+<td><code>Big Board.xlsx</code>,
+<code>21-Sep, 14 OG Phase 2 + sub.xlsx</code></td>
+<td>Sample training files for Update Syllabi</td>
+</tr>
+<tr class="even">
+<td><code>Boards\</code></td>
+<td>Autosaved board, one JSON per day</td>
+</tr>
+<tr class="odd">
+<td><code>Templates\</code></td>
+<td>Saved wave templates</td>
+</tr>
+<tr class="even">
+<td><code>Tests\</code></td>
+<td>Self-test and Pester suites</td>
+</tr>
+<tr class="odd">
+<td><code>OldFunctions.psm1</code></td>
+<td>Legacy, not loaded</td>
+</tr>
+<tr class="even">
+<td><code>FAIS_txt.zip</code>, <code>FAIS_catalog.txt</code>,
+<code>FAIS_txt_update\</code></td>
+<td>Text-only copies for machines that block scripts</td>
+</tr>
+<tr class="odd">
+<td><code>Docs\</code></td>
+<td>This guide</td>
+</tr>
+</tbody>
+</table>
+<h2 id="40-quick-index">§40 Quick index</h2>
+<table>
+<thead>
+<tr class="header">
+<th>Topic</th>
+<th>Where</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Absences</td>
+<td>§11, §13 (#4), §19, §27</td>
+</tr>
+<tr class="even">
+<td>BIT</td>
+<td>§14, §16</td>
+</tr>
+<tr class="odd">
+<td>CAP students</td>
+<td>§13 (#5, #6, #14), §14</td>
+</tr>
+<tr class="even">
+<td>Check rides</td>
+<td>§13 (event rules), §14 (Checkride Priority)</td>
+</tr>
+<tr class="odd">
+<td>Colors</td>
+<td>§6</td>
+</tr>
+<tr class="even">
+<td>Context rows (other exported days)</td>
+<td>§9, §24, §2</td>
+</tr>
+<tr class="odd">
+<td>Crew rest, turn time, duty day</td>
+<td>§13 (#9–#13)</td>
+</tr>
+<tr class="even">
+<td>Direct support</td>
+<td>§17</td>
+</tr>
+<tr class="odd">
+<td>Discontinuity score</td>
+<td>§16, §33</td>
+</tr>
+<tr class="even">
+<td>Export</td>
+<td>§8, §26, §29</td>
+</tr>
+<tr class="odd">
+<td>Formations / wingmen</td>
+<td>§17</td>
+</tr>
+<tr class="even">
+<td>Hard rules</td>
+<td>§13</td>
+</tr>
+<tr class="odd">
+<td>Line details / See options</td>
+<td>§8</td>
+</tr>
+<tr class="even">
+<td>O&amp;B / return legs</td>
+<td>§18</td>
+</tr>
+<tr class="odd">
+<td>OVERRIDE</td>
+<td>§12, §13, §36</td>
+</tr>
+<tr class="even">
+<td>Pre-run pop-ups</td>
+<td>§5</td>
+</tr>
+<tr class="odd">
+<td>Scoring / soft rules</td>
+<td>§14, §33</td>
+</tr>
+<tr class="even">
+<td>Selection process</td>
+<td>§12, §24, §32</td>
+</tr>
+<tr class="odd">
+<td>Sim debt</td>
+<td>§16</td>
+</tr>
+<tr class="even">
+<td>Strings / counters / zipper</td>
+<td>§15</td>
+</tr>
+<tr class="odd">
+<td>Tie-breaks</td>
+<td>§20</td>
+</tr>
+<tr class="even">
+<td>Unsats</td>
+<td>§19</td>
+</tr>
+<tr class="odd">
+<td>Update Syllabi</td>
+<td>§10</td>
+</tr>
+</tbody>
+</table>
+</body>
+</html>
