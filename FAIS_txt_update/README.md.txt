@@ -11,7 +11,7 @@ powershell.exe -STA -File .\FAIS.ps1
 ```
 Add `-Trace` to print every scheduling decision to the console. FAIS restarts itself in STA mode if needed.
 
-**Needs:** Windows PowerShell 5.1 and the ImportExcel module. `MasterData.xlsx` and `OutputSchedule.xlsx` live in the FAIS folder, next to `FAIS.ps1`. `ATIS.xlsx` is written to the Desktop.
+**Needs:** Windows PowerShell 5.1 and the ImportExcel module. `MasterData.xlsx` and `OutputSchedule.xlsx` live in the FAIS folder, next to `FAIS.ps1`. `ATIS.xlsx` is written to the Teams folder picked when `RUNME.ps1` runs (saved in `TeamsLocation.txt` next to `FAIS.ps1`, one line: the folder), or to the Desktop when no folder was picked or it can't be found.
 
 **You can leave Excel open.** If MasterData or OutputSchedule is open in Excel, FAIS saves it before reading it (so edits you have not saved yet are read too), and saves and closes it before writing it (so there is no "file is open" error), then opens it again afterwards. You only see a "file is open" box if Excel can't be reached, for example while a cell is still being edited.
 
@@ -256,7 +256,8 @@ Click a student in the list to see their full check on the left. **Double-click*
 
 | Path | What |
 |---|---|
-| `FAIS.ps1` | Entry point and settings (`$BoardSettings`, `$OutputSettings`; the Teams copy is off by default) |
+| `FAIS.ps1` | Entry point and settings (`$BoardSettings`, `$OutputSettings`; the Teams copy is on and goes to the RUNME Teams folder, next to ATIS.xlsx) |
+| `RUNME.ps1` | First-run setup: shortcuts, the ImportExcel copy, Add Students, and the Teams folder picker (saved to `TeamsLocation.txt`, which FAIS reads for where ATIS.xlsx and the Teams copy go) |
 | `Modules\` | Code: engine (`SchedulingEngine`, `Syllabus`), board (`PuckBoard.xaml/.psm1`, `LoadDayDialog.xaml`, `BulkLinesDialog.xaml`, `PasteLinesDialog.xaml`, `AbsenceDialog.xaml`, `ExportResultDialog.xaml`, `BoardLogo.png` (the title-bar logo), `BoardModel`, `Assessment`), Excel in/out (`DataDownload`, `DataUpload`, `ExcelFiles`), Update Syllabi (`SyllabusImport`), pre-run pop-ups (`PreRunMenu`), helpers (`DataManipulation`) |
 | `Boards\` | Autosaved board, one file per day (created on first run) |
 | `Templates\` | Saved wave templates |
@@ -269,7 +270,7 @@ The MasterData **Schedule** sheet is optional: without it, paste the lines from 
 
 | Setting | Default | What |
 |---|---|---|
-| `WriteAtis` | `$true` | Write ATIS.xlsx on the Desktop |
+| `WriteAtis` | `$true` | Write ATIS.xlsx in the Teams folder from `TeamsLocation.txt` (else the Desktop) |
 | `SaveAndCloseExcel` | `$true` | Save and close a workbook in Excel before FAIS writes it |
 | `ReopenExcel` | `$true` | Open those workbooks again afterwards |
 | `CloseAllExcelWorkbooks` | `$false` | Save and close *every* open workbook before writing, not just FAIS's (never-saved workbooks are left open) |

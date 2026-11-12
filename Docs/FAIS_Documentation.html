@@ -1160,7 +1160,7 @@ FALSE where the schedule cleans them up.</td>
 <td>Any absence Add Student Absence couldn’t save earlier.</td>
 </tr>
 <tr class="even">
-<td><strong>ATIS.xlsx</strong> (Desktop)</td>
+<td><strong>ATIS.xlsx</strong> (Teams folder picked in RUNME.ps1, else Desktop)</td>
 <td>One tab per exported day (<code>Wednesday. October 21, 2026</code>):
 flights in ETD order, a thick border, then sims. Other days’ tabs are
 kept.</td>
@@ -2624,7 +2624,7 @@ the rest.</li>
 <li>pending absences,</li>
 <li>ATIS.</li>
 </ul></li>
-<li>Optional Teams copy (<code>PublishToTeams</code>).</li>
+<li>Teams copy (<code>PublishToTeams</code>, on): <code>TESTING ATIS NOT OFFICIAL.xlsx</code> in the RUNME Teams folder.</li>
 <li>Reopen the workbooks FAIS closed (<code>ReopenExcel</code>).</li>
 </ol>
 <hr />
@@ -2762,7 +2762,9 @@ exported days in it change. - <strong>One tab per student</strong>
 ETD and IsComplete for what they’ve done (and what’s been scheduled).
 This is where each run <strong>starts</strong> from. FAIS writes only
 the changed cells, so your own columns and formatting are safe.</p>
-<p><strong>ATIS.xlsx</strong> (Desktop): one tab per exported day,
+<p><strong>ATIS.xlsx</strong> (the Teams folder picked in RUNME.ps1 and saved in
+<code>TeamsLocation.txt</code> next to FAIS.ps1; the Desktop when there is none or
+it can't be found): one tab per exported day,
 flights in ETD order, a thick border, then sims. Rebuilt for the
 exported days; other tabs kept.</p>
 <h2 id="29-what-is-read-and-written-and-when">§29 What is read and
@@ -2922,13 +2924,13 @@ later</td>
 </tr>
 <tr class="even">
 <td><code>PublishToTeams</code></td>
-<td><code>$false</code></td>
+<td><code>$true</code></td>
 <td>Also write daily sheets to a Teams/OneDrive workbook</td>
 </tr>
 <tr class="odd">
 <td><code>TeamsFolder</code>, <code>TeamsFileName</code></td>
-<td></td>
-<td>Where</td>
+<td>RUNME folder, <code>TESTING ATIS NOT OFFICIAL.xlsx</code></td>
+<td>Where (<code>TeamsFolder</code> comes from <code>TeamsLocation.txt</code>; blank, so no Teams copy, when that folder can't be found)</td>
 </tr>
 </tbody>
 </table>

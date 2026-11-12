@@ -352,7 +352,7 @@ It writes the day on screen **and** every day you filled since the board opened 
 | MasterData: **Students** | SimDebt, DiscontinuityScore, and UnsatSim / UnsatFlight reset to FALSE where the schedule cleans them up. |
 | MasterData: **String Tracker** | One row per student: 5+, 4, 3, 2 and 1-strings and unique counters (§15). |
 | MasterData: **StudentAbsences** | Any absence Add Student Absence couldn't save earlier. |
-| **ATIS.xlsx** (Desktop) | One tab per exported day (`Wednesday. October 21, 2026`): flights in ETD order, a thick border, then sims. Other days' tabs are kept. |
+| **ATIS.xlsx** (Teams folder picked in RUNME.ps1, else Desktop) | One tab per exported day (`Wednesday. October 21, 2026`): flights in ETD order, a thick border, then sims. Other days' tabs are kept. |
 
 Afterwards a window says what was written (days, line counts, files, unsats cleared, OVERRIDE lines) or, if it failed, that **nothing** was written and why.
 
@@ -1030,7 +1030,7 @@ count FilledBy into Stats
    - String Tracker,
    - pending absences,
    - ATIS.
-6. Optional Teams copy (`PublishToTeams`).
+6. Teams copy (`PublishToTeams`, on): `TESTING ATIS NOT OFFICIAL.xlsx` in the RUNME Teams folder.
 7. Reopen the workbooks FAIS closed (`ReopenExcel`).
 
 ---
@@ -1090,7 +1090,7 @@ One data row of weights (§14). Header names: `ContString`, `String4`, `String5`
 - **MasterSchedule** (first tab): every exported day from today on. Columns ETD, Instructor, SortieType, Student, Mission, Callsign, Num, Notes. Only this sheet is rewritten, and only the exported days in it change.
 - **One tab per student** (named exactly as `SPName`): their syllabus with Instructor, ETD and IsComplete for what they've done (and what's been scheduled). This is where each run **starts** from. FAIS writes only the changed cells, so your own columns and formatting are safe.
 
-**ATIS.xlsx** (Desktop): one tab per exported day, flights in ETD order, a thick border, then sims. Rebuilt for the exported days; other tabs kept.
+**ATIS.xlsx** (the Teams folder picked in RUNME.ps1 and saved in `TeamsLocation.txt` next to FAIS.ps1; the Desktop when there is none or it can't be found): one tab per exported day, flights in ETD order, a thick border, then sims. Rebuilt for the exported days; other tabs kept.
 
 ## §29 What is read and written, and when
 
@@ -1129,8 +1129,8 @@ In `FAIS.ps1`:
 | `SaveAndCloseExcel` | `$true` | Save and close a workbook before writing it |
 | `ReopenExcel` | `$true` | Reopen those workbooks afterwards |
 | `CloseAllExcelWorkbooks` | `$false` | Save and close *every* open workbook first |
-| `PublishToTeams` | `$false` | Also write daily sheets to a Teams/OneDrive workbook |
-| `TeamsFolder`, `TeamsFileName` | | Where |
+| `PublishToTeams` | `$true` | Also write daily sheets to a Teams/OneDrive workbook |
+| `TeamsFolder`, `TeamsFileName` | RUNME folder, `TESTING ATIS NOT OFFICIAL.xlsx` | Where (`TeamsFolder` comes from `TeamsLocation.txt`; blank, so no Teams copy, when that folder can't be found) |
 
 **Rules that are fixed in code** (change them in `SchedulingEngine.psm1`, see §38): turn time 3.25 / 3.5 hr, duty day 9 hr, crew rest 15 hr, absence window −1.5 / +2.5 hr, Checkride Priority +50, counter limits 6 / 3.
 

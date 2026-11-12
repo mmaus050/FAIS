@@ -12,7 +12,8 @@
 #   4. "Fill this day" or "Fill all days": the scheduler fills the open lines, you review it
 #   5. Export, all or nothing, for the filled days: OutputSchedule.xlsx (MasterSchedule, other exported
 #      days kept, + each student's syllabus tab), SimDebt, DiscontinuityScore + cleaned-up unsats to MasterData, and
-#      ATIS.xlsx (one tab per day: flights, then sims). Excel files are saved and closed first.
+#      ATIS.xlsx (one tab per day: flights, then sims; in the Teams folder picked in RUNME.ps1, else
+#      the Desktop). Excel files are saved and closed first.
 #      A window then says what was written (or why nothing was), with buttons to open the files.
 #
 # -Trace prints every scheduling decision to the console.
@@ -57,7 +58,34 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne [System.Thr
 $excelInputPath = Join-Path $PSScriptRoot "MasterData.xlsx"
 $desktopPath = [Environment]::GetFolderPath('Desktop')
 $excelOutputPath = Join-Path -Path $PSScriptRoot -ChildPath "OutputSchedule.xlsx"
-$atisOutputPath = Join-Path -Path $desktopPath -ChildPath "ATIS.xlsx"
+
+# ATIS.xlsx goes in the Teams folder picked in RUNME.ps1. RUNME saves that folder ($global:teamsLocation
+# there) to TeamsLocation.txt next to this script, one line: the folder. No file, or the folder can't be
+# found (OneDrive not synced, drive not mapped): the Desktop, as before, and the export window says why.
+$teamsLocationFile = Join-Path -Path $PSScriptRoot -ChildPath "TeamsLocation.txt"
+$teamsLocation = ''
+$teamsFolderFound = ''      # the RUNME folder when it exists; also the Teams copy's folder ($OutputSettings.TeamsFolder)
+$atisFolder = $desktopPath
+$atisFolderWarning = ''
+if (Test-Path -LiteralPath $teamsLocationFile -PathType Leaf) {
+    try {
+        $teamsLocation = [string](@([System.IO.File]::ReadAllLines($teamsLocationFile) | ForEach-Object { $_.Trim().Trim('"').Trim() } | Where-Object { $_ -ne '' }) | Select-Object -First 1)
+    }
+    catch {
+        $atisFolderWarning = "TeamsLocation.txt could not be read ($($_.Exception.Message)), so ATIS.xlsx went to the Desktop."
+    }
+}
+if ($teamsLocation -ne '') {
+    if (Test-Path -LiteralPath $teamsLocation -PathType Container) {
+        $teamsFolderFound = $teamsLocation
+        $atisFolder = $teamsLocation
+    }
+    else {
+        $atisFolderWarning = "The Teams folder in TeamsLocation.txt was not found ($teamsLocation), so ATIS.xlsx went to the Desktop. Check OneDrive is synced, or run RUNME to pick the folder again."
+    }
+}
+$atisOutputPath = Join-Path -Path $atisFolder -ChildPath "ATIS.xlsx"
+if ($atisFolderWarning) { Write-Host $atisFolderWarning -ForegroundColor Yellow }
 
 # Puck board
 $BoardSettings = @{
@@ -71,13 +99,13 @@ $BoardSettings = @{
 
 # Output (the student tabs and MasterData are always written on Export)
 $OutputSettings = @{
-    WriteAtis              = $true                      # ATIS.xlsx on the Desktop: one tab per day, flights then sims
+    WriteAtis              = $true                      # ATIS.xlsx in the RUNME Teams folder (else the Desktop): one tab per day, flights then sims
     KeepPastDays           = 0                          # MasterSchedule keeps exported days from today on (plus this many days back)
     SaveAndCloseExcel      = $true                      # save and close a workbook in Excel before FAIS writes it (no "file is open" errors)
     ReopenExcel            = $true                      # open those workbooks again once FAIS has written them
     CloseAllExcelWorkbooks = $false                     # $true = save and close EVERY open workbook before writing, not just FAIS's
-    PublishToTeams         = $false                     # also write the daily sheets to the Teams / OneDrive workbook
-    TeamsFolder            = ''                         # e.g. C:\Users\...\OneDrive - United States Air Force\ATIS - E Flight - E Flight
+    PublishToTeams         = $true                      # also write the daily sheets to the Teams / OneDrive workbook
+    TeamsFolder            = $teamsFolderFound          # the folder picked in RUNME (TeamsLocation.txt); blank (Teams copy skipped) when not found
     TeamsFileName          = 'TESTING ATIS NOT OFFICIAL.xlsx'
 }
 
@@ -201,8 +229,11 @@ $PendingAbsences = @(Get-PendingStudentAbsences -Students $FillResult.Students)
 $ExportWarnings = @()
 $Exported = Export-FaisOutput -FillResult $FillResult -OutputPath $excelOutputPath -MasterDataPath $excelInputPath -AtisPath $atisOutputPath -Settings $OutputSettings -LockedPrompt $LockedPrompt -Days @($BoardResult.Days) -Instructors $Instructors -WarningVariable ExportWarnings
 $AtisWritten = if ($OutputSettings.WriteAtis) { $atisOutputPath } else { '' }
+$SummaryWarnings = @($ExportWarnings | ForEach-Object { [string]$_.Message })
+# The console is hidden, so say in the result window when ATIS fell back to the Desktop
+if ($Exported -and $AtisWritten -and $atisFolderWarning) { $SummaryWarnings += $atisFolderWarning }
 $ExportSummary = Get-FaisExportSummary -Ok ([bool]$Exported) -FillResult $FillResult -Days @($BoardResult.Days) -OutputPath $excelOutputPath -MasterDataPath $excelInputPath `
-    -AtisPath $AtisWritten -UnsatChanges $UnsatChanges -Absences $PendingAbsences -Warnings @($ExportWarnings | ForEach-Object { [string]$_.Message })
+    -AtisPath $AtisWritten -UnsatChanges $UnsatChanges -Absences $PendingAbsences -Warnings $SummaryWarnings
 if (-not $Exported) {
     Write-Host "Nothing was written (OutputSchedule, MasterData and ATIS are as they were). Your board is saved; run FAIS again and Export once the files are closed." -ForegroundColor Red
     try { Show-FaisExportResult -Summary $ExportSummary } catch { Write-Host "Could not show the export result window: $($_.Exception.Message)" -ForegroundColor Yellow }
