@@ -23,6 +23,7 @@ function Get-Weight {
                 )
 
                 $v = Get-OptionalProperty $Config $Name $null
+                if ($v -is [double]) { return $v }
                 if ($null -eq $v -or [string]$v -eq '') { return $Default }
                 $num = 0.0
                 if ([double]::TryParse(([string]$v).Trim(), [System.Globalization.NumberStyles]::Any, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$num)) { return $num }
@@ -123,7 +124,11 @@ function Get-LinkedReturnRow {
                                 }
                 )
                 if ($candidates.Count -eq 0) { return $null }
-                $pick = $candidates | Sort-Object -Property @{ Expression = { -not $_.After } }, Start | Select-Object -First 1
+                # Single pass for the earliest candidate (After-first, then Start); strict '<' keeps the first on ties like a stable sort
+                $pick = $null
+                foreach ($c in $candidates) {
+                                if ($null -eq $pick -or ($c.After -and -not $pick.After) -or ($c.After -eq $pick.After -and $c.Start -lt $pick.Start)) { $pick = $c }
+                }
                 return $pick.Row
 }
 
@@ -257,7 +262,16 @@ function Test-HardRules {
                 }
 
                 $timeline = @(Get-StudentTimeline -Student $Student -ExceptLineId $lineId)
-                $today = @($timeline | Where-Object { $_.Start.Date -eq $start.Date })
+                # One pass over the timeline instead of three Where-Object pipelines
+                $startDate = $start.Date
+                $todayL = New-Object System.Collections.Generic.List[object]
+                $beforeL = New-Object System.Collections.Generic.List[object]
+                $afterL = New-Object System.Collections.Generic.List[object]
+                foreach ($t in $timeline) {
+                        $td = $t.Start.Date
+                        if ($td -eq $startDate) { $todayL.Add($t) } elseif ($td -lt $startDate) { $beforeL.Add($t) } else { $afterL.Add($t) }
+                }
+                $today = $todayL.ToArray()
                 $stop = { (-not $Explain) -and (Test-AnyBlocking $violations) }
 
                 # ---------------- O&B RETURN LINES ----------------
@@ -299,7 +313,7 @@ function Test-HardRules {
                 }
                 # CAPsters single turn ONLY (flights)
                 if ($isCap -and -not $isSimLine) {
-                                $flights = @($today | Where-Object { -not $_.IsSim })
+                                $flights = @($today.Where({ -not $_.IsSim }))
                                 if ($flights.Count -ge 1) {
                                                 $violations.Add((New-RuleViolation 'CAP_SINGLE_TURN' ("CAP student already flies today ({0})" -f ((@($flights | ForEach-Object { Format-EventLabel $_.Start $_.Mission })) -join ', '))))
                                                 if (& $stop) { return (New-HardRuleResult $violations $notes $eventResults) }
@@ -361,7 +375,7 @@ function Test-HardRules {
                 if (& $stop) { return (New-HardRuleResult $violations $notes $eventResults) }
 
                 # Crew rest from the previous day's last event
-                $before = @($timeline | Where-Object { $_.Start.Date -lt $start.Date })
+                $before = $beforeL.ToArray()
                 if ($before.Count -gt 0) {
                                 $last = $before[$before.Count - 1]
                                 if ($last.Start.Date -eq $start.Date.AddDays(-1)) {
@@ -372,12 +386,12 @@ function Test-HardRules {
                                 }
                 }
                 # Crew rest before the next day's first event (multi-day boards)
-                $after = @($timeline | Where-Object { $_.Start.Date -gt $start.Date })
+                $after = $afterL.ToArray()
                 if ($after.Count -gt 0) {
                                 $next = $after[0]
                                 $dayEnd = if ($null -ne $returnStart -and $returnStart -gt $start) { $returnStart } else { $start }
                                 # A later event the same day is checked on its own line, so only the day's last event answers for tomorrow
-                                $laterToday = @($today | Where-Object { $_.Start -gt $dayEnd })
+                                $laterToday = @($today.Where({ $_.Start -gt $dayEnd }))
                                 if ($laterToday.Count -eq 0 -and $next.Start.Date -eq $start.Date.AddDays(1)) {
                                                 $rest = ($next.Start - $dayEnd).TotalHours
                                                 if ($rest -lt 15) {
@@ -442,7 +456,8 @@ function Test-HardRules {
                                 foreach ($v in $valid) { $eventsToTest.Add($v) }
                 }
 
-                $completedReal = @($timeline | Where-Object { -not $_.IsReservation })
+                $completedReal = foreach ($t in $timeline) { if (-not $t.IsReservation) { $t } }
+                $completedReal = @($completedReal)
                 # A wingman the board already paired to this line satisfies the formation-lead checks
                 $pinnedWing = if ($IsWingCandidate) { $null } else { Get-PinnedWingRow -Sortie $Sortie -Schedule $Schedule }
 
@@ -571,7 +586,7 @@ function New-HardRuleResult {
                 param ($Violations, $Notes, $EventResults)
 
                 $events = @($EventResults.ToArray())
-                $passedEvents = @($events | Where-Object { $_.Passed } | ForEach-Object { $_.Event })
+                $passedEvents = @(foreach ($e in $events) { if ($e.Passed) { $e.Event } })
                 $studentBlocked = Test-AnyBlocking $Violations.ToArray()
                 $uniqueNotes = @($Notes.ToArray() | Select-Object -Unique)
                 return [PSCustomObject]@{
@@ -749,14 +764,17 @@ function SoftRules {
                 #   - Alternating counters (A,B,A + B) are not a string: no Continue String, only the Zipper weight
                 # Flights only: a sim line, solo or check ride never scores here, and past sims never count
                 #####################################
+                # Parse each ETD once (it was parsed up to three times per mission)
                 $PastFlights = @(
-                                $Student.Syllabus | Where-Object {
-                                                (Test-MissionComplete $_) -and
-                                                $null -ne (Parse-ETD $_.ETD) -and
-                                                (Get-MissionKind -Mission $_ -InstructorName (Get-NameText $_.Instructor)) -eq 'Flight' -and
-                                                -not [string]::IsNullOrWhiteSpace((Get-NameText $_.Instructor)) -and
-                                                (Parse-ETD $_.ETD) -lt $SortieDate
-                                } | Sort-Object -Property { Parse-ETD $_.ETD } -Descending
+                                foreach ($pm in @($Student.Syllabus)) {
+                                                if (-not (Test-MissionComplete $pm)) { continue }
+                                                $pmStart = Parse-ETD $pm.ETD
+                                                if ($null -eq $pmStart -or -not ($pmStart -lt $SortieDate)) { continue }
+                                                $pmIp = Get-NameText $pm.Instructor
+                                                if ([string]::IsNullOrWhiteSpace($pmIp)) { continue }
+                                                if ((Get-MissionKind -Mission $pm -InstructorName $pmIp) -ne 'Flight') { continue }
+                                                [PSCustomObject]@{ Item = $pm; Start = $pmStart }
+                                } | Sort-Object -Property Start -Descending | ForEach-Object { $_.Item }
                 )
 
                 $hasRealIP = ($CurrentIP -ne '' -and $CurrentIP -notmatch 'SIM IP' -and $CurrentIP -ne 'NEED IP')
@@ -1180,7 +1198,8 @@ function Pair-FormationWingman {
                                                 }
                                                 else {
                                                                 # No student wingman: claim the soonest open live-fly line as Direct Support
-                                                                $ds = $openLines | Sort-Object -Property { Parse-ETD $_.ETD } | Select-Object -First 1
+                                                                $ds = $null; $dsTime = $null
+                                                                foreach ($ol in $openLines) { $t = Parse-ETD $ol.ETD; if ($null -eq $ds -or ($null -ne $dsTime -and ($null -eq $t -or $t -lt $dsTime))) { $ds = $ol; $dsTime = $t } }
                                                                 if ($null -ne $ds) {
                                                                                 $ds.Student = 'Need Form SP'
                                                                                 [void](Initialize-SortieRow $ds)
@@ -1504,7 +1523,8 @@ function Invoke-PinnedLine {
                                 # Nothing was marked complete, so keep holding the student's time on this line (and its return)
                                 # or later lines could double- or triple-book them
                                 foreach ($rid in $release) {
-                                                $held = $Rows | Where-Object { [string]$_.BoardLineId -eq $rid } | Select-Object -First 1
+                                                $held = $null
+                                foreach ($hRow in $Rows) { if ([string]$hRow.BoardLineId -eq $rid) { $held = $hRow; break } }
                                                 if ($null -ne $held) {
                                                                 Add-StudentReservation -Student $Student -LineId $rid -ETD $held.ETD -SortieType ([string]$held.SortieType) -Mission $(if ($rid -eq [string]$Sortie.BoardLineId) { $explicitName } else { '' }) -Instructor (Get-NameText $Sortie.Instructor)
                                                 }
