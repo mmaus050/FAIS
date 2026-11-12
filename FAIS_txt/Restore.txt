@@ -10,7 +10,9 @@
 #
 # WHAT IT DOES
 #   - Renames every X.ps1.txt / X.psm1.txt / X.xaml.txt in this folder and its Modules
-#     folder back to X. An older X already there is replaced by the new one.
+#     folder back to X (FAIS.ps1, RUNME.ps1 and the Modules files). An older X already
+#     there is replaced by the new one. TeamsLocation.txt (the Teams folder RUNME saved)
+#     is not one of those, so it is left as it is.
 #   - Unblocks the files in this folder and in Modules so Windows lets them run.
 #   - Checks that every file FAIS needs is there, and lists any that are missing.
 #   It does nothing unless FAIS.ps1.txt (or FAIS.ps1) is in the folder you are in, so pasting
@@ -18,6 +20,12 @@
 #
 # NOT IN THE TEXT COPY (they are not text): MasterData.xlsx, which FAIS needs next to
 # FAIS.ps1, and Modules\BoardLogo.png, the title-bar logo (FAIS runs without it).
+# RUNME.ps1 also uses an ImportExcel folder and App Icons\FAISlogo.ico next to it when they
+# are there; neither is in the text copy.
+#
+# AFTER IT RUNS: run RUNME.ps1 once per computer to pick the Teams folder (saved to
+# TeamsLocation.txt). FAIS writes ATIS.xlsx and the Teams copy there; until then ATIS.xlsx
+# goes to the Desktop.
 
 # Every file FAIS needs to run
 $faisFiles = @(
@@ -57,4 +65,5 @@ if ($faisHere) {
 $faisMissing = @($faisFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path '.' $_)) })
 if ($faisHere -and $faisMissing.Count -gt 0) { Write-Host "$($faisMissing.Count) file(s) FAIS needs are missing. Copy them from FAIS_txt (as .txt) and paste this again:" -ForegroundColor Red; $faisMissing | ForEach-Object { Write-Host "   $_.txt" -ForegroundColor Red } }
 if ($faisHere -and $faisMissing.Count -eq 0 -and -not (Test-Path -LiteralPath '.\MasterData.xlsx')) { Write-Host "MasterData.xlsx is not in this folder yet. FAIS needs it next to FAIS.ps1." -ForegroundColor Yellow }
+if ($faisHere -and $faisMissing.Count -eq 0 -and (Test-Path -LiteralPath '.\RUNME.ps1') -and -not (Test-Path -LiteralPath '.\TeamsLocation.txt')) { Write-Host "No Teams folder picked yet, so ATIS.xlsx goes to the Desktop. To pick it, run once:  powershell.exe -STA -ExecutionPolicy Bypass -File .\RUNME.ps1" -ForegroundColor Yellow }
 if ($faisHere -and $faisMissing.Count -eq 0) { Write-Host "Done: all $($faisFiles.Count) FAIS files are in place. Run:  powershell.exe -STA -ExecutionPolicy Bypass -File .\FAIS.ps1" -ForegroundColor Green }
