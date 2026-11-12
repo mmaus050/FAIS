@@ -1183,3 +1183,282 @@ Describe 'Puck board: Add Student Absence (no window)' {
         }
     }
 }
+
+Describe 'Puck board: Paste lines (no window)' {
+    BeforeEach {
+        Mock -ModuleName PuckBoard Update-PBTabs { }
+        Mock -ModuleName PuckBoard Update-PBDay { }
+        Mock -ModuleName PuckBoard Update-PBPools { }
+        Mock -ModuleName PuckBoard Restore-PBFocus { }
+        Mock -ModuleName PuckBoard Get-PBFocusState { $null }
+        Mock -ModuleName PuckBoard Request-PBAutosave { }
+        Mock -ModuleName PuckBoard Start-PBAssessQueue { }
+        Mock -ModuleName PuckBoard Close-PBPopup { }
+        Mock -ModuleName PuckBoard Show-PBPlacementSummary { }
+        Mock -ModuleName PuckBoard Get-PBActiveDay { & (Get-Module PuckBoard) { $script:PB.ActiveDay } }
+        Mock -ModuleName PuckBoard Select-PBDay { & (Get-Module PuckBoard) { param($d) $script:PB.ActiveDay = $d } $Day }
+        Mock -ModuleName PuckBoard Set-PBStatus { & (Get-Module PuckBoard) { param($t, $k) $script:PB.C.StatusText.Text = $t; $script:PB.StatusLog.Add("$k|$t") } $Text $Kind }
+        Clear-AssessmentCache
+
+        Initialize-TestBoard -Days @($script:D1) -Sheet (New-Sheet @())
+        $script:Board = (Get-PB).Board
+        # A pasted date must be within five years of today: tomorrow and the day after
+        $script:P1 = (Get-Date).Date.AddDays(1).ToString('yyyy-MM-dd')
+        $script:P2 = (Get-Date).Date.AddDays(2).ToString('yyyy-MM-dd')
+        # What Excel copies: a tab between cells, CR LF after each row
+        $script:Copied = "Sortie Type`tETD`tInstructor`r`nDay Local`t0900`tJONES, BOB [Maj]`r`nOFT`t1300`t`r`n"
+
+        function Add-Pasted {
+            param ([string]$Text, [string]$Day = '2026-10-20', [switch]$KeepDates, [switch]$KeepStudents, [switch]$Replace)
+            & (Get-Module PuckBoard) { param($t, $d, $kd, $ks, $r) Add-PBPastedLines -Text $t -Day $d -KeepDates:$kd -KeepStudents:$ks -Replace:$r } $Text $Day ([bool]$KeepDates) ([bool]$KeepStudents) ([bool]$Replace)
+        }
+        function Get-DayText {
+            param ([string]$Day)
+            (@(Get-BoardDayLines -Board $script:Board -Day $Day) | ForEach-Object { "$($_.ETD.ToString('HHmm')) $($_.SortieType) $($_.Instructor) $($_.Student)".Trim() }) -join ','
+        }
+        function Get-LastStatus { @((Get-PB).StatusLog)[-1] }
+    }
+
+    It 'puts the lines on the day as one undo step, with the IPs as MasterData spells them' {
+        Add-Pasted $script:Copied | Should -BeTrue
+        Get-DayText $script:D1 | Should -BeExactly '0900 Day Local Jones, Bob,1300 OFT'
+        Get-LastStatus | Should -BeExactly 'Good|Pasted 2 line(s) onto Tue 20 Oct. Ctrl+Z undoes.'
+        Undo-Board $script:Board | Should -BeTrue
+        @(Get-BoardDayLines -Board $script:Board -Day $script:D1).Count | Should -Be 0
+    }
+
+    It 'says what is worth a second look: a row it could not read, an IP MasterData does not have, an O&B with no return leg' {
+        $text = "Sortie Type`tETD`tInstructor`r`nDay Local`t0730`tStoll, Joshua L. [Maj]`r`nO&B`t1015`tOrtiz`r`nDay Local`t`tLee, Ann`r`n"
+        Add-Pasted $text | Should -BeTrue
+        Get-DayText $script:D1 | Should -BeExactly '0730 Day Local Stoll, Joshua L. [Maj],1015 O&B Ortiz, Sam'
+        Get-LastStatus | Should -BeExactly "Warn|Pasted 2 line(s) onto Tue 20 Oct. Ctrl+Z undoes. 1 row(s) could not be read: row 4: no ETD (Day Local line). Not on MasterData's Instructors sheet (kept as pasted): Stoll, Joshua L. [Maj]. 1 O&B line(s) have no return leg in what was pasted (type e.g. 1330 RTN in the Add lines box to add one)."
+    }
+
+    It '-Replace clears the day first, and -KeepStudents hardcodes the students pasted' {
+        Add-BoardLine -Board $script:Board -Line @(New-BoardLine -ETD ([datetime]"$($script:D1) 07:30") -SortieType 'Day Local' -Instructor 'Jones, Bob' -Id 'L1') -NoUndo
+        Add-Pasted "ETD`tType`tIP`tStudent`r`n0800`tDL`tLee`tAdams, Al [2d Lt]`r`n" -KeepStudents -Replace | Should -BeTrue
+        Get-DayText $script:D1 | Should -BeExactly '0800 Day Local Lee, Ann Adams, Al'
+        Get-LastStatus | Should -BeExactly 'Good|Pasted 1 line(s) onto Tue 20 Oct, 1 with students hardcoded, replacing 1 line(s). Ctrl+Z undoes.'
+        Undo-Board $script:Board | Should -BeTrue
+        Get-DayText $script:D1 | Should -BeExactly '0730 Day Local Jones, Bob' -Because 'one undo puts the replaced line back'
+    }
+
+    It 'without -KeepStudents the student pasted is left off' {
+        Add-Pasted "ETD`tType`tIP`tStudent`r`n0800`tDL`tLee`tAdams, Al`r`n" | Should -BeTrue
+        Get-DayText $script:D1 | Should -BeExactly '0800 Day Local Lee, Ann'
+    }
+
+    It 'with the dates kept a line goes on its own date: the new day gets a tab and is shown' {
+        $text = "ETD`tInstructor`tSortieType`r`n$($script:P2) 08:45`tLee, Ann`tDay Local`r`n"
+        Add-Pasted $text -KeepDates | Should -BeTrue
+        ($script:Board.Days.ToArray() -join ',') | Should -BeExactly "$($script:D1),$($script:P2)"
+        Get-DayText $script:P2 | Should -BeExactly '0845 Day Local Lee, Ann'
+        (Get-PB).ActiveDay | Should -BeExactly $script:P2
+        Get-LastStatus | Should -BeExactly "Good|Pasted 1 line(s) onto $(Format-BoardDayLabel $script:P2). Ctrl+Z undoes."
+        Undo-Board $script:Board | Should -BeTrue
+        ($script:Board.Days.ToArray() -join ',') | Should -BeExactly $script:D1
+    }
+
+    It 'without the dates kept the same line goes on the day picked' {
+        Add-Pasted "ETD`tInstructor`tSortieType`r`n$($script:P2) 08:45`tLee, Ann`tDay Local`r`n" | Should -BeTrue
+        Get-DayText $script:D1 | Should -BeExactly '0845 Day Local Lee, Ann'
+        (Get-PB).ActiveDay | Should -BeExactly $script:D1
+    }
+
+    It 'what cannot be read says why and changes nothing' {
+        $v = $script:Board.Version
+        Add-Pasted 'hello there' | Should -BeFalse
+        Get-LastStatus | Should -BeLike 'Warn|What was pasted has no heading row, and FAIS could not find the ETD and Sortie Type columns*'
+        Add-Pasted '' | Should -BeFalse
+        Get-LastStatus | Should -BeExactly 'Warn|Nothing to paste: copy the lines in Excel first (the ETD, Sortie Type and Instructor columns).'
+        Add-Pasted "ETD`tInstructor`tSortieType`r`n`tJones, Bob`tDL`r`n" | Should -BeFalse
+        Get-LastStatus | Should -BeExactly 'Warn|No lines could be read from what was pasted: row 2: no ETD (Day Local line).'
+        $script:Board.Version | Should -Be $v
+        $script:Board.Undo.Count | Should -Be 0
+    }
+
+    It 'the button and Ctrl+V add what the window asked for, and nothing when it is cancelled' {
+        Mock -ModuleName PuckBoard Show-PBPasteLinesDialog { @{ Text = $script:Copied; Day = '2026-10-20'; KeepDates = $false; KeepStudents = $true; Replace = $false } }
+        & (Get-Module PuckBoard) { Invoke-PBPasteLines }
+        Get-DayText $script:D1 | Should -BeExactly '0900 Day Local Jones, Bob,1300 OFT'
+        Should -Invoke -ModuleName PuckBoard Show-PBPasteLinesDialog -Times 1 -Exactly -ParameterFilter { $Day -eq '2026-10-20' }
+        & (Get-Module PuckBoard) { Invoke-PBCommand @{ Cmd = 'PasteLines' } }
+        @(Get-BoardDayLines -Board $script:Board -Day $script:D1).Count | Should -Be 4 -Because 'Ctrl+V on the board opens the same window'
+
+        Mock -ModuleName PuckBoard Show-PBPasteLinesDialog { $null }
+        $v = $script:Board.Version
+        & (Get-Module PuckBoard) { Invoke-PBPasteLines }
+        $script:Board.Version | Should -Be $v
+    }
+
+    It 'Format-PBShortList names the first few and counts the rest' {
+        & (Get-Module PuckBoard) { Format-PBShortList @('a', 'b', 'c') } | Should -BeExactly 'a; b; c'
+        & (Get-Module PuckBoard) { Format-PBShortList @('a', 'b', 'c', 'd') -Max 2 } | Should -BeExactly 'a; b and 2 more'
+        & (Get-Module PuckBoard) { Format-PBShortList @() } | Should -BeExactly ''
+    }
+
+    Context 'the window (plain objects stand in for its boxes)' {
+        BeforeEach {
+            Mock -ModuleName PuckBoard Get-PBBrush { $Color }
+            Mock -ModuleName PuckBoard Get-PBClipboardText { $script:Copied }
+            & (Get-Module PuckBoard) {
+                $o = { param($h) [PSCustomObject]$h }
+                $script:PBPaste = @{ Window = (& $o @{ DialogResult = $null }); Result = $null; Setting = $false; Read = $null; ReadKey = ''; DatesFor = '' }
+                $script:PBPaste.PasteBox = & $o @{ Text = '' }
+                foreach ($box in @('SummaryText', 'ColumnsText', 'NotesText', 'TargetInfoText')) { $script:PBPaste[$box] = & $o @{ Text = ''; Foreground = '' } }
+                $script:PBPaste.PreviewList = & $o @{ ItemsSource = $null }
+                $script:PBPaste.TargetDayPicker = & $o @{ SelectedDate = [datetime]'2026-10-20'; IsEnabled = $true }
+                $script:PBPaste.KeepDatesCheck = & $o @{ IsChecked = $false; Visibility = 'Collapsed'; Content = '' }
+                $script:PBPaste.KeepStudentsCheck = & $o @{ IsChecked = $true; Visibility = 'Collapsed' }
+                $script:PBPaste.AddRadio = & $o @{ IsChecked = $true }
+                $script:PBPaste.ReplaceRadio = & $o @{ IsChecked = $false }
+                $script:PBPaste.AddButton = & $o @{ IsEnabled = $false }
+            }
+            function Get-Paste { & (Get-Module PuckBoard) { $script:PBPaste } }
+            function Set-Pasted { param ([string]$Text) & (Get-Module PuckBoard) { param($t) Set-PBPasteText $t } $Text }
+            function Update-Paste { & (Get-Module PuckBoard) { Update-PBPastePreview } }
+            function Get-PreviewTexts { @((Get-Paste).PreviewList.ItemsSource | ForEach-Object { $_.Text }) }
+        }
+        AfterEach { & (Get-Module PuckBoard) { $script:PBPaste = $null } }
+
+        It 'waits for something to paste, then shows the lines it read and the columns it used' {
+            Update-Paste | Should -BeFalse
+            (Get-Paste).AddButton.IsEnabled | Should -BeFalse
+            (Get-Paste).SummaryText.Text | Should -BeExactly 'Nothing pasted yet: copy the lines in Excel, then press Ctrl+V here.'
+            (Get-Paste).SummaryText.Foreground | Should -BeExactly '#64748B' -Because 'an empty box is not an error'
+            (Get-Paste).TargetInfoText.Text | Should -BeExactly 'on the board, no lines yet'
+
+            Set-Pasted "Sortie Type`tETD`tInstructor`r`nDay Local`t0730`tJones, Bob`r`nO&B`t1015`tOrtiz`r`nO&B Return`t1315`tOrtiz`r`nOFT`t1300`t`r`n"
+            (Get-Paste).AddButton.IsEnabled | Should -BeTrue
+            (Get-Paste).SummaryText.Text | Should -BeLike '4 line(s) to add to Tue 20 Oct: *1 Day Local*'
+            (Get-Paste).SummaryText.Text | Should -BeLike '*1 O&B Return*'
+            (Get-Paste).SummaryText.Foreground | Should -BeExactly '#0F172A'
+            (Get-Paste).ColumnsText.Text | Should -BeExactly 'Read as: ETD = column 2, Sortie Type = column 1, IP = column 3 (from the headings on row 1)'
+            $texts = Get-PreviewTexts
+            $texts.Count | Should -Be 4
+            $texts[0] | Should -BeLike '0730  Day Local *Jones, Bob'
+            $texts[1] | Should -BeLike '1015  O&B *Ortiz, Sam'
+            $texts[2] | Should -BeLike '1300  OFT *SIM IP'
+            $texts[3] | Should -BeLike '1315  O&B Return *Ortiz, Sam *follows its O&B'
+            (Get-Paste).NotesText.Text | Should -BeExactly ''
+            (Get-Paste).KeepDatesCheck.Visibility | Should -BeExactly 'Collapsed'
+            (Get-Paste).KeepStudentsCheck.Visibility | Should -BeExactly 'Collapsed'
+
+            (Get-Paste).ReplaceRadio.IsChecked = $true
+            Update-Paste | Should -BeTrue
+            (Get-Paste).SummaryText.Text | Should -BeLike '4 line(s) to replace the lines on Tue 20 Oct: *'
+        }
+
+        It 'says how many lines the day has now, or that it is a new day' {
+            Add-BoardLine -Board $script:Board -Line @(New-BoardLine -ETD ([datetime]"$($script:D1) 07:30") -SortieType 'Day Local' -Id 'L1') -NoUndo
+            Set-Pasted $script:Copied
+            (Get-Paste).TargetInfoText.Text | Should -BeExactly 'has 1 line(s) on the board now'
+            (Get-Paste).TargetDayPicker.SelectedDate = [datetime]'2026-10-22'
+            Update-Paste | Should -BeTrue
+            (Get-Paste).TargetInfoText.Text | Should -BeExactly 'adds this day to the board'
+            (Get-Paste).SummaryText.Text | Should -BeLike '2 line(s) to add to Thu 22 Oct: *'
+            (Get-Paste).TargetDayPicker.SelectedDate = $null
+            Update-Paste | Should -BeFalse
+            (Get-Paste).SummaryText.Text | Should -BeExactly 'Pick the day to put the lines on.'
+        }
+
+        It 'text that is not lines is refused in red; rows it could not read and names MasterData does not have are listed' {
+            Set-Pasted 'hello there'
+            (Get-Paste).AddButton.IsEnabled | Should -BeFalse
+            (Get-Paste).SummaryText.Foreground | Should -BeExactly '#B91C1C'
+            (Get-Paste).SummaryText.Text | Should -BeLike 'What was pasted has no heading row*'
+            @((Get-Paste).PreviewList.ItemsSource).Count | Should -Be 0
+
+            Set-Pasted "Sortie Type`tETD`tInstructor`r`nDay Local`t0730`tStoll, Joshua L. [Maj]`r`nDay Local`t`tLee, Ann`r`n"
+            (Get-Paste).AddButton.IsEnabled | Should -BeTrue
+            $notes = @((Get-Paste).NotesText.Text -split "`n")
+            $notes[0] | Should -BeExactly '1 row(s) could not be read: row 3: no ETD (Day Local line).'
+            $notes[1] | Should -BeExactly "Not on MasterData's Instructors sheet (kept as pasted): Stoll, Joshua L. [Maj]."
+        }
+
+        It 'dates that were pasted are kept, and the tick is the user''s from then on' {
+            Set-Pasted "ETD`tInstructor`tSortieType`r`n$($script:P1) 08:10`tJones, Bob`tDay Local`r`n$($script:P2) 08:45`tLee, Ann`tDay Local`r`n"
+            (Get-Paste).KeepDatesCheck.Visibility | Should -BeExactly 'Visible'
+            (Get-Paste).KeepDatesCheck.IsChecked | Should -BeTrue
+            (Get-Paste).KeepDatesCheck.Content | Should -BeExactly "Keep the dates that were pasted ($(Format-BoardDayLabel $script:P1): 1; $(Format-BoardDayLabel $script:P2): 1)"
+            (Get-Paste).TargetDayPicker.IsEnabled | Should -BeFalse
+            (Get-Paste).TargetInfoText.Text | Should -BeExactly 'not used: every line has its own date'
+            (Get-Paste).SummaryText.Text | Should -BeLike '2 line(s) to add to * (2 days): 2 Day Local.'
+            (Get-PreviewTexts)[0] | Should -BeLike "$(([datetime]$script:P1).ToString('ddd dd MMM'))  0810  Day Local *Jones, Bob"
+
+            (Get-Paste).KeepDatesCheck.IsChecked = $false
+            Update-Paste | Should -BeTrue
+            (Get-Paste).KeepDatesCheck.IsChecked | Should -BeFalse -Because 'the same paste does not tick it again'
+            (Get-Paste).TargetDayPicker.IsEnabled | Should -BeTrue
+            (Get-Paste).SummaryText.Text | Should -BeExactly '2 line(s) to add to Tue 20 Oct: 2 Day Local.'
+            (Get-PreviewTexts)[0] | Should -BeLike '0810  Day Local *Jones, Bob'
+        }
+
+        It 'a date before the board''s first day is not kept unless asked (yesterday''s lines copied to fly again)' {
+            $script:Board.Days.Clear()
+            $script:Board.Days.Add($script:P2)
+            (Get-Paste).TargetDayPicker.SelectedDate = [datetime]$script:P2
+            (Get-Paste).KeepDatesCheck.IsChecked = $true
+            Set-Pasted "ETD`tInstructor`tSortieType`r`n$($script:P1) 08:10`tJones, Bob`tDay Local`r`n0900`tLee, Ann`tDL`r`n"
+            (Get-Paste).KeepDatesCheck.Visibility | Should -BeExactly 'Visible'
+            (Get-Paste).KeepDatesCheck.IsChecked | Should -BeFalse
+            (Get-Paste).SummaryText.Text | Should -BeExactly "2 line(s) to add to $(Format-BoardDayLabel $script:P2): 2 Day Local."
+
+            (Get-Paste).KeepDatesCheck.IsChecked = $true
+            Update-Paste | Should -BeTrue
+            (Get-Paste).TargetDayPicker.IsEnabled | Should -BeTrue -Because 'one line has no date of its own'
+            (Get-Paste).TargetInfoText.Text | Should -BeExactly 'for the lines with no date (on the board, no lines yet)'
+            (Get-Paste).SummaryText.Text | Should -BeLike '2 line(s) to add to * (2 days): 2 Day Local.'
+        }
+
+        It 'students that were pasted can be kept (hardcoded) or left off' {
+            Set-Pasted "ETD`tType`tIP`tStudent`tMission`r`n0800`tDL`tLee`tAdams, Al [2d Lt]`tFT5001`r`n0900`tDL`tJones`tNobody, Nick`t`r`n"
+            (Get-Paste).KeepStudentsCheck.Visibility | Should -BeExactly 'Visible'
+            (Get-PreviewTexts)[0] | Should -BeLike '0800  Day Local *Lee, Ann *Adams, Al (FT5001)'
+            (Get-Paste).NotesText.Text | Should -BeExactly 'Not a FAIS student, or more than one (left off the line): Nobody, Nick.'
+            (Get-Paste).KeepStudentsCheck.IsChecked = $false
+            Update-Paste | Should -BeTrue
+            (Get-PreviewTexts)[0] | Should -BeLike '0800  Day Local *Lee, Ann'
+            (Get-Paste).NotesText.Text | Should -BeExactly ''
+        }
+
+        It 'Paste puts what was copied in the box, in place of what is there; with nothing copied it says so' {
+            (Get-Paste).PasteBox.Text = 'old text'
+            & (Get-Module PuckBoard) { Invoke-PBPasteFromClipboard }
+            (Get-Paste).PasteBox.Text | Should -BeExactly $script:Copied
+            (Get-Paste).AddButton.IsEnabled | Should -BeTrue
+            Mock -ModuleName PuckBoard Get-PBClipboardText { '' }
+            & (Get-Module PuckBoard) { Invoke-PBPasteFromClipboard }
+            (Get-Paste).PasteBox.Text | Should -BeExactly $script:Copied -Because 'the box keeps what it had'
+            (Get-Paste).SummaryText.Text | Should -BeExactly 'Nothing to paste: copy the lines in Excel first.'
+        }
+
+        It 'what is in the box is read once while only the other boxes change' {
+            Set-Pasted $script:Copied
+            $first = (Get-Paste).Read
+            (Get-Paste).ReplaceRadio.IsChecked = $true
+            Update-Paste | Should -BeTrue
+            [object]::ReferenceEquals($first, (Get-Paste).Read) | Should -BeTrue
+            (Get-Paste).KeepStudentsCheck.IsChecked = $false
+            Update-Paste | Should -BeTrue
+            [object]::ReferenceEquals($first, (Get-Paste).Read) | Should -BeFalse -Because 'keeping the students or not changes the lines'
+        }
+
+        It 'Add lines returns what the boxes ask for, and nothing while there is nothing to add' {
+            & (Get-Module PuckBoard) { Submit-PBPasteLinesDialog }
+            (Get-Paste).Result | Should -BeNullOrEmpty
+            (Get-Paste).Window.DialogResult | Should -BeNullOrEmpty
+
+            Set-Pasted $script:Copied
+            (Get-Paste).ReplaceRadio.IsChecked = $true
+            & (Get-Module PuckBoard) { Submit-PBPasteLinesDialog }
+            (Get-Paste).Window.DialogResult | Should -BeTrue
+            $ask = (Get-Paste).Result
+            $ask.Text | Should -BeExactly $script:Copied
+            $ask.Day | Should -BeExactly '2026-10-20'
+            $ask.KeepDates | Should -BeFalse
+            $ask.KeepStudents | Should -BeTrue
+            $ask.Replace | Should -BeTrue
+        }
+    }
+}

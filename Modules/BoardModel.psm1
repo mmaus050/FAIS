@@ -8,7 +8,8 @@
 #        Set-BoardMission / Set-BoardLineField / Set-FormationPair / Unlink-ReturnLine
 # Typing: ConvertTo-BoardTime / Format-BoardTime / ConvertTo-BoardSortieType / ConvertFrom-QuickEntry
 #         New-BulkBoardLines (Add Bulk Lines)
-# Absences: ConvertTo-ClockTime / Resolve-PastedStudents / New-StudentAbsences / Add-StudentAbsences
+# Pasting: ConvertFrom-PastedLines (lines copied from Excel) / Import-BoardLines
+# Absences: ConvertTo-ClockTime / Resolve-StudentNames / Resolve-PastedStudents / New-StudentAbsences / Add-StudentAbsences
 # Engine: ConvertTo-ScheduleRows / ConvertFrom-ScheduleRows / Get-FillOverlay / Test-BoardReadyToFill
 #         Set-BoardFill / Clear-BoardFill (a fill's picks put on the board, and taken off again)
 # One day at a time: Resolve-SheetRowDays / ConvertFrom-SheetRows / Import-BoardDayLines / Get-BoardSheetState / Get-SheetBannerInfo / Get-SheetDaysToAdd
@@ -753,6 +754,130 @@ function New-BulkBoardLines {
 
 
 # =================================================================================
+#  PASTE LINES
+#  Lines copied from Excel (the flying schedule's ETD, Sortie Type and Instructor columns,
+#  or any block with those three) go straight on the board, without going through
+#  MasterData's Schedule sheet first.
+# =================================================================================
+
+# What was copied, as board lines. The rows are read like the Schedule sheet's
+# (Read-PastedSchedule): columns by their headings, else worked out from the cells.
+#  - The lines go on -Day. With -KeepDates a row that has its own date goes on that date.
+#  - IPs are written the way MasterData's Instructors sheet spells them. A name that is no
+#    IP there (or could be more than one) goes on as pasted and is listed in
+#    UnknownInstructors (a sim line's instructor is not listed: they are not on that sheet).
+#  - -KeepStudents hardcodes the students pasted, with their missions and callsigns. A name
+#    that is no FAIS student, or more than one, is left off its line and listed in
+#    UnknownStudents.
+# Returns {Error; Found (something was pasted); Lines; Days ({Day; Count}: where the lines go);
+#          PastedDays ({Day; Count; Label}: the dates in what was pasted); Rows (rows read);
+#          PastedStudents (rows that name a student); Students (lines with one hardcoded);
+#          OpenOBs (O&Bs with no return leg pasted); Skipped; ColumnText;
+#          UnknownInstructors; UnknownStudents}
+function ConvertFrom-PastedLines {
+                param (
+                                [string]$Text,
+                                $Day,
+                                [switch]$KeepDates,
+                                [switch]$KeepStudents,
+                                [array]$Instructors = @(),
+                                [array]$Students = @(),
+                                $Settings
+                )
+
+                $defaults = Get-DefaultBoardSettings
+                if ($null -eq $Settings) { $Settings = $defaults }
+                $returnType = ([string]$Settings.ReturnSortieType).Trim()
+                if ($returnType -eq '') { $returnType = [string]$defaults.ReturnSortieType }
+                $simIP = ([string]$Settings.SimInstructor).Trim()
+                if ($simIP -eq '') { $simIP = [string]$defaults.SimInstructor }
+
+                $out = [PSCustomObject]@{
+                                Error              = ''
+                                Found              = $false
+                                Lines              = @()
+                                Days               = @()
+                                PastedDays         = @()
+                                Rows               = 0
+                                PastedStudents     = 0
+                                Students           = 0
+                                OpenOBs            = 0
+                                Skipped            = @()
+                                ColumnText         = ''
+                                UnknownInstructors = @()
+                                UnknownStudents    = @()
+                }
+                $dayText = if ($null -eq $Day -or ([string]$Day).Trim() -eq '') { $null } else { ConvertTo-BoardDay $Day }
+                if ($null -eq $dayText) { $out.Error = 'Pick the day to put the lines on.'; return $out }
+
+                $read = Read-PastedSchedule -Text $Text -ReturnType $returnType -SimInstructor $simIP -Instructors $Instructors -Students $Students
+                $out.Found = [bool]$read.Found
+                $out.ColumnText = [string]$read.ColumnText
+                $out.Skipped = @($read.Skipped)
+                if ($read.Error) { $out.Error = [string]$read.Error; return $out }
+                $rows = @($read.Rows)
+                $out.Rows = $rows.Count
+                if ($rows.Count -eq 0) { return $out }
+                $out.PastedDays = @(Get-ScheduleSheetDays -Rows $rows | Where-Object { $_.Day -ne '' })
+
+                # A row's student, when it names one ('' for a return leg or a placeholder like For Sale)
+                $studentOf = {
+                                param ($row)
+                                if ((Test-IsSentinelStudent $row.Student) -or (Test-IsReturnSortieType ([string]$row.SortieType))) { return '' }
+                                return ([string]$row.Student).Trim()
+                }
+                $named = @($rows | ForEach-Object { & $studentOf $_ } | Where-Object { $_ -ne '' })
+                $out.PastedStudents = $named.Count
+                $studentMap = @{}
+                if ($KeepStudents -and $named.Count -gt 0) { $studentMap = Resolve-StudentNames -Names @($named | Select-Object -Unique) -Students $Students }
+
+                $ipIndex = New-PersonIndex -Items $Instructors
+                $ipNames = @{}
+                $unknownIps = New-Object System.Collections.Generic.List[string]
+                $unknownSps = New-Object System.Collections.Generic.List[string]
+                $dated = New-Object System.Collections.Generic.List[object]
+                foreach ($r in $rows) {
+                                $c = $r.PSObject.Copy()
+                                $rowDay = if ($KeepDates -and [string]$r.Day -ne '') { [string]$r.Day } else { $dayText }
+                                $c.ETD = "$rowDay $($r.Time):00"
+
+                                $ip = (([string]$r.Instructor) -replace '\s+', ' ').Trim()
+                                if ($ip -ne '' -and $ip -notlike '*SIM IP*' -and $ip -ne 'NEED IP') {
+                                                if (-not $ipNames.ContainsKey($ip)) {
+                                                                $hits = @((Find-PersonMatch -Person (ConvertTo-PersonName $ip) -Index $ipIndex).Hits)
+                                                                $ipNames[$ip] = if ($hits.Count -eq 1) { ([string]$hits[0].Name).Trim() } else { '' }
+                                                }
+                                                if ($ipNames[$ip] -ne '') { $c.Instructor = $ipNames[$ip] }
+                                                else {
+                                                                $c.Instructor = $ip
+                                                                if (-not (Test-IsSimSortieType ([string]$r.SortieType)) -and -not $unknownIps.Contains($ip)) { $unknownIps.Add($ip) }
+                                                }
+                                }
+
+                                $sp = & $studentOf $r
+                                if ($KeepStudents -and $sp -ne '') {
+                                                if ($studentMap.ContainsKey($sp)) { $c.Student = ([string]$studentMap[$sp].Name).Trim() }
+                                                else {
+                                                                $c.Student = $null
+                                                                $c.Mission = $null
+                                                                if (-not $unknownSps.Contains($sp)) { $unknownSps.Add($sp) }
+                                                }
+                                }
+                                $dated.Add($c)
+                }
+
+                $lines = @(ConvertFrom-ScheduleRows -Rows $dated.ToArray() -Source 'Pasted' -KeepStudents:$KeepStudents -KeepNotes)
+                $out.Lines = $lines
+                $out.Days = @($lines | Group-Object -Property Day | Sort-Object -Property Name | ForEach-Object { [PSCustomObject]@{ Day = [string]$_.Name; Count = $_.Count } })
+                $out.Students = @($lines | Where-Object { $_.Student }).Count
+                $out.OpenOBs = @($lines | Where-Object { (Test-BoardLineIsOB $_) -and -not $_.LinkedLineId }).Count
+                $out.UnknownInstructors = $unknownIps.ToArray()
+                $out.UnknownStudents = $unknownSps.ToArray()
+                return $out
+}
+
+
+# =================================================================================
 #  ADD STUDENT ABSENCE
 #  Blocks students off for a stretch of time: the same as a line on MasterData's
 #  StudentAbsences sheet, so the ABSENCE hard rule keeps them off any line in it.
@@ -775,6 +900,27 @@ function ConvertTo-ClockTime {
                 return New-TimeSpan -Hours $hours -Minutes $clock.Minutes
 }
 
+# name -> student, for the names that are exactly one student: a name exactly as MasterData
+# has it first, then matched like Update Syllabi does ('Casey B. Quill' or 'Quill, Casey
+# [2d Lt]' for 'Quill, Casey'). A name that is no one, or could be more than one student, is
+# left out.
+function Resolve-StudentNames {
+                param ([string[]]$Names = @(), [array]$Students = @())
+
+                $byName = @{}
+                foreach ($s in $Students) {
+                                $name = ([string]$s.Name).Trim()
+                                if ($name -ne '' -and -not $byName.ContainsKey($name)) { $byName[$name] = $s }
+                }
+                $map = @{}
+                $rest = @(foreach ($n in $Names) { if ($byName.ContainsKey($n)) { $map[$n] = $byName[$n] } else { $n } })
+                if ($rest.Count -gt 0) {
+                                $matched = (Resolve-TrainingStudents -Names $rest -Students $Students).Map
+                                foreach ($k in $matched.Keys) { $map[$k] = $matched[$k] }
+                }
+                return $map
+}
+
 # Names copied from Excel, an email or a list -> the students they are. One name per line,
 # cell or ';'. A piece with commas that is nobody's name ('Adams, Brown') is read as several
 # names. Names are matched like Update Syllabi does: exactly first, then 'Casey B. Quill' or
@@ -783,25 +929,8 @@ function ConvertTo-ClockTime {
 function Resolve-PastedStudents {
                 param ([string]$Text, [array]$Students = @())
 
-                $byName = @{}
-                foreach ($s in $Students) {
-                                $name = ([string]$s.Name).Trim()
-                                if ($name -ne '' -and -not $byName.ContainsKey($name)) { $byName[$name] = $s }
-                }
-                # name -> student for the names that are exactly one student
-                $resolve = {
-                                param ([string[]]$Names)
-                                $map = @{}
-                                $rest = @(foreach ($n in $Names) { if ($byName.ContainsKey($n)) { $map[$n] = $byName[$n] } else { $n } })
-                                if ($rest.Count -gt 0) {
-                                                $matched = (Resolve-TrainingStudents -Names $rest -Students $Students).Map
-                                                foreach ($k in $matched.Keys) { $map[$k] = $matched[$k] }
-                                }
-                                return $map
-                }
-
                 $pieces = @([string]$Text -split '[\r\n\t;]+' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
-                $map = if ($pieces.Count -gt 0) { & $resolve $pieces } else { @{} }
+                $map = if ($pieces.Count -gt 0) { Resolve-StudentNames -Names $pieces -Students $Students } else { @{} }
                 $found = New-Object System.Collections.Generic.List[object]
                 $unknown = New-Object System.Collections.Generic.List[string]
                 foreach ($piece in $pieces) {
@@ -809,7 +938,7 @@ function Resolve-PastedStudents {
                                 if ($map.ContainsKey($piece)) { $hits = @($map[$piece]) }
                                 elseif ($piece.Contains(',')) {
                                                 $parts = @($piece -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
-                                                $partMap = & $resolve $parts
+                                                $partMap = Resolve-StudentNames -Names $parts -Students $Students
                                                 if (@($parts | Where-Object { -not $partMap.ContainsKey($_) }).Count -eq 0) { $hits = @(foreach ($p in $parts) { $partMap[$p] }) }
                                 }
                                 if ($hits.Count -eq 0) { if (-not $unknown.Contains($piece)) { $unknown.Add($piece) }; continue }
@@ -1219,17 +1348,19 @@ function Set-BoardSheetSync {
 }
 
 # Puts one day's lines on the board as one undo step. -Replace clears the day first.
-# -Sync records what the Schedule sheet held for that day. Returns {Added; Removed}.
+# -Sync records what the Schedule sheet held for that day. -NoUndo: the caller saved the
+# undo point (Import-BoardLines). Returns {Added; Removed}.
 function Import-BoardDayLines {
                 param (
                                 $Board,
                                 [Parameter(Mandatory)] [string]$Day,
                                 [array]$Lines = @(),
                                 [switch]$Replace,
-                                $Sync
+                                $Sync,
+                                [switch]$NoUndo
                 )
 
-                Save-BoardUndoPoint $Board
+                if (-not $NoUndo) { Save-BoardUndoPoint $Board }
                 $removed = 0
                 if ($Replace) {
                                 $gone = @($Board.Lines | Where-Object { $_.Day -eq $Day } | ForEach-Object { $_.Id })
@@ -1255,6 +1386,24 @@ function Import-BoardDayLines {
                 }
                 Step-BoardVersion $Board
                 return [PSCustomObject]@{ Added = $added; Removed = $removed }
+}
+
+# Puts lines on the board as one undo step, each on its own day (Paste lines). -Replace
+# clears those days first. Returns {Added; Removed; Days}.
+function Import-BoardLines {
+                param ($Board, [array]$Lines = @(), [switch]$Replace)
+
+                $list = @($Lines | Where-Object { $null -ne $_ })
+                $days = @($list | ForEach-Object { [string]$_.Day } | Sort-Object -Unique)
+                $added = 0
+                $removed = 0
+                if ($days.Count -gt 0) { Save-BoardUndoPoint $Board }
+                foreach ($day in $days) {
+                                $res = Import-BoardDayLines -Board $Board -Day $day -Lines @($list | Where-Object { $_.Day -eq $day }) -Replace:$Replace -NoUndo
+                                $added += $res.Added
+                                $removed += $res.Removed
+                }
+                return [PSCustomObject]@{ Added = $added; Removed = $removed; Days = $days }
 }
 
 # How a board day stands against MasterData's Schedule sheet (Read-ScheduleSheet rows):

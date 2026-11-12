@@ -29,10 +29,14 @@
 #  - The menu bar has every action; the Line menu acts on the selected line.
 #  - "Add Student Absence" blocks students off for a stretch of time: the absence goes on the
 #    students straight away (every line is checked against it) and on MasterData's StudentAbsences sheet.
+#  - "Paste lines" (Ctrl+V on the board) takes lines copied from Excel - the ETD, Sortie Type and
+#    Instructor columns - and puts them on the board, without MasterData's Schedule sheet. Its
+#    window shows what was read first.
 
 $script:PB = $null
 $script:PBDlg = $null
 $script:PBAbs = $null
+$script:PBPaste = $null
 $script:PBKnownTags = @('IPPuck', 'StudentPuck', 'IPSlot', 'StudentSlot', 'IPPool', 'StudentPool', 'EtdBox', 'TypeBox',
                 'MissionBox', 'CallsignBox', 'NumBox', 'NotesBox', 'DeleteLine', 'Row')
 $script:PBCellTags = @('EtdBox', 'CallsignBox', 'NumBox', 'NotesBox')
@@ -126,14 +130,14 @@ function Initialize-PuckBoardWindow {
 
                 $controls = @{}
                 foreach ($name in @('UndoButton', 'HelpButton', 'QuickEntryBox', 'AddLineButton', 'QuickEntryFeedback', 'TemplateCombo',
-                                'LoadTemplateButton', 'SaveTemplateButton', 'CopyPrevDayButton', 'LoadDayButton', 'AddDayPicker', 'AddDayButton',
+                                'LoadTemplateButton', 'SaveTemplateButton', 'CopyPrevDayButton', 'LoadDayButton', 'PasteLinesButton', 'AddDayPicker', 'AddDayButton',
                                 'RemoveDayButton', 'BulkLinesButton', 'UpdateSyllabiButton', 'AddAbsenceButton', 'CancelButton', 'BackToEditButton', 'RefillButton', 'ExportButton',
                                 'FillDayButton', 'FillAllButton', 'ColorKeyButton', 'StatusText',
                                 'CountsText', 'IPSearchBox', 'IPPool', 'StudentSearchBox', 'StudentPool', 'ModeBanner', 'ModeBannerText', 'DayTabs',
                                 'SheetBanner', 'SheetBannerText', 'SheetBannerLoadButton', 'SheetBannerIgnoreButton', 'LogoImage',
                                 'HoldBanner', 'HoldBannerText', 'HoldLetGoButton', 'CenterGrid', 'DetailsSplitter', 'DetailsPanel', 'DetailsHideButton',
                                 'DetailsTitle', 'DetailsChecks', 'DetailsPlaceButton', 'DetailsOptionsButton', 'DetailsHideHardCheck', 'DetailsListTitle', 'DetailsListInfo', 'DetailsList',
-                                'MainMenu', 'MenuLoadDay', 'MenuApplyTemplate', 'MenuSaveTemplate', 'MenuCopyPrevDay', 'MenuUpdateSyllabi', 'MenuAddAbsence', 'MenuClose',
+                                'MainMenu', 'MenuLoadDay', 'MenuPasteLines', 'MenuApplyTemplate', 'MenuSaveTemplate', 'MenuCopyPrevDay', 'MenuUpdateSyllabi', 'MenuAddAbsence', 'MenuClose',
                                 'MenuUndo', 'MenuTypeLines', 'MenuBulkLines', 'MenuRecheck', 'MenuLetGo', 'MenuLine', 'MenuPrevDay', 'MenuNextDay',
                                 'MenuAddNextDay', 'MenuAddPickedDay', 'MenuRemoveDay', 'MenuFillDay', 'MenuFillAll', 'MenuRefill', 'MenuBackToEdit',
                                 'MenuExport', 'MenuShowDetails', 'MenuColorKey', 'MenuHelp', 'MenuHelpColorKey',
@@ -476,6 +480,7 @@ function Register-PBHandlers {
                 $C.SaveTemplateButton.Add_Click({ Invoke-PBSafe { Invoke-PBSaveTemplate } })
                 $C.CopyPrevDayButton.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'CopyPrevDay' } } })
                 $C.LoadDayButton.Add_Click({ Invoke-PBSafe { Invoke-PBLoadDayDialog } })
+                $C.PasteLinesButton.Add_Click({ Invoke-PBSafe { Invoke-PBPasteLines } })
                 $C.SheetBannerLoadButton.Add_Click({ Invoke-PBSafe { Invoke-PBSheetBannerLoad } })
                 $C.SheetBannerIgnoreButton.Add_Click({ Invoke-PBSafe { Invoke-PBSheetBannerIgnore } })
                 $C.AddDayButton.Add_Click({ Invoke-PBSafe { Invoke-PBAddDay } })
@@ -507,6 +512,7 @@ function Register-PBMenuHandlers {
                 $C = $script:PB.C
 
                 $C.MenuLoadDay.Add_Click({ Invoke-PBSafe { Invoke-PBLoadDayDialog } })
+                $C.MenuPasteLines.Add_Click({ Invoke-PBSafe { Invoke-PBPasteLines } })
                 $C.MenuSaveTemplate.Add_Click({ Invoke-PBSafe { Invoke-PBSaveTemplate } })
                 $C.MenuCopyPrevDay.Add_Click({ Invoke-PBSafe { Request-PBCommand @{ Cmd = 'CopyPrevDay' } } })
                 $C.MenuUpdateSyllabi.Add_Click({ Invoke-PBSafe { Invoke-PBUpdateSyllabi } })
@@ -1286,6 +1292,8 @@ function Invoke-PBKeyDown {
                 $selected = [string]$script:PB.SelectedLineId
                 if ($ctrl -and $key -eq $KeyT::Z) { Request-PBCommand @{ Cmd = 'Undo' }; $e.Handled = $true; return }
                 if ($ctrl -and $key -eq $KeyT::L) { [void]$C.QuickEntryBox.Focus(); $C.QuickEntryBox.SelectAll(); $e.Handled = $true; return }
+                # Ctrl+V (outside a box being typed in): the Paste lines window, with what was copied in it
+                if ($ctrl -and $key -eq $KeyT::V) { Request-PBCommand @{ Cmd = 'PasteLines' }; $e.Handled = $true; return }
                 # Ctrl+Enter fills every day, Ctrl+Shift+Enter only the day on screen
                 if ($ctrl -and $key -eq $KeyT::Enter) { Request-PBCommand @{ Cmd = 'Fill'; Scope = $(if ($shift) { 'Day' } else { 'All' }) }; $e.Handled = $true; return }
                 if ($ctrl -and $key -eq $KeyT::D -and $selected) { Request-PBCommand @{ Cmd = 'DuplicateLine'; LineId = $selected }; $e.Handled = $true; return }
@@ -1696,6 +1704,7 @@ function Invoke-PBCommand {
                                                 else { Set-PBStatus 'Nothing to undo.' 'Warn' }
                                 }
                                 'CopyPrevDay' { Invoke-PBCopyPrevDay }
+                                'PasteLines' { Invoke-PBPasteLines }
                                 'Fill' { Invoke-PBFill -Refill:([bool]$Cmd.Refill) -Scope $(if ($Cmd.Scope -eq 'Day') { 'Day' } else { 'All' }) }
                                 'ClearFill' { Invoke-PBClearFill }
                                 # Click and place
@@ -2290,6 +2299,7 @@ function Update-PBMenuState {
                 $C.MenuAddPickedDay.Header = if ($null -ne $picked) { "Add the day in the date box ($(Format-BoardDayLabel (([datetime]$picked).ToString('yyyy-MM-dd'))))" } else { 'Add the day in the date box' }
                 $C.MenuRemoveDay.IsEnabled = ($null -ne $active)
                 $C.MenuApplyTemplate.IsEnabled = ($null -ne $active)
+                $C.MenuPasteLines.IsEnabled = ($null -ne $active)
                 $label = if ($active) { Format-BoardDayLabel $active } else { 'this day' }
                 $C.MenuFillDay.Header = "Fill _this day ($label)"
                 $C.MenuFillAll.Header = "Fill _all days ($($script:PB.Board.Days.Count))"
@@ -2798,6 +2808,306 @@ function Submit-PBBulkLinesDialog {
                 if (-not (Update-PBBulkPreview)) { return }
                 $bulk.Result = Get-PBBulkRequest
                 try { $bulk.Window.DialogResult = $true } catch { $bulk.Window.Close() }
+}
+
+
+# =================================================================================
+#  PASTE LINES
+#  Lines copied from Excel (the flying schedule's ETD, Sortie Type and Instructor columns,
+#  with or without their headings) go on the board without going through MasterData's
+#  Schedule sheet. The Paste lines window shows what FAIS read before anything is added.
+# =================================================================================
+
+# The "Paste lines" button, File > Paste lines from Excel and Ctrl+V on the board
+function Invoke-PBPasteLines {
+                $day = Get-PBActiveDay
+                if ($null -eq $day) { Set-PBStatus 'Add a day first.' 'Warn'; return }
+                $ask = Show-PBPasteLinesDialog -Day $day
+                if ($null -eq $ask) { return }
+                [void](Add-PBPastedLines -Text $ask.Text -Day $ask.Day -KeepDates:([bool]$ask.KeepDates) -KeepStudents:([bool]$ask.KeepStudents) -Replace:([bool]$ask.Replace))
+}
+
+# What -Text holds as board lines: ConvertFrom-PastedLines with the board's IPs, students and settings
+function Get-PBPastedLines {
+                param ([string]$Text, [string]$Day, [switch]$KeepDates, [switch]$KeepStudents)
+
+                return (ConvertFrom-PastedLines -Text $Text -Day $Day -KeepDates:$KeepDates -KeepStudents:$KeepStudents -Instructors @($script:PB.Data.Instructors) -Students @($script:PB.Data.Students) -Settings $script:PB.Board.Settings)
+}
+
+# Reads -Text and puts its lines on the board as one undo step: on -Day, or with -KeepDates
+# each line that has its own date on that date. Returns $true when lines went on.
+function Add-PBPastedLines {
+                param ([string]$Text, [string]$Day, [switch]$KeepDates, [switch]$KeepStudents, [switch]$Replace)
+
+                $board = $script:PB.Board
+                $made = Get-PBPastedLines -Text $Text -Day $Day -KeepDates:$KeepDates -KeepStudents:$KeepStudents
+                $lines = @($made.Lines)
+                if ($made.Error -or $lines.Count -eq 0) { Set-PBStatus (Get-PBPasteProblem $made) 'Warn'; return $false }
+
+                $days = @($made.Days | ForEach-Object { [string]$_.Day })
+                $newDay = (@($days | Where-Object { -not $board.Days.Contains($_) }).Count -gt 0)
+                $holder = @{ Res = $null }
+                Invoke-PBChange { $holder.Res = Import-BoardLines -Board $board -Lines $lines -Replace:$Replace }
+                if ($newDay) { Reset-PBPlannedFromBoard }
+                if ($days -notcontains [string](Get-PBActiveDay)) { Select-PBDay $days[0] }
+
+                $res = $holder.Res
+                $msg = "Pasted $($res.Added) line(s) onto $(Format-PBDays $days)"
+                if ($made.Students -gt 0) { $msg += ", $($made.Students) with students hardcoded" }
+                if ($res.Removed -gt 0) { $msg += ", replacing $($res.Removed) line(s)" }
+                $msg += '. Ctrl+Z undoes.'
+                $notes = @(Get-PBPasteNotes $made)
+                if ($notes.Count -gt 0) { $msg += ' ' + ($notes -join ' ') }
+                Set-PBStatus $msg $(if ($notes.Count -gt 0) { 'Warn' } else { 'Good' })
+                return $true
+}
+
+# "a; b; c and 4 more": the first -Max of a list
+function Format-PBShortList {
+                param ([string[]]$Items = @(), [int]$Max = 6)
+
+                $list = @($Items | Where-Object { $_ })
+                $text = @($list | Select-Object -First $Max) -join '; '
+                if ($list.Count -gt $Max) { $text += " and $($list.Count - $Max) more" }
+                return $text
+}
+
+# Why a paste (ConvertFrom-PastedLines) has no lines to add
+function Get-PBPasteProblem {
+                param ($Made)
+
+                if ($Made.Error) { return [string]$Made.Error }
+                if (-not $Made.Found) { return 'Nothing to paste: copy the lines in Excel first (the ETD, Sortie Type and Instructor columns).' }
+                $skipped = @($Made.Skipped)
+                if ($skipped.Count -gt 0) { return "No lines could be read from what was pasted: $(Format-PBShortList $skipped -Max 4)." }
+                return 'No lines could be read from what was pasted: no row has an ETD and a sortie type.'
+}
+
+# What is worth a second look about a paste, one sentence each: rows that could not be read,
+# names MasterData does not have, O&Bs with no return leg
+function Get-PBPasteNotes {
+                param ($Made)
+
+                $notes = New-Object System.Collections.Generic.List[string]
+                $skipped = @($Made.Skipped)
+                if ($skipped.Count -gt 0) { $notes.Add("$($skipped.Count) row(s) could not be read: $(Format-PBShortList $skipped -Max 4).") }
+                $ips = @($Made.UnknownInstructors)
+                if ($ips.Count -gt 0) { $notes.Add("Not on MasterData's Instructors sheet (kept as pasted): $(Format-PBShortList $ips).") }
+                $sps = @($Made.UnknownStudents)
+                if ($sps.Count -gt 0) { $notes.Add("Not a FAIS student, or more than one (left off the line): $(Format-PBShortList $sps).") }
+                if ($Made.OpenOBs -gt 0) { $notes.Add("$($Made.OpenOBs) O&B line(s) have no return leg in what was pasted (type e.g. 1330 RTN in the Add lines box to add one).") }
+                return $notes.ToArray()
+}
+
+# The Paste lines window. Returns @{ Text; Day ('yyyy-MM-dd'); KeepDates; KeepStudents; Replace },
+# or $null when cancelled.
+function Show-PBPasteLinesDialog {
+                param ([string]$Day)
+
+                $win = Initialize-PBPasteLinesDialog -Day $Day
+                try { [void]$win.ShowDialog() } catch { Write-PBLog "Paste lines dialog: $($_.Exception.Message)" }
+                $result = $script:PBPaste.Result
+                $script:PBPaste = $null
+                return $result
+}
+
+# Builds the Paste lines window without showing it. Its state lives in $script:PBPaste.
+# What was just copied starts in the box when it reads as lines (-Text stands in for it).
+function Initialize-PBPasteLinesDialog {
+                param ([string]$Day, [string]$Text)
+
+                [xml]$xaml = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'PasteLinesDialog.xaml') -Raw -Encoding UTF8
+                $win = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
+                $paste = @{ Window = $win; Result = $null; Setting = $false; Read = $null; ReadKey = ''; DatesFor = '' }
+                foreach ($ctl in @('PasteBox', 'PasteButton', 'ClearButton', 'SummaryText', 'ColumnsText', 'PreviewList', 'NotesText', 'TargetDayPicker', 'TargetInfoText',
+                                'KeepDatesCheck', 'AddRadio', 'ReplaceRadio', 'KeepStudentsCheck', 'AddButton', 'CancelButton')) {
+                                $c = $win.FindName($ctl)
+                                if ($null -eq $c) { throw "PasteLinesDialog.xaml is missing the element '$ctl'" }
+                                $paste[$ctl] = $c
+                }
+                $script:PBPaste = $paste
+                try { if ($script:PB.Window.IsVisible) { $win.Owner = $script:PB.Window } } catch { }
+                if ($null -eq $win.Owner) { $win.WindowStartupLocation = [System.Windows.WindowStartupLocation]::CenterScreen }
+                $paste.TargetDayPicker.SelectedDate = ConvertTo-PBDayDate $Day
+
+                # A change the window makes by itself (Setting) is not one to read again
+                $refresh = { Invoke-PBSafe { if ($null -ne $script:PBPaste -and -not $script:PBPaste.Setting) { [void](Update-PBPastePreview) } } }
+                $paste.PasteBox.Add_TextChanged($refresh)
+                $paste.TargetDayPicker.Add_SelectedDateChanged($refresh)
+                foreach ($box in @($paste.KeepDatesCheck, $paste.KeepStudentsCheck, $paste.ReplaceRadio)) {
+                                $box.Add_Checked($refresh)
+                                $box.Add_Unchecked($refresh)
+                }
+                $paste.PasteButton.Add_Click({ Invoke-PBSafe { Invoke-PBPasteFromClipboard } })
+                $paste.ClearButton.Add_Click({ Invoke-PBSafe { Set-PBPasteText ''; [void]$script:PBPaste.PasteBox.Focus() } })
+                $paste.AddButton.Add_Click({ Invoke-PBSafe { Submit-PBPasteLinesDialog } })
+                $win.AddHandler([System.Windows.UIElement]::PreviewKeyDownEvent,
+                                [System.Windows.Input.KeyEventHandler]{ param($s, $e) Invoke-PBSafe { Invoke-PBPasteKeyDown $e } }, $true)
+                # Enter adds the lines when there are some to add; else the box is ready for Ctrl+V
+                $win.Add_Loaded({ Invoke-PBSafe { if ($script:PBPaste.AddButton.IsEnabled) { [void]$script:PBPaste.AddButton.Focus() } else { [void]$script:PBPaste.PasteBox.Focus() } } })
+
+                $copied = if ($PSBoundParameters.ContainsKey('Text')) { $Text } else { Get-PBClipboardText }
+                $start = ''
+                if (-not [string]::IsNullOrWhiteSpace($copied)) {
+                                $ask = Get-PBPasteRequest
+                                $ask.Text = $copied
+                                $made = Get-PBPasteRead $ask
+                                if (-not $made.Error -and @($made.Lines).Count -gt 0) { $start = $copied }
+                }
+                Set-PBPasteText $start
+                return $win
+}
+
+# What the window's boxes ask for right now
+function Get-PBPasteRequest {
+                $paste = $script:PBPaste
+                $date = $paste.TargetDayPicker.SelectedDate
+                return @{
+                                Text         = [string]$paste.PasteBox.Text
+                                Day          = $(if ($null -ne $date) { ([datetime]$date).ToString('yyyy-MM-dd') } else { '' })
+                                KeepDates    = [bool]$paste.KeepDatesCheck.IsChecked
+                                KeepStudents = [bool]$paste.KeepStudentsCheck.IsChecked
+                                Replace      = [bool]$paste.ReplaceRadio.IsChecked
+                }
+}
+
+# The lines a request's text reads as. The last read is kept, so a big paste is read once
+# and not again for every box that changes.
+function Get-PBPasteRead {
+                param ([hashtable]$Ask)
+
+                $paste = $script:PBPaste
+                $key = "$($Ask.Day)|$([bool]$Ask.KeepDates)|$([bool]$Ask.KeepStudents)|$($Ask.Text)"
+                if ($null -eq $paste.Read -or $paste.ReadKey -cne $key) {
+                                $paste.Read = Get-PBPastedLines -Text $Ask.Text -Day $Ask.Day -KeepDates:([bool]$Ask.KeepDates) -KeepStudents:([bool]$Ask.KeepStudents)
+                                $paste.ReadKey = $key
+                }
+                return $paste.Read
+}
+
+# One line in the Paste lines window's list: "0730  Day Local   Jones, Bob   Adams, Al (FT5103)"
+function New-PBPasteItem {
+                param ($Line, [switch]$ShowDay)
+
+                $type = [string]$Line.SortieType
+                $ip = [string]$Line.Instructor
+                if ($ip -eq '') { $ip = if (Test-IsSimSortieType $type) { 'SIM IP' } else { '(no IP)' } }
+                $rest = ''
+                if ($Line.Student) {
+                                $rest = [string]$Line.Student
+                                if ($Line.Mission) { $rest += " ($($Line.Mission))" }
+                }
+                elseif ((Test-IsReturnSortieType $type) -and $Line.LinkedLineId) { $rest = 'follows its O&B' }
+                $day = if ($ShowDay) { $Line.ETD.ToString('ddd dd MMM') + '  ' } else { '' }
+                return [PSCustomObject]@{ Text = ('{0}{1}  {2,-11} {3,-32} {4}' -f $day, $Line.ETD.ToString('HHmm'), $type, $ip, $rest).TrimEnd() }
+}
+
+# Reads what is in the box and shows the lines it would add, or what is wrong with it.
+# Returns $true when there are lines to add.
+function Update-PBPastePreview {
+                $paste = $script:PBPaste
+                if ($null -eq $paste) { return $false }
+                $board = $script:PB.Board
+                $ask = Get-PBPasteRequest
+                $read = Get-PBPasteRead $ask
+
+                # Dates in what was pasted are kept, unless one of them is before the board's first
+                # day (yesterday's lines copied to fly again). The tick is the user's from then on.
+                $pasted = @($read.PastedDays)
+                $datesKey = @($pasted | ForEach-Object { [string]$_.Day }) -join ','
+                if ($datesKey -ne $paste.DatesFor) {
+                                $paste.DatesFor = $datesKey
+                                $first = if ($board.Days.Count -gt 0) { [string]$board.Days[0] } else { '' }
+                                $keep = ($pasted.Count -gt 0 -and @($pasted | Where-Object { [string]$_.Day -lt $first }).Count -eq 0)
+                                if ([bool]$paste.KeepDatesCheck.IsChecked -ne $keep) {
+                                                $paste.Setting = $true
+                                                try { $paste.KeepDatesCheck.IsChecked = $keep } finally { $paste.Setting = $false }
+                                                $ask = Get-PBPasteRequest
+                                                $read = Get-PBPasteRead $ask
+                                }
+                }
+                $paste.KeepDatesCheck.Visibility = if ($pasted.Count -gt 0) { 'Visible' } else { 'Collapsed' }
+                $paste.KeepDatesCheck.Content = 'Keep the dates that were pasted (' + (Format-PBShortList @($pasted | ForEach-Object { "$(Format-BoardDayLabel $_.Day): $($_.Count)" }) -Max 4) + ')'
+                $paste.KeepStudentsCheck.Visibility = if ($read.PastedStudents -gt 0) { 'Visible' } else { 'Collapsed' }
+
+                # The day picked is for the lines with no date of their own
+                $datedRows = 0
+                foreach ($d in $pasted) { $datedRows += [int]$d.Count }
+                $allDated = ($ask.KeepDates -and $read.Rows -gt 0 -and $datedRows -eq $read.Rows)
+                $paste.TargetDayPicker.IsEnabled = (-not $allDated)
+                $info = 'pick the day'
+                if ($allDated) { $info = 'not used: every line has its own date' }
+                elseif ($ask.Day -ne '') {
+                                $n = @($board.Lines | Where-Object { $_.Day -eq $ask.Day }).Count
+                                $info = if ($n -gt 0) { "has $n line(s) on the board now" } elseif ($board.Days.Contains($ask.Day)) { 'on the board, no lines yet' } else { 'adds this day to the board' }
+                                if ($ask.KeepDates -and $datedRows -gt 0) { $info = "for the lines with no date ($info)" }
+                }
+                $paste.TargetInfoText.Text = $info
+
+                $lines = @($read.Lines)
+                $empty = [string]::IsNullOrWhiteSpace($ask.Text)
+                if ($empty -or $read.Error -or $lines.Count -eq 0) {
+                                # Grey while nothing is pasted yet, red once what is there can't be read
+                                $paste.SummaryText.Text = if ($empty) { 'Nothing pasted yet: copy the lines in Excel, then press Ctrl+V here.' } else { Get-PBPasteProblem $read }
+                                $paste.SummaryText.Foreground = Get-PBBrush $(if ($empty) { '#64748B' } else { '#B91C1C' })
+                                $paste.ColumnsText.Text = if ($empty -or -not $read.ColumnText) { '' } else { "Read as: $($read.ColumnText)" }
+                                $paste.PreviewList.ItemsSource = @()
+                                $paste.NotesText.Text = ''
+                                $paste.AddButton.IsEnabled = $false
+                                return $false
+                }
+
+                $days = @($read.Days | ForEach-Object { [string]$_.Day })
+                $types = @($lines | Group-Object -Property SortieType | Sort-Object -Property @{ Expression = 'Count'; Descending = $true }, Name | ForEach-Object { "$($_.Count) $($_.Name)" }) -join ', '
+                $verb = if ($ask.Replace) { 'replace the lines on' } else { 'add to' }
+                $paste.SummaryText.Text = "$($lines.Count) line(s) to $verb $(Format-PBDays $days): $types."
+                $paste.SummaryText.Foreground = Get-PBBrush '#0F172A'
+                $paste.ColumnsText.Text = "Read as: $($read.ColumnText)"
+                $showDay = ($days.Count -gt 1)
+                $paste.PreviewList.ItemsSource = @(foreach ($l in @($lines | Sort-Object -Property ETD)) { New-PBPasteItem -Line $l -ShowDay:$showDay })
+                $paste.NotesText.Text = (@(Get-PBPasteNotes $read) -join "`n")
+                $paste.AddButton.IsEnabled = $true
+                return $true
+}
+
+# Puts -Text in the box and shows what it reads as
+function Set-PBPasteText {
+                param ([string]$Text)
+
+                $paste = $script:PBPaste
+                $paste.Setting = $true
+                try { $paste.PasteBox.Text = $Text } finally { $paste.Setting = $false }
+                [void](Update-PBPastePreview)
+}
+
+# The Paste button, and Ctrl+V outside the box: what was copied goes in the box, in place of
+# what is there
+function Invoke-PBPasteFromClipboard {
+                $copied = Get-PBClipboardText
+                if ([string]::IsNullOrWhiteSpace($copied)) {
+                                $script:PBPaste.SummaryText.Text = 'Nothing to paste: copy the lines in Excel first.'
+                                $script:PBPaste.SummaryText.Foreground = Get-PBBrush '#B45309'
+                                return
+                }
+                Set-PBPasteText $copied
+}
+
+# Ctrl+V anywhere but in a text box pastes what was copied (in the box it pastes as usual)
+function Invoke-PBPasteKeyDown {
+                param ($e)
+
+                $ctrl = ([System.Windows.Input.Keyboard]::Modifiers -band [System.Windows.Input.ModifierKeys]::Control) -eq [System.Windows.Input.ModifierKeys]::Control
+                if ($ctrl -and $e.Key -eq [System.Windows.Input.Key]::V -and [System.Windows.Input.Keyboard]::FocusedElement -isnot [System.Windows.Controls.Primitives.TextBoxBase]) {
+                                Invoke-PBPasteFromClipboard
+                                $e.Handled = $true
+                }
+}
+
+function Submit-PBPasteLinesDialog {
+                $paste = $script:PBPaste
+                if (-not (Update-PBPastePreview)) { return }
+                $paste.Result = Get-PBPasteRequest
+                try { $paste.Window.DialogResult = $true } catch { $paste.Window.Close() }
 }
 
 
@@ -3670,6 +3980,10 @@ ADDING LINES (box at the top, press Enter)
   Several at once:        0730 DL, 0745 DL, 0800 DL
   Add Bulk Lines          asks for a start time, how many lines and the minutes between them
                           (3 by default), e.g. 0730, 10 lines -> 0730 0733 ... 0757
+  Paste lines...          copy the lines in Excel (the ETD, Sortie Type and Instructor columns,
+                          with their headings if you can) and press Ctrl+V on the board, or
+                          Paste lines. A window shows what FAIS read (and lets you pick the
+                          day) before the lines go on. No need for MasterData's Schedule sheet.
 Templates save a day's times; "Copy previous day's lines" copies the last flying day.
 
 ONE DAY AT A TIME
@@ -3723,7 +4037,8 @@ MENUS
   right-click menu). Help > What the colors mean (or the Colors button) explains every color.
 
 KEYS
-  Ctrl+L quick entry   Ctrl+Z undo   Delete clears the selected slot   Esc lets go of a puck
+  Ctrl+L quick entry   Ctrl+V paste lines copied from Excel   Ctrl+Z undo
+  Delete clears the selected slot   Esc lets go of a puck
   Ctrl+D duplicate the selected line   Ctrl+Delete delete it   Ctrl+PgUp / PgDn change day
   F5 re-check everything   Ctrl+Enter fill all days   Ctrl+Shift+Enter fill this day
 
@@ -4526,6 +4841,29 @@ function Test-PuckBoardWindow {
                                                 & $check (@(Get-BoardDayLines -Board $script:PB.Board -Day $day2).Count -eq $before + 4 -and $script:PB.DayColls[$day2].Count -eq $before + 4) 'four new rows on the day'
                                                 Invoke-PBCommand @{ Cmd = 'Undo' }
                                                 & $check (@(Get-BoardDayLines -Board $script:PB.Board -Day $day2).Count -eq $before) 'one undo takes them all off'
+                                }
+
+                                $step = 'paste lines dialog'
+                                $pasteText = "Sortie Type`tETD`tInstructor`r`nDay Local`t1500`t$ipName`r`nOFT`t1530`t`r`n"
+                                [void](Initialize-PBPasteLinesDialog -Day $day2 -Text $pasteText)
+                                & $check ($script:PBPaste.AddButton.IsEnabled -and @($script:PBPaste.PreviewList.ItemsSource).Count -eq 2) 'what was copied starts in the box and reads as two lines'
+                                & $check ([string]$script:PBPaste.SummaryText.Text -like '2 line(s) to add to*') 'the summary says what will be added'
+                                $script:PBPaste.PasteBox.Text = 'not a schedule'
+                                & $check (-not $script:PBPaste.AddButton.IsEnabled) 'text that is not lines is refused'
+                                $script:PBPaste.PasteBox.Text = $pasteText
+                                & $check ($script:PBPaste.AddButton.IsEnabled) 'typing in the box reads it again'
+                                Submit-PBPasteLinesDialog
+                                $pasteAsk = $script:PBPaste.Result
+                                $script:PBPaste = $null
+                                & $check ($null -ne $pasteAsk -and $pasteAsk.Day -eq $day2 -and -not $pasteAsk.Replace) 'dialog returns the text and the day'
+                                $before = @(Get-BoardDayLines -Board $script:PB.Board -Day $day2).Count
+                                if ($null -ne $pasteAsk) {
+                                                & $check (Add-PBPastedLines -Text $pasteAsk.Text -Day $pasteAsk.Day -KeepDates:([bool]$pasteAsk.KeepDates) -KeepStudents:([bool]$pasteAsk.KeepStudents) -Replace:([bool]$pasteAsk.Replace)) 'pasted lines added'
+                                                $after = @(Get-BoardDayLines -Board $script:PB.Board -Day $day2)
+                                                & $check ($after.Count -eq $before + 2 -and $script:PB.DayColls[$day2].Count -eq $before + 2) 'two new rows on the day'
+                                                & $check (@($after | Where-Object { $_.Instructor -eq $ipName -and $_.ETD.ToString('HHmm') -eq '1500' }).Count -eq 1) 'the IP pasted is on its line'
+                                                Invoke-PBCommand @{ Cmd = 'Undo' }
+                                                & $check (@(Get-BoardDayLines -Board $script:PB.Board -Day $day2).Count -eq $before) 'one undo takes the pasted lines off'
                                 }
 
                                 $step = 'menu bar'

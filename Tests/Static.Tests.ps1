@@ -269,6 +269,33 @@ Describe 'BulkLinesDialog.xaml' {
                 }
 }
 
+Describe 'PasteLinesDialog.xaml' {
+                BeforeAll {
+                                $script:PasteDlgText = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Modules/PasteLinesDialog.xaml'))
+                                $script:BoardCode6 = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Modules/PuckBoard.psm1'))
+                }
+
+                It 'is well-formed XML with no code-behind hooks' {
+                                { [xml]$script:PasteDlgText } | Should -Not -Throw
+                                $script:PasteDlgText | Should -Not -Match 'x:Class='
+                                $script:PasteDlgText | Should -Not -Match '\sClick='
+                }
+
+                It 'has every named element the board code looks up, and no other' {
+                                $names = @([regex]::Matches($script:PasteDlgText, 'x:Name="([^"]+)"') | ForEach-Object { $_.Groups[1].Value })
+                                $listBlock = [regex]::Match($script:BoardCode6, "foreach \(\`$ctl in @\(([^)]*)\)\)").Groups[1].Value
+                                $wanted = @([regex]::Matches($listBlock, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value })
+                                $wanted.Count | Should -BeGreaterThan 10
+                                @($wanted | Where-Object { $names -notcontains $_ }) | Should -BeNullOrEmpty
+                                @($names | Where-Object { $wanted -notcontains $_ }) | Should -BeNullOrEmpty
+                }
+
+                It 'is plain ASCII' {
+                                $bytes = [System.IO.File]::ReadAllBytes((Join-Path $script:Root 'Modules/PasteLinesDialog.xaml'))
+                                @($bytes | Where-Object { $_ -gt 127 }).Count | Should -Be 0
+                }
+}
+
 Describe 'ExportResultDialog.xaml' {
                 BeforeAll {
                                 $script:ResultText = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Modules/ExportResultDialog.xaml'))

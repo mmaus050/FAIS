@@ -17,7 +17,7 @@ Add `-Trace` to print every scheduling decision to the console. FAIS restarts it
 
 **What happens:**
 1. **Pre-run pop-ups.** Log any hooked (unsat) or incomplete events from the last schedule, put students on or off hold with **Change Student HOLD status** (checked = on hold), and block students off with **Add Student Absence**, then click **Open Puck Board**. These are saved right away (see *Data in and out*).
-2. **Puck board.** Each day on MasterData's **Schedule** sheet opens as its own tab with its lines (or you type them), and you hardcode whoever you want. **Add Student Absence** is on the board too. *(details below)*
+2. **Puck board.** Each day on MasterData's **Schedule** sheet opens as its own tab with its lines (or you paste them from Excel with **Paste lines**, or type them), and you hardcode whoever you want. **Add Student Absence** is on the board too. *(details below)*
 3. **Fill.** The scheduler fills every open line: formation wingmen, direct support and O&B return legs included. **Fill <day>** fills just the day on screen; **Fill all N days** (shown when the board has more than one day) fills them all. Its picks go **on the board** (blue italics, `AUTO`), so you can still drag them between lines, swap them, change missions, add or delete lines, and fill another day: the Fill buttons stay. A line nobody could fly shows **NEED SP** in red. **Clear fill** takes the scheduler's picks off the day on screen (students you hardcoded or moved stay), **Re-fill** does that and fills the day again, and **Ctrl+Z** takes a fill back off.
 4. **Export** (always on the bottom bar). Writes the board **as it stands**: nobody is picked, every student stays where they are (rule breaks flagged `OVERRIDE`), and a line with no student goes out as **NEED SP**. All or nothing: if any part fails, none of the files change. It writes the day on screen and every day you filled since the board opened (the button names them):
    - OutputSchedule: the **MasterSchedule** sheet (first tab). Only the filled days are replaced; other days already exported (today onward) are kept, so you can update **one day at a time**,
@@ -39,7 +39,7 @@ Closing the board without exporting writes nothing (only the pre-run pop-ups hav
 | **Log Hooked Event** | | MasterData: UnsatSim or UnsatFlight = TRUE |
 | **Log Incomplete Event** | | MasterData: SimDebt and DiscontinuityScore (only that event's part comes off). OutputSchedule: that event's cells on the student's tab |
 | **Change Student HOLD status** | | MasterData: OnHold = TRUE or FALSE for the students you changed |
-| Puck board and fill | MasterData's Schedule sheet again whenever MasterData is saved; **Load a day...** reads it (or the last exported MasterSchedule) fresh | Nothing (the board's own autosave in `Boards\` aside) |
+| Puck board and fill | MasterData's Schedule sheet again whenever MasterData is saved; **Load a day...** reads it (or the last exported MasterSchedule) fresh; **Paste lines** reads what you copied in Excel (no file) | Nothing (the board's own autosave in `Boards\` aside) |
 | **Update Syllabi** | The training file you pick (flying schedule or Big Board) | OutputSchedule: the changed events' cells on the students' tabs (a student with no tab gets one). MasterData: SimDebt, DiscontinuityScore |
 | **Add Student Absence** | | MasterData: a line on StudentAbsences for each student (Student, StartTime, EndTime, Reason, IsActive = TRUE) |
 | **Export** | | OutputSchedule: MasterSchedule (the day on screen and the days filled), student tabs. MasterData: SimDebt, DiscontinuityScore, unsat resets, String Tracker, and any absence **Add Student Absence** could not save. ATIS: the exported days' tabs |
@@ -63,6 +63,40 @@ The board reads the **Schedule** sheet and keeps watching it:
 - **ETD** can be a date and time, or just a time (`0730`, `730`, `7:30`, `7:30 AM`, a time-formatted cell). A time-only row takes its date from the `Date` column, or from a row above it that holds only a date (for example `Tuesday, October 21, 2026`). With neither, it counts as the first day on the board.
 - **SortieType** can be written short: `DL`, `OB`, `RTN`, `OFT`, `IFT`.
 - **Blank rows** and repeated heading rows are skipped. (They used to stop the read, so days after a blank row never loaded.)
+
+## Paste lines
+
+**Paste lines...** (second bar, File menu, or **Ctrl+V** anywhere on the board that isn't a box you are typing in) puts lines you copied from Excel straight on the board. It is another way in for the schedule that needs filling: nothing has to go on MasterData's Schedule sheet first. The Schedule sheet still works exactly as before.
+
+1. **Copy the lines in Excel.** FAIS needs the **ETD**, the **Sortie Type** and the **Instructor** columns. Copy their heading row too if you can. Other columns can come along (a whole tab of the flying schedule is fine): FAIS picks out the ones it knows.
+2. **Press Ctrl+V on the board** (or **Paste lines...**). The window opens with what you copied in its box, when it reads as lines. You can also paste into the box yourself (Ctrl+V, or **Paste**) and fix a cell there.
+3. **Check what FAIS read.** Under the box:
+   - how many lines, and which column it took for what, for example `ETD = column 5, Sortie Type = column 19, IP = column 14 (from the headings on row 1)`;
+   - each line: ETD, type, IP (and the student, when one is kept);
+   - in amber, what is worth a second look: rows it could not read (with the reason), IPs that are not on MasterData's Instructors sheet, O&Bs with no return leg.
+4. **Pick the day** the lines go on (it starts on the day on screen), and whether to **add** them to the lines already on the board or **replace** that day's lines.
+5. **Add lines.** They go on the board as ordinary lines: drag pucks onto them, change the ETDs, fill. **Ctrl+Z** takes the whole paste back off. Nothing changes until you press Add lines.
+
+**How the columns are found:**
+- **By their headings**, in any order, the same headings the Schedule sheet takes: `ETD` (or `Time`, `Start Time`), `Sortie Type` (or `Type`, `Device`), `Instructor` (or `IP`, `Simulator Instructor`), and `Date`, `Student`, `Mission` (or `Event Name`), `Callsign`, `#`, `Notes` (or `Remarks`). The flying schedule's **Flying** and **Sims** tabs paste as they are.
+- **With no heading row**, from what is in the cells:
+  - the column of times is the ETD;
+  - the column of sortie types (`Day Local`, `DL`, `O&B`, `OFT 3` ...) is the type;
+  - the column of names on MasterData's Instructors sheet is the IP;
+  - a column of names on the Students sheet is the student, a column of `FT5103`-style numbers the mission, a column of dates the date.
+
+  If FAIS can't tell which column is the ETD or the sortie type, it says so: copy the heading row too.
+- **A heading FAIS doesn't know** (`Crew` over the IPs): that column is worked out from its cells in the same way. Only the ETD, sortie type and IP are looked for like this once there is a heading row.
+
+**What goes on each line:**
+- **ETD:** `0730`, `730`, `7:30`, `7:30 AM`, or a date and time. Sortie types can be short (`DL`, `OB`, `RTN`).
+- **IP:** written the way MasterData's Instructors sheet spells them (`JONES, BOB [Maj]` or just `Jones` becomes `Jones, Bob`), so the IP's puck counts the line. A name MasterData doesn't have goes on as pasted and is listed. A sim line with no instructor is a SIM IP line.
+- **O&B:** linked to the next O&B Return pasted for the same IP. An O&B with no return leg in what you pasted is listed: type e.g. `1330 RTN` in the Add lines box to add one.
+- **Notes:** a `Notes` or `Remarks` column goes on the line's Notes.
+- **Students:** when what you pasted names students, **Keep the students and missions that were pasted** (ticked to start with) hardcodes the ones FAIS knows, with their mission and callsign. A name that is no FAIS student, or could be more than one, is left off its line and listed. Untick it to get the lines only.
+- **Dates:** a line with just a time goes on the day you pick. When lines have their own dates (a date and time in the ETD, a `Date` column, or a date on a row of its own above them), **Keep the dates that were pasted** puts each on its own date and adds a tab for a new day. It starts ticked, unless one of the dates is before the board's first day (yesterday's lines copied to fly again): then they all go on the day you pick. A date more than five years from today is not read as a date (tail numbers like `03-3678` look like one).
+
+Anything that pastes as rows of tab-separated cells is read the same way. Text with no tabs in it is split on `|`, else on runs of two or more spaces.
 
 ## Update Syllabi
 
@@ -159,10 +193,11 @@ An absence a student already has (same start and end) is not added twice.
 | **Add Bulk Lines** (top) | Asks for a start time, how many lines and the minutes between them (3 by default), then adds them to the day on screen: `0730`, `10` lines, `3` min gives 0730, 0733 ... 0757. Pick the line type too (an O&B gets its return leg). One **Ctrl+Z** takes the whole run off. |
 | **Template / Copy previous day's lines** | Reuse a saved wave, or copy the last flying day's times, types and IPs. |
 | **Load a day...** | Load one day from MasterData's Schedule sheet or from the last exported schedule. |
+| **Paste lines...** | Put lines copied from Excel (the ETD, Sortie Type and Instructor columns) straight on the board. **Ctrl+V** on the board does the same. See *Paste lines*. |
 | **Update Syllabi** | Pick the day's flying schedule or the Big Board; FAIS works out which it is and marks each student's events complete or not complete from it. See *Update Syllabi*. |
 | **Add Student Absence** | Block students off for a stretch of time: drag, click or paste them in, pick the day on the calendar, type the times (`0730`, `1530` or `0330 PM`). See *Add Student Absence*. |
 | **Blue banner** | MasterData's Schedule sheet has lines the board doesn't: load them or keep the board's lines. |
-| **Menu bar** (very top) | Every action in one place, with its key: File (load a day, templates, Update Syllabi, Add student absence), Edit (undo, type lines, bulk lines, re-check), **Line** (what can be done to the selected line), Day, Fill, View, Help. |
+| **Menu bar** (very top) | Every action in one place, with its key: File (load a day, paste lines, templates, Update Syllabi, Add student absence), Edit (undo, type lines, bulk lines, re-check), **Line** (what can be done to the selected line), Day, Fill, View, Help. |
 | **Fill <day> / Fill all N days** (bottom) | Fill the open lines on the day on screen, or on every day on the board. The picks go on the board to move or change; the buttons stay for the next day. |
 | **Clear fill / Re-fill** (bottom) | Shown when the day on screen has the scheduler's picks: take them off, or take them off and fill again. |
 | **Export** (bottom) | Write the board as it stands (open lines as NEED SP) for the day on screen and every day filled since the board opened. |
@@ -208,6 +243,7 @@ Click a student in the list to see their full check on the left. **Double-click*
 
 **Keys:**
 - **Ctrl+L**: jump to the Add lines box
+- **Ctrl+V**: paste lines copied from Excel (see *Paste lines*); in a box you are typing in it pastes there as usual
 - **Ctrl+Z**: undo
 - **Delete**: clear the selected slot
 - **Ctrl+D** / **Ctrl+Delete**: duplicate / delete the selected line
@@ -221,13 +257,13 @@ Click a student in the list to see their full check on the left. **Double-click*
 | Path | What |
 |---|---|
 | `FAIS.ps1` | Entry point and settings (`$BoardSettings`, `$OutputSettings`; the Teams copy is off by default) |
-| `Modules\` | Code: engine (`SchedulingEngine`, `Syllabus`), board (`PuckBoard.xaml/.psm1`, `LoadDayDialog.xaml`, `BulkLinesDialog.xaml`, `AbsenceDialog.xaml`, `ExportResultDialog.xaml`, `BoardLogo.png` (the title-bar logo), `BoardModel`, `Assessment`), Excel in/out (`DataDownload`, `DataUpload`, `ExcelFiles`), Update Syllabi (`SyllabusImport`), pre-run pop-ups (`PreRunMenu`), helpers (`DataManipulation`) |
+| `Modules\` | Code: engine (`SchedulingEngine`, `Syllabus`), board (`PuckBoard.xaml/.psm1`, `LoadDayDialog.xaml`, `BulkLinesDialog.xaml`, `PasteLinesDialog.xaml`, `AbsenceDialog.xaml`, `ExportResultDialog.xaml`, `BoardLogo.png` (the title-bar logo), `BoardModel`, `Assessment`), Excel in/out (`DataDownload`, `DataUpload`, `ExcelFiles`), Update Syllabi (`SyllabusImport`), pre-run pop-ups (`PreRunMenu`), helpers (`DataManipulation`) |
 | `Boards\` | Autosaved board, one file per day (created on first run) |
 | `Templates\` | Saved wave templates |
 | `OldFunctions.psm1` | Legacy code, kept for reference only; not loaded |
 | `Tests\` | Self-test and Pester suites |
 
-The MasterData **Schedule** sheet is optional: without it, type the lines or use templates.
+The MasterData **Schedule** sheet is optional: without it, paste the lines from Excel (*Paste lines*), type them or use templates.
 
 **Output settings** (`$OutputSettings` in FAIS.ps1):
 
