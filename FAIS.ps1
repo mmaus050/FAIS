@@ -6,7 +6,8 @@
 #   2. Pre-run pop-ups: log hooked (unsat) / incomplete events from the last schedule, HOLD status,
 #      Add Student Absence (all saved right away)
 #   3. Puck board: lines come from MasterData's Schedule sheet, a tab for each day it has lines for
-#      (re-read whenever MasterData is saved), or are typed; hardcode IPs and students, see the + / - and rule flags.
+#      (re-read whenever MasterData is saved), or are pasted from Excel (Paste lines) or typed; hardcode IPs and
+#      students, see the + / - and rule flags.
 #      Add Student Absence blocks students off (saved to MasterData's StudentAbsences sheet right away)
 #   4. "Fill this day" or "Fill all days": the scheduler fills the open lines, you review it
 #   5. Export, all or nothing, for the filled days: OutputSchedule.xlsx (MasterSchedule, other exported

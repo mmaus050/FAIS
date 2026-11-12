@@ -7,7 +7,8 @@
 #   - Excel round trip through ImportExcel (temp files only), when ImportExcel is installed:
 #     MasterSchedule + student tabs, the Schedule sheet reader, exporting one day at a time
 #   - the puck board: the XAML loads, every template builds, and the real window is driven
-#     off-screen through pin / move / undo / ETD / fill / export (a window may flash briefly)
+#     off-screen through pin / move / undo / ETD / fill / export, and each of its windows
+#     (Load a day, Add bulk lines, Paste lines, Add student absence) (a window may flash briefly)
 # Exit code 0 = everything passed. -SkipWindow skips the window part.
 param (
     [switch]$SkipWindow
@@ -72,6 +73,18 @@ Assert-That "quick entry '0730 DL, 1015 O&B, 1300 OFT x2' makes 5 lines with a l
 }
 Assert-That "'0900 DL Lee' picks Lee, Ann (not Leech, Tom)" {
     (ConvertFrom-QuickEntry -Text '0900 DL Lee' -Day '2026-10-20' -Instructors $ips -Students @()).Lines[0].Instructor -eq 'Lee, Ann'
+}
+Assert-That 'lines copied from Excel (Sortie Type, ETD, Instructor) read as board lines, with the IPs as MasterData spells them' {
+    $copied = "Sortie Type`tETD`tInstructor`r`nDay Local`t0730`tJONES, BOB [Maj]`r`nO&B`t1015`tOrtiz`r`nO&B Return`t1315`tOrtiz`r`nOFT`t1300`t`r`n"
+    $p = ConvertFrom-PastedLines -Text $copied -Day '2026-10-20' -Instructors $ips -Students @()
+    $l = @($p.Lines | Sort-Object -Property ETD)
+    $p.Error -eq '' -and $l.Count -eq 4 -and $l[0].Instructor -eq 'Jones, Bob' -and $l[0].ETD -eq [datetime]'2026-10-20 07:30' -and
+        $l[1].Instructor -eq 'Ortiz, Sam' -and $l[1].LinkedLineId -eq $l[3].Id -and $l[2].SortieType -eq 'OFT'
+}
+Assert-That 'pasted with no heading row, the columns are worked out from the cells' {
+    $p = ConvertFrom-PastedLines -Text "Day Local`t0730`tLee, Ann`r`nDL`t7:45`tJones`r`n" -Day '2026-10-20' -Instructors $ips -Students @()
+    $l = @($p.Lines | Sort-Object -Property ETD)
+    $p.Error -eq '' -and $l.Count -eq 2 -and $l[0].Instructor -eq 'Lee, Ann' -and $l[1].Instructor -eq 'Jones, Bob' -and $l[1].ETD.ToString('HHmm') -eq '0745'
 }
 
 

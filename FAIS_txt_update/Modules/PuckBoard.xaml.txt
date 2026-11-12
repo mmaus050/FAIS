@@ -209,6 +209,7 @@
             <Menu x:Name="MainMenu" DockPanel.Dock="Top" Background="#F8FAFC" Padding="6,2" BorderBrush="#CBD5E1" BorderThickness="0,0,0,1">
                 <MenuItem Header="_File">
                     <MenuItem x:Name="MenuLoadDay" Header="_Load a day..."/>
+                    <MenuItem x:Name="MenuPasteLines" Header="_Paste lines from Excel..." InputGestureText="Ctrl+V"/>
                     <MenuItem x:Name="MenuApplyTemplate" Header="Apply a _template">
                         <MenuItem Header="(no templates saved)" IsEnabled="False"/>
                     </MenuItem>
@@ -292,6 +293,8 @@
                     <Button x:Name="CopyPrevDayButton" Content="Copy previous day's lines" Style="{StaticResource BarButton}"/>
                     <Button x:Name="LoadDayButton" Content="Load a day..." Style="{StaticResource BarButton}" FontWeight="SemiBold"
                             ToolTip="Load one day's lines from MasterData's Schedule sheet, or from the schedule you last exported (to change a day already sent out)."/>
+                    <Button x:Name="PasteLinesButton" Content="Paste lines..." Style="{StaticResource BarButton}" FontWeight="SemiBold"
+                            ToolTip="Copy the lines in Excel (the flying schedule's ETD, Sortie Type and Instructor columns, with their headings if you can) and put them straight on the board: no need to paste them into MasterData's Schedule sheet first. Ctrl+V on the board does the same."/>
                     <Rectangle Width="1" Height="20" Fill="#94A3B8" Margin="8,0"/>
                     <Button x:Name="UpdateSyllabiButton" Content="Update Syllabi" Style="{StaticResource BarButton}"
                             ToolTip="Pick the day's flying schedule or the Big Board: FAIS works out which it is and marks each student's events complete or not complete from it. You see what will change before anything is saved."/>
